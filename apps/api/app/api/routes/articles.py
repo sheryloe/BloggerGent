@@ -8,9 +8,15 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
 from app.models.entities import Article, BloggerPost, PublishMode
-from app.schemas.api import ArticleRead, ArticleSeoMetaRead
+from app.schemas.api import ArticleRead, ArticleSearchDescriptionSyncRead, ArticleSeoMetaRead
 from app.services.blog_seo_meta_service import get_article_seo_meta_overview, verify_article_seo_meta
 from app.services.blog_service import list_visible_blog_ids
+from app.services.blogger_editor_service import (
+    BloggerEditorAutomationError,
+    is_blogger_playwright_auto_sync_enabled,
+    is_blogger_playwright_enabled,
+    sync_article_search_description,
+)
 from app.services.html_assembler import assemble_article_html
 from app.services.providers.base import ProviderRuntimeError
 from app.services.providers.factory import get_blogger_provider
@@ -85,6 +91,32 @@ def _rebuild_article_html(db: Session, article: Article, hero_image_url: str) ->
     db.refresh(article)
     save_html(slug=article.slug, html=assembled_html)
     return assembled_html
+
+
+def _record_search_description_sync(
+    db: Session,
+    *,
+    article: Article,
+    status: str,
+    message: str,
+    editor_url: str | None = None,
+    cdp_url: str | None = None,
+) -> None:
+    if not article.blogger_post:
+        return
+
+    payload = dict(article.blogger_post.response_payload or {})
+    payload["search_description_sync"] = {
+        "status": status,
+        "message": message,
+        "editor_url": editor_url or "",
+        "cdp_url": cdp_url or "",
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+    article.blogger_post.response_payload = payload
+    db.add(article.blogger_post)
+    db.commit()
+    db.refresh(article.blogger_post)
 
 
 @router.get("", response_model=list[ArticleRead])
@@ -186,6 +218,35 @@ def publish_article(article_id: int, db: Session = Depends(get_db)) -> Article:
         ).scalar_one_or_none()
         if not refreshed:
             raise HTTPException(status_code=404, detail="Article not found after publishing")
+
+        if (
+            refreshed.blogger_post
+            and not refreshed.blogger_post.is_draft
+            and is_blogger_playwright_enabled(db)
+            and is_blogger_playwright_auto_sync_enabled(db)
+        ):
+            try:
+                sync_result = sync_article_search_description(db, refreshed)
+                _record_search_description_sync(
+                    db,
+                    article=refreshed,
+                    status=sync_result.status,
+                    message=sync_result.message,
+                    editor_url=sync_result.editor_url,
+                    cdp_url=sync_result.cdp_url,
+                )
+                refreshed = db.execute(
+                    select(Article)
+                    .where(Article.id == article_id)
+                    .options(selectinload(Article.blog), selectinload(Article.image), selectinload(Article.blogger_post))
+                ).scalar_one_or_none() or refreshed
+            except BloggerEditorAutomationError as exc:
+                _record_search_description_sync(
+                    db,
+                    article=refreshed,
+                    status="error",
+                    message=exc.message,
+                )
         return refreshed
     except ProviderRuntimeError as exc:
         db.rollback()
@@ -214,3 +275,35 @@ def verify_article_seo_meta_status(article_id: int, db: Session = Depends(get_db
     if not article or article.blog_id not in set(list_visible_blog_ids(db)):
         raise HTTPException(status_code=404, detail="Article not found")
     return verify_article_seo_meta(article)
+
+
+@router.post("/{article_id}/search-description/sync", response_model=ArticleSearchDescriptionSyncRead)
+def sync_article_search_description_status(article_id: int, db: Session = Depends(get_db)) -> dict:
+    article = db.execute(
+        select(Article)
+        .where(Article.id == article_id)
+        .options(selectinload(Article.blog), selectinload(Article.blogger_post))
+    ).scalar_one_or_none()
+    if not article or article.blog_id not in set(list_visible_blog_ids(db)):
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    try:
+        result = sync_article_search_description(db, article)
+    except BloggerEditorAutomationError as exc:
+        _record_search_description_sync(
+            db,
+            article=article,
+            status="error",
+            message=exc.message,
+        )
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    _record_search_description_sync(
+        db,
+        article=article,
+        status=result.status,
+        message=result.message,
+        editor_url=result.editor_url,
+        cdp_url=result.cdp_url,
+    )
+    return result.to_dict()

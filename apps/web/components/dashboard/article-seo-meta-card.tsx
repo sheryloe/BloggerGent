@@ -2,16 +2,16 @@
 
 import { useState } from "react";
 
-import type { ArticleSeoMeta } from "@/lib/types";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import type { ArticleSearchDescriptionSync, ArticleSeoMeta } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
 
 function StatusBadge({ status }: { status: ArticleSeoMeta["head_meta_description_status"]["status"] }) {
-  if (status === "ok") return <Badge className="bg-emerald-700 text-white">정상</Badge>;
-  if (status === "warning") return <Badge className="bg-amber-100 text-amber-900">주의</Badge>;
-  return <Badge className="bg-slate-200 text-slate-700">대기</Badge>;
+  if (status === "ok") return <Badge className="bg-emerald-700 text-white">OK</Badge>;
+  if (status === "warning") return <Badge className="bg-amber-100 text-amber-900">Warning</Badge>;
+  return <Badge className="bg-slate-200 text-slate-700">Idle</Badge>;
 }
 
 function StatusRow({
@@ -43,26 +43,58 @@ export function ArticleSeoMetaCard({
 }) {
   const [meta, setMeta] = useState(initialMeta);
   const [error, setError] = useState("");
-  const [isPending, setIsPending] = useState(false);
+  const [syncMessage, setSyncMessage] = useState("");
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  async function refreshVerification() {
+    const response = await fetch(`${apiBase}/articles/${articleId}/seo-meta/verify`, {
+      method: "POST",
+    });
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw new Error(payload?.detail ?? "SEO meta verification failed.");
+    }
+
+    const payload = (await response.json()) as ArticleSeoMeta;
+    setMeta(payload);
+  }
 
   async function handleVerify() {
     setError("");
-    setIsPending(true);
+    setSyncMessage("");
+    setIsVerifying(true);
     try {
-      const response = await fetch(`${apiBase}/articles/${articleId}/seo-meta/verify`, {
+      await refreshVerification();
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "SEO meta verification failed.");
+    } finally {
+      setIsVerifying(false);
+    }
+  }
+
+  async function handleSyncSearchDescription() {
+    setError("");
+    setSyncMessage("");
+    setIsSyncing(true);
+    try {
+      const response = await fetch(`${apiBase}/articles/${articleId}/search-description/sync`, {
         method: "POST",
       });
+
       if (!response.ok) {
         const payload = await response.json().catch(() => null);
-        setError(payload?.detail ?? "SEO 메타 검증에 실패했습니다.");
-        return;
+        throw new Error(payload?.detail ?? "Search description sync failed.");
       }
-      const payload = (await response.json()) as ArticleSeoMeta;
-      setMeta(payload);
+
+      const payload = (await response.json()) as ArticleSearchDescriptionSync;
+      setSyncMessage(payload.message);
+      await refreshVerification();
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "SEO 메타 검증에 실패했습니다.");
+      setError(exc instanceof Error ? exc.message : "Search description sync failed.");
     } finally {
-      setIsPending(false);
+      setIsSyncing(false);
     }
   }
 
@@ -70,9 +102,9 @@ export function ArticleSeoMetaCard({
     <div className="rounded-[24px] border border-ink/10 bg-white/70 p-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <p className="text-xs uppercase tracking-[0.16em] text-slate-500">SEO 메타 검증</p>
+          <p className="text-xs uppercase tracking-[0.16em] text-slate-500">SEO meta check</p>
           <p className="mt-2 text-sm leading-7 text-slate-600">
-            이 글의 공개 페이지 head 메타가 앱의 검색 설명과 실제로 일치하는지 확인합니다.
+            Compare the expected article description with the published Blogger source and the installed Bloggent theme fallback.
           </p>
           {meta.verification_target_url ? (
             <a
@@ -85,9 +117,14 @@ export function ArticleSeoMetaCard({
             </a>
           ) : null}
         </div>
-        <Button type="button" variant="outline" onClick={handleVerify} disabled={isPending}>
-          {isPending ? "검증 중..." : "글별 검증 실행"}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" onClick={handleVerify} disabled={isVerifying || isSyncing}>
+            {isVerifying ? "Verifying..." : "Verify published meta"}
+          </Button>
+          <Button type="button" onClick={handleSyncSearchDescription} disabled={isVerifying || isSyncing}>
+            {isSyncing ? "Syncing..." : "Sync search description"}
+          </Button>
+        </div>
       </div>
 
       {meta.warnings.length ? (
@@ -100,6 +137,12 @@ export function ArticleSeoMetaCard({
 
       {error ? (
         <div className="mt-4 rounded-[20px] border border-rose-200 bg-rose-50 p-4 text-sm leading-7 text-rose-900">{error}</div>
+      ) : null}
+
+      {syncMessage ? (
+        <div className="mt-4 rounded-[20px] border border-emerald-200 bg-emerald-50 p-4 text-sm leading-7 text-emerald-900">
+          {syncMessage}
+        </div>
       ) : null}
 
       <div className="mt-4 grid gap-3 lg:grid-cols-3">

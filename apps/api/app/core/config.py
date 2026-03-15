@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     blogger_oauth_state: str = ""
     blogger_access_token: str = ""
     blogger_blog_id: str = ""
+    blogger_playwright_enabled: bool = False
+    blogger_playwright_auto_sync: bool = False
+    blogger_playwright_cdp_url: str = "http://host.docker.internal:9223"
+    blogger_playwright_account_index: int = 0
     seed_demo_data: bool = True
     auto_trigger_on_discovery: bool = True
     related_post_count: int = 3

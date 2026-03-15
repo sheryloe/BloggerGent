@@ -251,6 +251,45 @@ const sections: SectionConfig[] = [
       },
     ],
   },
+  {
+    title: "Blogger editor automation",
+    description:
+      "Connect Playwright to a logged-in Chrome or Edge session and fill the Blogger search description after publish.",
+    fields: [
+      {
+        key: "blogger_playwright_enabled",
+        label: "Enable Playwright sync",
+        help: "Turn this on only after Chrome or Edge is running with remote debugging and Blogger is already signed in.",
+        options: [
+          { value: "true", label: "enabled" },
+          { value: "false", label: "disabled" },
+        ],
+      },
+      {
+        key: "blogger_playwright_auto_sync",
+        label: "Auto sync after publish",
+        help: "If enabled, Bloggent will attempt to update the Blogger search description right after public publish.",
+        options: [
+          { value: "true", label: "enabled" },
+          { value: "false", label: "disabled" },
+        ],
+        showWhen: (values) => values.blogger_playwright_enabled === "true",
+      },
+      {
+        key: "blogger_playwright_cdp_url",
+        label: "Remote debugging URL",
+        help: "Default: http://host.docker.internal:9223",
+        showWhen: (values) => values.blogger_playwright_enabled === "true",
+      },
+      {
+        key: "blogger_playwright_account_index",
+        label: "Blogger account index",
+        help: "Usually 0. Change only if your Blogger editor URL uses another /u/{index} value.",
+        type: "number",
+        showWhen: (values) => values.blogger_playwright_enabled === "true",
+      },
+    ],
+  },
 ];
 
 function getInputType(field: FieldConfig): "password" | "number" | "text" {

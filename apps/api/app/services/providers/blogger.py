@@ -32,7 +32,6 @@ class BloggerPublishingProvider:
             "title": title,
             "content": content,
             "labels": labels,
-            "customMetaData": meta_description,
         }
         response = httpx.post(
             url,
@@ -65,7 +64,6 @@ class BloggerPublishingProvider:
             "title": title,
             "content": content,
             "labels": labels,
-            "customMetaData": meta_description,
         }
         response = httpx.put(
             url,

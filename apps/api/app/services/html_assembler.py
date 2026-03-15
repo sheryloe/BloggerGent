@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import re
 
 from app.models.entities import Article
@@ -147,15 +148,20 @@ def assemble_article_html(article: Article, hero_image_url: str, related_posts: 
         card_border=theme["faq_border"],
     )
     lead_summary = _lead_summary(article)
+    escaped_lead_summary = html.escape(lead_summary, quote=True)
+    hidden_lead_summary = html.escape(lead_summary)
+    escaped_title = html.escape(article.title, quote=True)
+    escaped_hero_url = html.escape(hero_image_url, quote=True)
     return f"""
-<article style="max-width:860px;margin:0 auto;padding:32px 22px 48px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:{theme['heading']};background:{theme['article_background']};border:1px solid {theme['article_border']};border-radius:{'0px' if category == 'mystery' else '32px'};box-shadow:{theme['article_shadow']};">
+<article data-bloggent-meta-description="{escaped_lead_summary}" style="max-width:860px;margin:0 auto;padding:32px 22px 48px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:{theme['heading']};background:{theme['article_background']};border:1px solid {theme['article_border']};border-radius:{'0px' if category == 'mystery' else '32px'};box-shadow:{theme['article_shadow']};">
   <header style="margin-bottom:28px;display:flex;flex-direction:column;">
     <p style="order:3;font-size:18px;line-height:1.8;color:{theme['muted']};margin:0;">{lead_summary}</p>
     <p style="order:1;font-size:12px;letter-spacing:0.18em;text-transform:uppercase;color:{theme['accent']};font-weight:700;margin:0 0 10px;">{eyebrow}</p>
     <h1 style="order:2;font-size:40px;line-height:1.12;margin:0 0 14px;color:{theme['heading']};">{article.title}</h1>
   </header>
+  <div id="bloggent-seo-meta" data-bloggent-meta-source="body" style="display:none!important;visibility:hidden!important;max-height:0;overflow:hidden;">{hidden_lead_summary}</div>
   <figure style="margin:0 0 32px;">
-    <img src="{hero_image_url}" alt="{article.title}" style="width:100%;border-radius:28px;display:block;object-fit:cover;" />
+    <img src="{escaped_hero_url}" alt="{escaped_title}" style="width:100%;border-radius:28px;display:block;object-fit:cover;" />
   </figure>
   <section style="font-size:17px;line-height:1.9;color:{theme['body']};">{article_html}</section>
   {faq_html}

@@ -1,0 +1,12 @@
+title: Bloggent
+description: Multi-blog Blogger automation workspace documentation
+theme: minima
+markdown: kramdown
+header_pages:
+  - getting-started.md
+  - workflow.md
+  - seo-metadata.md
+  - architecture.md
+  - deployment.md
+  - security.md
+  - faq.md

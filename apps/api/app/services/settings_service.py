@@ -77,6 +77,22 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     ),
     "blogger_token_scope": DefaultSetting(settings.blogger_token_scope, "Google OAuth 승인 scope"),
     "blogger_token_type": DefaultSetting(settings.blogger_token_type, "Google OAuth token type"),
+    "blogger_playwright_enabled": DefaultSetting(
+        str(settings.blogger_playwright_enabled).lower(),
+        "Enable Playwright automation for Blogger search description sync",
+    ),
+    "blogger_playwright_auto_sync": DefaultSetting(
+        str(settings.blogger_playwright_auto_sync).lower(),
+        "Automatically sync Blogger search description after publish",
+    ),
+    "blogger_playwright_cdp_url": DefaultSetting(
+        settings.blogger_playwright_cdp_url,
+        "Chrome or Edge remote debugging URL used by Playwright",
+    ),
+    "blogger_playwright_account_index": DefaultSetting(
+        str(settings.blogger_playwright_account_index),
+        "Blogger account index in the editor URL. Usually 0",
+    ),
     "default_publish_mode": DefaultSetting(settings.default_publish_mode, "새 작업의 기본 발행 모드"),
     "schedule_enabled": DefaultSetting(str(settings.schedule_enabled).lower(), "매일 자동 스케줄 실행 여부"),
     "schedule_time": DefaultSetting(settings.schedule_time, "자동 실행 시각. HH:MM 형식"),

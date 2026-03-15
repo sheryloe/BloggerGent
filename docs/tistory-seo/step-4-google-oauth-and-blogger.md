@@ -1,43 +1,43 @@
-# Step 4. Google OAuth와 Blogger API 연동 정리
+# Step 4. Google OAuth와 Blogger 연결에서 실제로 막히는 포인트
 
 ## 추천 제목
-- Google OAuth로 Blogger 자동 게시 붙이는 방법 정리
-- Blogger API는 왜 OAuth가 필요한가? 직접 붙여본 실전 기록
-- 구글 블로그 자동 게시 만들기: OAuth, Blogger, Search Console, GA4 연결
+
+1. Blogger API 연결할 때 가장 많이 막히는 Google OAuth 설정 정리
+2. Google OAuth Testing, Redirect URI, Test Users까지 한 번에 정리한 Blogger 연동 가이드
+3. Blogger 자동화에서 OAuth가 중요한 이유와 실제 설정 순서
 
 ## 검색 설명
-Google OAuth와 Blogger API를 연결해 실제 블로그 목록 조회와 자동 게시를 가능하게 만든 과정을 정리한 실전 글입니다.
+
+Google OAuth와 Blogger API를 연결할 때 가장 자주 막히는 Redirect URI, Testing 모드, Test users, 토큰 저장 문제를 실전 기준으로 정리했다.
 
 ## 추천 태그
-`GoogleOAuth`, `BloggerAPI`, `SearchConsoleAPI`, `GA4API`, `구글연동`
 
-## 글 구조
-- Blogger 게시에 왜 OAuth가 필요한가
-- Client ID, Secret만으로는 왜 안 되는가
-- Test users와 Production 전환 이슈
-- 여러 Blogger 블로그를 같은 계정에서 가져오는 흐름
+`#GoogleOAuth #BloggerAPI #RedirectURI #TestUsers #GoogleCloudConsole #Blogger연동`
 
-## 본문 샘플
+## 본문
 
-Blogger API는 공개 조회만으로 끝나는 서비스가 아닙니다. 실제 글을 쓰거나 내 계정의 블로그 목록을 읽으려면 반드시 OAuth 승인이 필요합니다.
+Blogger 자동화에서 가장 먼저 부딪히는 진짜 벽은 AI 모델이 아니라 Google OAuth다. 글 생성 로직은 나중 문제고, 일단 Blogger 블로그 목록을 읽어오고 발행 권한을 얻으려면 OAuth부터 정확히 맞아야 한다. 여기서 한 번 삐끗하면 403, access denied, test users, redirect mismatch 같은 에러가 끝없이 나온다.
 
-즉 `Client ID`와 `Client Secret`만 저장한다고 끝나는 것이 아니라, 한 번은 실제 Google 계정으로 로그인하고 권한을 승인해야 합니다. 이 과정을 통과하면 `refresh token`을 저장해 이후 자동 게시가 가능해집니다.
+핵심은 세 가지다. 첫째, Google Cloud Console에서 OAuth Client를 `Web application` 타입으로 만들어야 한다. 둘째, Redirect URI를 정확하게 등록해야 한다. 셋째, 앱이 Testing 상태라면 실제로 로그인할 Google 계정을 Test users에 추가해야 한다. 이 세 가지 중 하나라도 빠지면 연결이 되지 않는다.
+
+Redirect URI는 특히 자주 틀린다. 로컬 개발 기준이라면 `http://localhost:8000/api/v1/blogger/oauth/callback`처럼 백엔드가 실제로 콜백을 받을 주소와 완전히 일치해야 한다. 대문자 하나, 포트 하나가 달라도 실패한다. 또 사람들은 종종 프론트 주소를 넣는데, 실제 콜백을 처리하는 주체가 API 서버라면 백엔드 주소를 써야 한다.
+
+Testing 상태의 함정도 크다. 본인 계정으로는 잘 될 줄 알았는데, 막상 Google이 허용한 테스트 사용자 목록에 들어 있지 않으면 곧바로 차단된다. 그래서 “왜 분명히 Client ID와 Secret은 맞는데 로그인 후 막히지?”라는 상황이 자주 발생한다. 이 부분은 문서보다 직접 겪고 나서야 구조가 이해되는 경우가 많다.
+
+토큰 저장도 단순하지 않다. 액세스 토큰은 만료되고, 실제 운영에서는 refresh token이 중요하다. BloggerGent에서는 이 값을 설정 테이블에 그대로 평문으로 넣는 대신 암호화해서 저장하도록 바꿨다. 혼자 쓰는 도구라도, 토큰이 그대로 남는 구조는 나중에 로컬 백업이나 DB 유출 상황에서 꽤 위험할 수 있기 때문이다.
+
+연결이 완료되면 Blogger 블로그 목록을 실제로 불러오고, 그중 필요한 블로그만 서비스용 블로그로 import하는 단계로 넘어간다. 이때부터 비로소 “한 계정에 여러 블로그가 있을 때 각각 다른 워크플로를 운영하는 구조”가 시작된다. 결국 OAuth는 단순 로그인 절차가 아니라, 블로그 자동화 서비스의 입구이자 권한 모델 전체를 결정하는 핵심 단계다.
 
 ## HTML 예시
 
 ```html
-<h2>왜 Blogger API는 OAuth가 필요한가</h2>
-<p>API Key만으로는 공개 데이터 조회 정도만 가능합니다.</p>
-<p>하지만 내 Blogger 계정의 블로그 목록 조회, 글 작성, 발행은 계정 권한이 필요한 작업이라 OAuth가 필수입니다.</p>
-
-<h2>실전에서 중요한 체크포인트</h2>
+<h2>OAuth 설정 핵심</h2>
 <ul>
-  <li><strong>Redirect URI</strong>가 정확히 일치해야 합니다.</li>
-  <li><strong>Testing</strong> 상태면 로그인 계정을 Test users에 추가해야 합니다.</li>
-  <li><strong>refresh token</strong>이 저장되어야 이후 자동 발행이 가능합니다.</li>
+  <li>Web application 타입으로 Client 생성</li>
+  <li>Redirect URI를 정확히 등록</li>
+  <li>Testing 상태면 Test users 추가</li>
 </ul>
+
+<h2>실무 포인트</h2>
+<p>액세스 토큰보다 중요한 것은 refresh token이다. 운영형 도구라면 토큰 저장 방식까지 같이 설계해야 한다.</p>
 ```
-
-## 마무리 문장 예시
-
-Google OAuth를 안정적으로 붙이고 나니, 이제 단순 생성이 아니라 실제 Blogger 운영 플로우가 완성되기 시작했습니다. 다음 글에서는 AI 글 생성, 이미지 생성, HTML 조립까지 이어지는 파이프라인을 정리하겠습니다.

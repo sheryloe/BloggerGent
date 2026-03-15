@@ -178,6 +178,16 @@ class ArticleSeoMetaRead(BaseModel):
     twitter_description_status: SeoMetaStatusRead
 
 
+class ArticleSearchDescriptionSyncRead(BaseModel):
+    article_id: int
+    blogger_post_id: str
+    editor_url: str
+    cdp_url: str
+    description: str
+    status: str
+    message: str
+
+
 class WorkflowStepCreate(BaseModel):
     stage_type: WorkflowStageType
 

@@ -1,32 +1,89 @@
 # Bloggent
 
-Bloggent는 Google Blogger를 운영하는 사람을 위한 반자동 SEO 블로그 운영 시스템입니다.
-주제 발굴, 글 생성, 이미지 생성, HTML 조립, Blogger 게시, Google 성과 확인까지 한 화면에서 관리할 수 있게 구성했습니다.
+Bloggent is a service-oriented automation workspace for operating multiple Google Blogger blogs from a single dashboard.
+It is designed for real publishing work, not just content generation demos.
 
-핵심 목표는 단순합니다.
+The current stack covers:
 
-- 주제만 던지면 SEO 구조에 맞는 글을 만든다
-- 대표 이미지를 자동으로 생성하고 공개 URL로 연결한다
-- 글 목록에서 검토 후 원하는 글만 공개 게시한다
-- Search Console, GA4, Blogger 데이터를 한곳에서 확인한다
+- blog import from real Blogger accounts
+- blog-specific workflow and prompt configuration
+- AI-assisted topic discovery, article writing, image generation, and HTML assembly
+- manual-safe publishing from the generated article list
+- Google data connections for Blogger, Search Console, and GA4
+- SEO metadata verification and Blogger theme patch guidance
+- published-post protection, duplicate-topic prevention, and encrypted secret storage
 
-## 주요 기능
+## What Bloggent Solves
 
-- Blogger 계정에서 실제 블로그를 가져와 서비스용 블로그로 등록
-- 블로그별 워크플로 단계, 모델, 프롬프트 관리
-- OpenAI 기반 본문 생성, 이미지 프롬프트 생성, 이미지 생성
-- Gemini 기반 자동 주제 발굴
-- GitHub Pages 기반 공개 이미지 업로드
-- 수동 공개 게시 및 재게시
-- Blogger SEO 메타 패치 안내와 공개 페이지 head 검증
-- Search Console / GA4 / Blogger 데이터 모니터링
+Running more than one Blogger blog usually means repeating the same cycle again and again:
 
-## 기술 스택
+1. find a topic
+2. write the article
+3. create an image
+4. assemble publish-ready HTML
+5. publish carefully without overwriting an existing post
+6. verify whether the public page actually reflects the intended SEO state
+
+Bloggent turns that manual loop into a controlled workflow.
+It keeps blog-specific prompts separate, lets each blog use a different tone and pipeline, and leaves the final publish action in the article list so public posts are not overwritten by accident.
+
+## Core Product Principles
+
+### 1. Blog-specific workflows, not one global prompt
+Each imported blog has its own workflow, visible stages, system stages, model selection, and prompt text.
+This matters when one blog is an English Korea travel/festival guide and another is a dark documentary-style mystery blog.
+
+### 2. Generate first, publish later
+Bloggent treats generation and publishing as two different steps.
+Draft generation finishes first, then the user checks the generated article list and manually presses the publish button only for the post they want to release.
+
+### 3. Public posts must not be overwritten
+Published Blogger posts are protected.
+The service blocks accidental overwrites and also rejects obviously duplicated topics so the same subject is not regenerated carelessly.
+
+### 4. SEO must be validated on the real public page
+Blogger API metadata is not enough on its own.
+Bloggent therefore verifies what is actually present on the public page and supports a practical Blogger theme patch strategy for description tags.
+
+## Current Feature Set
+
+### Blogger and Google integration
+- import Blogger blogs from a connected Google account
+- map each service blog to Search Console and GA4 data
+- keep a separate operating profile for each imported blog
+
+### AI pipeline
+- optional topic discovery
+- writing package stage
+- optional image prompt refinement
+- image generation
+- HTML assembly
+- manual publish queue
+
+### Safety and operations
+- duplicate topic detection
+- published-post overwrite protection
+- encrypted storage for secrets in the settings table
+- blog-level and article-level SEO metadata verification
+- dashboard, jobs, articles, settings, guide, and Google data views
+
+### SEO metadata strategy
+Bloggent no longer relies on `customMetaData` as the primary Blogger metadata path.
+Instead, it:
+
+- stores the expected article meta description in the app database
+- embeds that value into the assembled article body
+- uses a Blogger theme patch to upsert `description`, `og:description`, and `twitter:description`
+- verifies the public result from the published page
+
+This is the practical fallback path for Blogger because API-side metadata fields do not reliably become real `<head>` tags on public pages.
+
+## Architecture Overview
 
 ### Frontend
 - Next.js 14
 - TypeScript
-- TailwindCSS
+- Tailwind CSS
 
 ### Backend
 - FastAPI
@@ -34,243 +91,80 @@ Bloggent는 Google Blogger를 운영하는 사람을 위한 반자동 SEO 블로
 - Alembic
 - Pydantic
 
-### Worker / Infra
+### Worker and infrastructure
 - Celery
 - Redis
 - PostgreSQL
 - Docker Compose
 
-## 실행
+## Local Run
 
 ```bash
 docker compose up --build
 ```
 
-실행 후 접속 주소:
+Main addresses:
 
-- 대시보드: `http://localhost:3001`
-- API 문서: `http://localhost:8000/docs`
-- API 헬스체크: `http://localhost:8000/healthz`
+- dashboard: `http://localhost:3001`
+- API docs: `http://localhost:8000/docs`
+- API health: `http://localhost:8000/healthz`
 
-## 이 프로젝트는 완전 자동이 아니라 반자동 운영형입니다
+## Recommended Operating Flow
 
-초기 1회는 사람이 연결과 설정을 끝내야 합니다.
+1. Open `/settings`
+2. Add shared API credentials and Google OAuth values
+3. Connect a Google account
+4. Import Blogger blogs
+5. Configure each blog workflow and prompt set
+6. Generate topics and articles
+7. Review the generated article list
+8. Publish only the post you want to release
+9. Verify SEO metadata on the public page
 
-- OpenAI API Key 입력
-- Google OAuth Client ID / Secret 등록
-- Google 계정 OAuth 승인
-- Blogger 블로그 가져오기
-- GitHub Pages 또는 공개 이미지 호스팅 설정
+## Repository Guide
 
-이 초기 세팅이 끝나면 이후부터는 주제 입력, 초안 검토, 게시 운영을 훨씬 빠르게 반복할 수 있습니다.
+- `apps/api`
+  FastAPI backend, workflow logic, Blogger integration, SEO verification, and scheduling
+- `apps/web`
+  dashboard, settings, jobs, articles, guide, and Google views
+- `prompts`
+  reusable prompt templates for travel, mystery, and shared stages
+- `docs`
+  GitHub Pages-ready project documentation and Tistory/Notion writing materials
+- `scripts`
+  operational helpers for local development and browser automation experiments
 
-## 처음 사용하는 순서
+## Documentation
 
-### 1. 전역 설정 입력
-`/settings`에서 아래 항목을 먼저 입력합니다.
+### GitHub Pages-ready docs
 
-필수:
-- `OpenAI API Key`
-- `Google OAuth Client ID`
-- `Google OAuth Client Secret`
-- `Google OAuth Redirect URI`
-- `공개 이미지 방식`
+These docs focus only on the service and the codebase:
 
-선택:
-- `Gemini API Key`
-  - 자동 주제 발굴을 쓸 때만 필요합니다.
+- [Project Overview](docs/index.md)
+- [Getting Started](docs/getting-started.md)
+- [Workflow Model](docs/workflow.md)
+- [SEO Metadata Strategy](docs/seo-metadata.md)
+- [Architecture](docs/architecture.md)
+- [Deployment](docs/deployment.md)
+- [Security](docs/security.md)
+- [FAQ](docs/faq.md)
 
-### 2. Google OAuth 연결
-설정 페이지에서 `Google 계정 연결하기`를 누르면 Blogger / Search Console / GA4 권한 승인을 진행합니다.
+### Wiki-ready docs
 
-### 3. Blogger 블로그 가져오기
-Google 계정에 연결된 실제 Blogger 블로그 목록을 불러오고, 그중 운영할 블로그를 서비스용 블로그로 가져옵니다.
+Wiki markdown is stored under [`wiki/`](wiki) so it can be pushed to GitHub Wiki later if needed.
 
-### 4. 블로그별 연결 매핑
-가져온 블로그마다 아래 항목을 연결합니다.
+### Tistory / Notion writing series
 
-- Blogger 블로그
-- Search Console 속성
-- GA4 속성
+The Korean writing series for implementation process, theory, and SEO-focused documentation lives under [`docs/tistory-seo`](docs/tistory-seo).
 
-### 5. 블로그별 워크플로 / 프롬프트 정리
-블로그별로 다음 항목을 정리합니다.
+## Notes
 
-- 블로그 이름 / 설명 / 타깃 독자 / 운영 브리프
-- 현재 실행 순서
-  - 예: `주제 발굴 -> 글쓰기 패키지 -> 이미지 생성 -> HTML 조립 -> 게시 대기`
-- 단계별 모델 선택
-- 단계별 프롬프트
-- 프리셋 라이브러리
+- Publishing is intentionally manual from the article list.
+- Public posts are protected against accidental overwrite.
+- Secrets are encrypted before being stored in the settings table.
+- Blogger SEO metadata needs theme-level help, so verification is done against the real public page.
+- GitHub Pages image delivery is supported for public article images.
 
-기본 사용자 가시 단계는 다음처럼 단순화되어 있습니다.
+## Status
 
-- `주제 발굴` (선택)
-- `글쓰기 패키지` (필수)
-- `이미지 프롬프트 정교화` (선택, 고급)
-
-아래 단계는 시스템 단계로 자동 실행됩니다.
-
-- `이미지 생성`
-- `HTML 조립`
-- `게시 대기`
-
-### 6. Blogger SEO 메타 패치
-설정 페이지의 `Blogger SEO 메타 패치` 카드에서 아래를 함께 관리합니다.
-
-- Blogger 테마에 넣을 실제 스니펫
-- 적용 체크리스트
-- 공개 글 URL 기준 head 메타 검증
-  - `meta name="description"`
-  - `og:description`
-  - `twitter:description`
-
-앱에 검색 설명을 저장하는 것만으로는 충분하지 않을 수 있으므로, 테마 패치와 실제 공개 페이지 검증을 함께 진행해야 합니다.
-
-### 7. 주제 실행
-다음 두 방식 중 하나를 사용합니다.
-
-- 수동 키워드 입력
-- Gemini 자동 주제 발굴
-
-### 8. 글 확인 후 게시
-`/articles`에서 아래를 확인합니다.
-
-- HTML 미리보기
-- 대표 이미지
-- 메타 설명
-- Blogger 링크
-
-문제가 없으면 글 목록의 `공개 게시` 버튼을 눌러 최종 게시합니다.
-
-## 다른 사람이 이 프로젝트를 쓰려면 무엇을 입력해야 하나요?
-
-다른 사람이 Bloggent를 사용하려면 아래 입력값이 필요합니다.
-
-### A. OpenAI
-- `OpenAI API Key`
-
-### B. Google OAuth
-- `Client ID`
-- `Client Secret`
-- `Redirect URI`
-
-### C. 공개 이미지 호스팅
-권장:
-- `GitHub Pages`
-
-필요한 값:
-- `github_pages_owner`
-- `github_pages_repo`
-- `github_pages_branch`
-- `github_pages_token`
-- `github_pages_base_url`
-
-### D. 선택 항목
-- `Gemini API Key`
-
-## Google OAuth 설정 방법
-
-### Google Cloud에서 해야 하는 일
-1. Google Cloud Console에서 프로젝트를 만듭니다.
-2. `Google Auth Platform` 또는 `APIs & Services`에서 OAuth Client를 생성합니다.
-3. 타입은 `Web application`으로 만듭니다.
-4. Redirect URI에 아래 주소를 등록합니다.
-
-```text
-http://localhost:8000/api/v1/blogger/oauth/callback
-```
-
-### Testing 상태일 때
-OAuth 앱이 `Testing` 상태면 실제 로그인할 Google 계정을 `Test users`에 추가해야 합니다.
-
-추가하지 않으면 이런 오류가 납니다.
-
-- `403 access_denied`
-- `앱은 현재 테스트 중이며 개발자가 승인한 테스터만 액세스할 수 있습니다`
-
-### 다른 사람도 쓰게 하려면
-다른 사람이 자기 Google 계정으로 이 프로젝트를 쓰게 하려면 아래 둘 중 하나가 필요합니다.
-
-1. 당신이 만든 OAuth 앱에 그 사람 Google 계정을 `Test users`로 추가
-2. OAuth 앱을 `Production`으로 전환
-
-장기 운영이나 다수 사용자 기준으로는 `Production` 전환을 권장합니다.
-
-## GitHub Pages 이미지 설정
-
-대표 이미지가 Blogger 공개 글에서 보이려면 `localhost`가 아니라 외부에서 접근 가능한 공개 URL이어야 합니다.
-Bloggent는 현재 GitHub Pages 업로드를 지원합니다.
-
-### 준비
-1. public 저장소 생성
-2. GitHub Pages 활성화
-3. Fine-grained token 생성
-4. 권한:
-   - `Contents: Read and write`
-
-### Bloggent에 넣을 값
-```text
-github_pages_owner=...
-github_pages_repo=...
-github_pages_branch=main
-github_pages_token=...
-github_pages_base_url=https://username.github.io/repo
-```
-
-이후 이미지는 날짜별 폴더로 자동 업로드됩니다.
-
-## 페이지 안내
-
-- `/`
-  - 대시보드
-- `/guide`
-  - 사용 가이드
-- `/settings`
-  - 전역 설정, Google OAuth, Blogger import, 블로그별 워크플로, 프리셋 라이브러리, SEO 메타 패치
-- `/articles`
-  - 생성 글 목록, HTML 미리보기, 수동 공개 게시
-- `/jobs`
-  - 작업 상태와 감사 로그
-- `/google`
-  - Blogger / Search Console / GA4 모니터링
-
-## 권장 운영 방식
-
-### 여행 / 축제 / 행사 블로그
-- OpenAI 본문 생성
-- OpenAI 이미지 생성
-- Gemini 주제 발굴
-- 생성 후 검토, 공개 게시 버튼으로 최종 게시
-
-### 미스터리 / 다큐 / 전설 블로그
-- 수동 주제 입력 비중 높음
-- 프롬프트 관리 중요
-- 초안 검토 후 게시 권장
-
-## 검증 명령
-
-```bash
-python -m compileall apps/api/app
-```
-
-```bash
-cd apps/web
-npm run build
-```
-
-## 주의 사항
-
-- 비밀값은 UI에서 입력하면 DB `settings` 테이블에 저장됩니다.
-- 비밀 입력칸을 비워두고 저장하면 기존 값은 유지됩니다.
-- OAuth 앱이 Testing 상태면 테스트 사용자 등록이 필요합니다.
-- 공개 이미지 URL이 없으면 Blogger 썸네일이 깨집니다.
-- 같은 Google 계정 안에 여러 Blogger 블로그가 있어도 import 후 각각 따로 운영할 수 있습니다.
-
-## 요약
-
-Bloggent는 Blogger 운영자가 매번 손으로 글 작성, 이미지 연결, 게시, 성과 확인을 반복하지 않도록,
-
-`주제 입력 -> 글 생성 -> 이미지 생성 -> 게시 -> 성과 확인`
-
-흐름을 하나의 로컬 대시보드에 묶어 둔 반자동 운영형 프로젝트입니다.
+Bloggent is already usable as a practical Blogger operating workspace and continues to be refined around publishing safety, workflow clarity, and SEO verification quality.

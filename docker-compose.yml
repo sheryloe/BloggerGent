@@ -60,6 +60,8 @@ services:
     volumes:
       - ./storage:/app/storage
       - ./prompts:/app/prompts
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy

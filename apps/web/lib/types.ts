@@ -347,6 +347,16 @@ export interface ArticleSeoMeta {
   twitter_description_status: SeoMetaStatus;
 }
 
+export interface ArticleSearchDescriptionSync {
+  article_id: number;
+  blogger_post_id: string;
+  editor_url: string;
+  cdp_url: string;
+  description: string;
+  status: string;
+  message: string;
+}
+
 export interface BloggerPageview {
   range: string;
   count: number;

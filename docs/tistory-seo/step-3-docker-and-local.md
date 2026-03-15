@@ -1,45 +1,46 @@
-# Step 3. Docker로 로컬 실행 환경 구축하기
+# Step 3. Docker 기반 로컬 실행 환경을 먼저 잡아야 했던 이유
 
 ## 추천 제목
-- Docker Compose로 Blogger 자동화 프로젝트 로컬 환경 완성하기
-- Next.js + FastAPI + Redis + PostgreSQL 로컬 실행기: 실전 Docker 구성
-- 구글 블로그 반자동화 프로젝트, Docker 환경부터 잡았다
+
+1. 블로그 자동화 프로젝트를 Docker로 먼저 묶은 이유
+2. FastAPI + Next.js + Celery 프로젝트를 로컬에서 안정적으로 돌리는 방법
+3. 운영형 사이드 프로젝트는 왜 Docker Compose부터 정리해야 하는가
 
 ## 검색 설명
-Docker Compose로 Next.js, FastAPI, Celery, Redis, PostgreSQL 기반 Blogger 자동화 프로젝트를 로컬에서 실행하는 과정을 정리합니다.
+
+로컬에서 잘 되던 코드가 실제 운영 단계에서 꼬이지 않도록 Docker Compose 기반 실행 구조를 먼저 잡은 이유와 구성 방식을 정리했다.
 
 ## 추천 태그
-`DockerCompose`, `로컬개발환경`, `FastAPI`, `Nextjs`, `Celery`
 
-## 글 구조
-- 왜 Docker Compose를 선택했는가
-- 어떤 컨테이너가 필요한가
-- 로컬에서 바로 뜨게 만들 때 중요한 점
-- API, 워커, 웹을 어떻게 연결했는가
+`#DockerCompose #로컬개발환경 #FastAPI배포 #Nextjs개발 #Celery환경 #사이드프로젝트`
 
-## 본문 샘플
+## 본문
 
-이 프로젝트는 다른 사람도 쉽게 실행할 수 있어야 했기 때문에, 설치 가이드를 길게 쓰는 대신 `docker compose up --build` 한 줄로 올라오게 맞추는 것이 중요했습니다.
+운영형 프로젝트를 만들 때 자주 하는 실수 중 하나가 “일단 코드부터 짜고 나중에 실행 환경을 맞추자”는 접근이다. 작은 실험용 프로젝트라면 괜찮을 수 있지만, BloggerGent처럼 API 서버와 프론트엔드, 워커, 스케줄러, Redis, PostgreSQL이 함께 움직이는 구조에서는 이 방식이 금방 한계에 부딪힌다. 한쪽은 잘 되는데 다른 쪽은 안 되거나, 내 컴퓨터에서는 되는데 컨테이너 안에서는 안 되는 식의 문제가 반복된다.
 
-웹, API, 워커, 스케줄러, 데이터베이스, Redis가 모두 연결되어야 해서 Docker Compose 구성이 자연스러운 선택이었습니다. 특히 로컬 테스트 단계에서는 서비스 간 주소를 고정하기 쉬운 점이 편했습니다.
+그래서 처음부터 Docker Compose 기준으로 구조를 맞췄다. 핵심 서비스는 `web`, `api`, `worker`, `scheduler`, `postgres`, `redis`다. 여기에 필요하면 MinIO 같은 스토리지성 서비스도 붙일 수 있지만, 기본적인 흐름은 이 여섯 개만으로 충분하다. 이렇게 나누면 개발 환경과 운영 환경의 차이를 줄이기 쉽고, 문제가 생겼을 때 어느 컨테이너를 봐야 하는지 바로 판단할 수 있다.
+
+Next.js 대시보드는 `web` 컨테이너에서 돌아가고, FastAPI는 `api` 컨테이너에서 동작한다. 이미지 생성이나 예약 작업처럼 오래 걸리는 일은 `worker`와 `scheduler`가 맡는다. 데이터는 PostgreSQL과 Redis가 각각 영속 상태와 작업 브로커 역할을 나눈다. 이 구조를 처음부터 잡아두니 로컬에서 기능을 붙일 때마다 전체 흐름이 망가지지 않았다.
+
+또 하나 중요한 포인트는 컨테이너 이름과 프로젝트명을 명확하게 유지하는 것이다. 이름이 뒤죽박죽이면 로그를 볼 때도 헷갈리고, 재기동할 때도 실수하기 쉽다. 실제로 프로젝트명을 명시해두는 것만으로도 운영성이 좋아진다. 작은 디테일 같지만 사이드 프로젝트가 길어질수록 이런 부분이 차이를 만든다.
+
+로컬 검증 루틴도 Docker 기준으로 맞췄다. 단순히 `docker compose up`만 되는 것으로 끝내지 않고, API health check, 웹 페이지 200 응답, `python -m compileall`, `npm run build` 같은 검증 단계를 반복적으로 확인했다. 운영형 도구는 기능이 많아질수록 “돌아간다”와 “안전하다”의 차이가 커진다. 그래서 실행 자체보다 재현 가능한 검증 루틴이 더 중요해진다.
+
+결국 Docker 환경을 먼저 잡는 것은 단순 편의가 아니라 프로젝트의 기초 공사에 가깝다. 프론트와 백엔드, 비동기 작업이 함께 얽히는 서비스라면 이 단계를 건너뛰지 않는 편이 훨씬 안정적이다.
 
 ## HTML 예시
 
 ```html
-<h2>Docker Compose에 올린 서비스</h2>
+<h2>기본 컨테이너 구성</h2>
 <ul>
-  <li><strong>web</strong>: Next.js 대시보드</li>
-  <li><strong>api</strong>: FastAPI 백엔드</li>
-  <li><strong>worker</strong>: Celery 워커</li>
-  <li><strong>scheduler</strong>: Celery Beat</li>
-  <li><strong>postgres</strong>: 메타데이터 저장</li>
-  <li><strong>redis</strong>: 큐와 스케줄링</li>
+  <li>web: 대시보드 UI</li>
+  <li>api: FastAPI 백엔드</li>
+  <li>worker: 비동기 작업 처리</li>
+  <li>scheduler: 예약 작업 처리</li>
+  <li>postgres: 운영 데이터 저장</li>
+  <li>redis: 큐와 상태 전달</li>
 </ul>
 
-<h2>실행 명령</h2>
-<p><strong>docker compose up --build</strong> 한 줄로 전체 환경이 올라오도록 맞췄습니다.</p>
+<h2>검증 포인트</h2>
+<p>docker compose 재기동, healthz 확인, 프론트 빌드, 백엔드 컴파일 검증까지 반복 가능해야 로컬 환경이 안정적이라고 볼 수 있다.</p>
 ```
-
-## 마무리 문장 예시
-
-로컬 환경이 안정적으로 올라오면 그다음부터는 외부 API 연결과 실제 게시 흐름을 붙일 수 있습니다. 다음 글에서는 가장 많은 시행착오가 있었던 Google OAuth와 Blogger 연동 과정을 정리하겠습니다.
