@@ -4,24 +4,30 @@ Blog focus:
 - {content_brief}
 - Target audience: {target_audience}
 
-Task:
-- Find the Top 3 Korea-related search topics that are currently attractive to international audiences.
-- Prefer topics with clear foreign-traveler intent.
-- Prioritize topics that feel timely, seasonal, event-driven, or newly relevant.
-- Topics may include travel, festivals, public events, K-culture, concerts, food, neighborhoods, or seasonal experiences.
-- Include stylish culture-route and mood-driven Seoul topics when they feel shareable and search-friendly.
-- Prefer keyword phrases that first-time visitors to Korea would realistically search.
-- Avoid vague one-word topics.
-- Avoid duplicate intent.
-- Avoid topics that require highly speculative facts to write.
+Mission:
+- Find the Top 3 Korea-related topics that are likely to attract international readers right now.
+- This blog is not a generic backpacking guide. Prioritize Korea festival, event, culture, art, K-pop-adjacent lifestyle, seasonal city experiences, and practical foreigner-facing culture guides.
+- Prefer topics that feel timely, visual, culturally rich, and realistically useful for someone visiting Korea.
 
-Good topic patterns:
-- named festivals or public events
-- seasonal Seoul itineraries
-- artist-inspired neighborhood routes
-- cafe, jazz, gallery, or local culture routes tied to a recognizable mood
-- Korea travel questions tied to weather or timing
-- practical foreigner-facing guides with strong search intent
+Prioritize topics such as:
+- named festivals or seasonal public events
+- exhibitions, art fairs, gallery routes, or neighborhood culture walks
+- concert-season survival guides or pop-culture travel routes
+- artist-inspired Seoul itineraries
+- limited-time spring, summer, autumn, or winter experiences
+- practical foreigner-friendly event guides with transport and timing intent
+
+Avoid:
+- vague one-word travel topics
+- generic “best places in Korea” style topics
+- duplicate search intent
+- topics that rely on rumors or highly uncertain facts
+
+Good examples:
+- Seoul lantern festival 2026 guide
+- BTS-inspired jazz bars in Seoul
+- Best Korean spring events for foreigners
+- Seochon art walk for first-time visitors
 
 Return valid JSON only in this exact shape:
 

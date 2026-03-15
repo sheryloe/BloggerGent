@@ -8,10 +8,15 @@ Story context:
 
 Visual direction:
 - believable real-world scene tied to the mystery
-- eerie atmosphere without fantasy excess
 - documentary photography style
-- dim natural light or overcast conditions
+- eerie or solitary atmosphere
+- dim natural light, overcast light, twilight, or muted weather when suitable
 - realistic textures and natural shadows
-- subtle tension, no gore
+- subtle tension without fantasy excess
+- no gore
 - no text overlays
-- high realism, editorial composition, 50mm lens feeling
+- premium editorial composition
+- high realism with a 50mm lens feel
+
+If the topic is a legend, keep the image atmospheric but still believable.
+If the topic is a historical mystery, prefer evidence-rich environments, landscapes, ruins, sea, forest, snow, desert, or archival-feeling locations that fit the story.
