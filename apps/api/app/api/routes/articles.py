@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
 from app.models.entities import Article, BloggerPost, PublishMode
-from app.schemas.api import ArticleRead
+from app.schemas.api import ArticleRead, ArticleSeoMetaRead
+from app.services.blog_seo_meta_service import get_article_seo_meta_overview, verify_article_seo_meta
 from app.services.blog_service import list_visible_blog_ids
 from app.services.html_assembler import assemble_article_html
 from app.services.providers.base import ProviderRuntimeError
@@ -146,6 +147,11 @@ def publish_article(article_id: int, db: Session = Depends(get_db)) -> Article:
                 detail="대표 이미지가 아직 공개 URL이 아닙니다. public_asset_base_url 또는 Cloudinary 설정을 먼저 저장해주세요.",
             )
         existing_post = article.blogger_post
+        if existing_post and not existing_post.is_draft:
+            raise HTTPException(
+                status_code=409,
+                detail="이미 공개된 글은 덮어쓸 수 없습니다. 새 글로 다시 생성하거나 초안 상태에서만 게시하세요.",
+            )
 
         if existing_post and hasattr(provider, "update_post"):
             update_summary, update_payload = provider.update_post(
@@ -184,3 +190,27 @@ def publish_article(article_id: int, db: Session = Depends(get_db)) -> Article:
     except ProviderRuntimeError as exc:
         db.rollback()
         raise HTTPException(status_code=exc.status_code or 502, detail=exc.detail or exc.message) from exc
+
+
+@router.get("/{article_id}/seo-meta", response_model=ArticleSeoMetaRead)
+def get_article_seo_meta(article_id: int, db: Session = Depends(get_db)) -> dict:
+    article = db.execute(
+        select(Article)
+        .where(Article.id == article_id)
+        .options(selectinload(Article.blog), selectinload(Article.blogger_post))
+    ).scalar_one_or_none()
+    if not article or article.blog_id not in set(list_visible_blog_ids(db)):
+        raise HTTPException(status_code=404, detail="Article not found")
+    return get_article_seo_meta_overview(article)
+
+
+@router.post("/{article_id}/seo-meta/verify", response_model=ArticleSeoMetaRead)
+def verify_article_seo_meta_status(article_id: int, db: Session = Depends(get_db)) -> dict:
+    article = db.execute(
+        select(Article)
+        .where(Article.id == article_id)
+        .options(selectinload(Article.blog), selectinload(Article.blogger_post))
+    ).scalar_one_or_none()
+    if not article or article.blog_id not in set(list_visible_blog_ids(db)):
+        raise HTTPException(status_code=404, detail="Article not found")
+    return verify_article_seo_meta(article)

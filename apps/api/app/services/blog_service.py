@@ -929,7 +929,7 @@ def get_blog_summary_map(db: Session, blog_ids: list[int]) -> dict[int, BlogSumm
 
     post_count_rows = db.execute(
         select(BloggerPost.blog_id, func.count(BloggerPost.id))
-        .where(BloggerPost.blog_id.in_(unique_ids))
+        .where(BloggerPost.blog_id.in_(unique_ids), BloggerPost.is_draft.is_(False))
         .group_by(BloggerPost.blog_id)
     ).all()
     for blog_id, count in post_count_rows:
@@ -963,7 +963,7 @@ def get_blog_summary_map(db: Session, blog_ids: list[int]) -> dict[int, BlogSumm
             BloggerPost.published_url.label("published_url"),
             post_rank,
         )
-        .where(BloggerPost.blog_id.in_(unique_ids))
+        .where(BloggerPost.blog_id.in_(unique_ids), BloggerPost.is_draft.is_(False))
         .subquery()
     )
     latest_post_rows = db.execute(

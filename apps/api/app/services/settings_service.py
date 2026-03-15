@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.entities import Blog, Setting
+from app.services.secret_service import decrypt_secret_value, encrypt_secret_value, is_encrypted_secret
 
 
 @dataclass(slots=True)
@@ -96,11 +97,14 @@ def ensure_default_settings(db: Session) -> None:
             if item.is_secret != default.is_secret:
                 item.is_secret = default.is_secret
                 changed = True
+            if item.is_secret and item.value and not is_encrypted_secret(item.value):
+                item.value = encrypt_secret_value(item.value)
+                changed = True
             continue
         db.add(
             Setting(
                 key=key,
-                value=default.value,
+                value=encrypt_secret_value(default.value) if default.is_secret and default.value else default.value,
                 description=default.description,
                 is_secret=default.is_secret,
             )
@@ -113,7 +117,7 @@ def ensure_default_settings(db: Session) -> None:
 def get_settings_map(db: Session) -> dict[str, str]:
     ensure_default_settings(db)
     items = db.execute(select(Setting).order_by(Setting.key.asc())).scalars().all()
-    return {item.key: item.value for item in items}
+    return {item.key: decrypt_secret_value(item.value) if item.is_secret else item.value for item in items}
 
 
 def list_settings(db: Session) -> list[Setting]:
@@ -128,10 +132,17 @@ def upsert_settings(db: Session, values: dict[str, str]) -> list[Setting]:
         if key in existing:
             if existing[key].is_secret and not str(value).strip():
                 continue
-            existing[key].value = value
+            existing[key].value = encrypt_secret_value(value) if existing[key].is_secret else value
             continue
         meta = DEFAULT_SETTINGS.get(key, DefaultSetting("", "사용자 정의 설정"))
-        db.add(Setting(key=key, value=value, description=meta.description, is_secret=meta.is_secret))
+        db.add(
+            Setting(
+                key=key,
+                value=encrypt_secret_value(value) if meta.is_secret else value,
+                description=meta.description,
+                is_secret=meta.is_secret,
+            )
+        )
     db.commit()
     return list_settings(db)
 

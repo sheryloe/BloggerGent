@@ -11,6 +11,11 @@ from app.models.entities import BloggerPost, Image, JobStatus, LogLevel, Publish
 from app.services.article_service import build_collage_prompt, save_article
 from app.services.audit_service import add_log, count_logs_since
 from app.services.blog_service import get_blog, get_workflow_step, render_agent_prompt, stage_label
+from app.services.content_guard_service import (
+    DuplicateContentError,
+    build_duplicate_exclusion_prompt,
+    filter_duplicate_topic_items,
+)
 from app.services.html_assembler import assemble_article_html
 from app.services.job_service import (
     create_job,
@@ -268,10 +273,11 @@ def discover_topics_and_enqueue(
 
     topic_step = _require_enabled_step(blog, WorkflowStageType.TOPIC_DISCOVERY)
     provider = get_topic_provider(db, model_override=topic_step.provider_model)
-    prompt = render_agent_prompt(blog, topic_step)
+    prompt = render_agent_prompt(blog, topic_step) + build_duplicate_exclusion_prompt(db, blog_id=blog.id)
     _enforce_gemini_topic_limits(db, blog=blog)
     payload, raw_response = provider.discover_topics(prompt)
-    topics = upsert_topics(db, blog, payload.topics)
+    filtered_topics, skipped_duplicates = filter_duplicate_topic_items(db, blog_id=blog.id, items=payload.topics)
+    topics = upsert_topics(db, blog, filtered_topics)
 
     settings_map = get_settings_map(db)
     mode_value = publish_mode or "draft"
@@ -280,19 +286,26 @@ def discover_topics_and_enqueue(
 
     job_ids: list[int] = []
     for topic in topics:
-        job = create_job(
-            db,
-            blog_id=blog.id,
-            keyword=topic.keyword,
-            topic_id=topic.id,
-            publish_mode=mode,
-            initial_status=JobStatus.DISCOVERING_TOPICS,
-            raw_prompts={
-                topic_step.stage_type.value: prompt,
-                PIPELINE_CONTROL_KEY: _serialize_pipeline_control(stop_after_status),
-            },
-            raw_responses={topic_step.stage_type.value: raw_response},
-        )
+        try:
+            job = create_job(
+                db,
+                blog_id=blog.id,
+                keyword=topic.keyword,
+                topic_id=topic.id,
+                publish_mode=mode,
+                initial_status=JobStatus.DISCOVERING_TOPICS,
+                raw_prompts={
+                    topic_step.stage_type.value: prompt,
+                    PIPELINE_CONTROL_KEY: _serialize_pipeline_control(stop_after_status),
+                },
+                raw_responses={
+                    topic_step.stage_type.value: raw_response,
+                    "duplicate_filter": {"skipped": skipped_duplicates},
+                },
+            )
+        except DuplicateContentError as exc:
+            skipped_duplicates.append({"keyword": topic.keyword, "reason": str(exc)})
+            continue
         set_status(
             db,
             job,
@@ -309,7 +322,7 @@ def discover_topics_and_enqueue(
         "queued_topics": len(job_ids),
         "job_ids": job_ids,
         "stop_after_status": stop_after_status.value if stop_after_status else None,
-        "message": f"{blog.name} 블로그 주제 수집과 작업 등록을 완료했습니다.",
+        "message": f"{blog.name} 블로그 주제 수집과 작업 등록을 완료했습니다. 중복 후보 {len(skipped_duplicates)}개는 제외했습니다.",
     }
 
 
@@ -510,6 +523,12 @@ def run_job(self: Task, job_id: int, force_retry: bool = False) -> dict:
             "job_id": job_id,
             "status": "stopped" if final_job and final_job.status == JobStatus.STOPPED else "completed",
         }
+    except DuplicateContentError as exc:
+        db.rollback()
+        job = load_job(db, job_id)
+        if job:
+            record_failure(db, job, exc)
+        return {"job_id": job_id, "status": "failed", "error": str(exc)}
     except Exception as exc:
         db.rollback()
         job = load_job(db, job_id)

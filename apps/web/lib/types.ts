@@ -335,6 +335,18 @@ export interface BlogSeoMeta {
   twitter_description_status: SeoMetaStatus;
 }
 
+export interface ArticleSeoMeta {
+  article_id: number;
+  blog_id: number;
+  article_title: string;
+  verification_target_url?: string | null;
+  expected_meta_description?: string | null;
+  warnings: string[];
+  head_meta_description_status: SeoMetaStatus;
+  og_description_status: SeoMetaStatus;
+  twitter_description_status: SeoMetaStatus;
+}
+
 export interface BloggerPageview {
   range: string;
   count: number;

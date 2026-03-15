@@ -1,10 +1,11 @@
 import Link from "next/link";
 
 import { ArticlePreviewFrame } from "@/components/dashboard/article-preview-frame";
+import { ArticleSeoMetaCard } from "@/components/dashboard/article-seo-meta-card";
 import { PublishArticleButton } from "@/components/dashboard/publish-article-button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { getArticles } from "@/lib/api";
+import { getArticleSeoMeta, getArticles } from "@/lib/api";
 
 function formatDate(value?: string | null) {
   if (!value) return "-";
@@ -34,21 +35,20 @@ export default async function ArticlesPage({
   const articles = await getArticles();
   const selectedArticleId = Number(searchParams?.article);
   const selectedArticle = articles.find((article) => article.id === selectedArticleId) ?? articles[0] ?? null;
+  const selectedSeoMeta = selectedArticle ? await getArticleSeoMeta(selectedArticle.id) : null;
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="font-display text-4xl font-semibold text-ink">생성 글</h1>
         <p className="mt-2 text-base leading-7 text-slate-600">
-          왼쪽에서 글 제목을 고르면, 오른쪽에서 실제 게시 형태에 가까운 미리보기를 따로 확인할 수 있습니다.
+          왼쪽에서 글 제목을 고르면 오른쪽에서 실제 게시 상태에 가까운 미리보기와 SEO 검증 정보를 함께 확인할 수 있습니다.
         </p>
       </div>
 
       {articles.length === 0 ? (
         <Card>
-          <CardContent className="px-6 py-10 text-sm leading-7 text-slate-600">
-            아직 생성된 글이 없습니다.
-          </CardContent>
+          <CardContent className="px-6 py-10 text-sm leading-7 text-slate-600">아직 생성된 글이 없습니다.</CardContent>
         </Card>
       ) : (
         <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
@@ -88,7 +88,7 @@ export default async function ArticlesPage({
 
           {!selectedArticle ? (
             <Card>
-              <CardContent className="px-6 py-10 text-sm leading-7 text-slate-600">선택한 글이 없습니다.</CardContent>
+              <CardContent className="px-6 py-10 text-sm leading-7 text-slate-600">선택된 글이 없습니다.</CardContent>
             </Card>
           ) : (
             <div className="space-y-6">
@@ -151,16 +151,24 @@ export default async function ArticlesPage({
                         )}
                         <PublishArticleButton
                           articleId={selectedArticle.id}
-                          isPublished={Boolean(selectedArticle.blogger_post?.published_url) && !selectedArticle.blogger_post?.is_draft}
+                          publishState={
+                            selectedArticle.blogger_post?.published_url
+                              ? selectedArticle.blogger_post.is_draft
+                                ? "draft"
+                                : "published"
+                              : "unpublished"
+                          }
                         />
                       </div>
                     </div>
                   </div>
 
+                  {selectedSeoMeta ? <ArticleSeoMetaCard articleId={selectedArticle.id} initialMeta={selectedSeoMeta} /> : null}
+
                   <div className="rounded-[24px] border border-ink/10 bg-white/70 p-5">
                     <p className="text-xs uppercase tracking-[0.16em] text-slate-500">실제 게시 미리보기</p>
                     <p className="mt-2 text-sm leading-7 text-slate-600">
-                      아래 화면은 조립된 HTML을 별도 프레임에서 렌더링한 결과입니다. 앱 카드 색상과 글 스타일이 섞이지 않도록 분리해서 보여줍니다.
+                      아래 프레임은 조립된 HTML을 별도 프레임에서 렌더링한 결과입니다. 페이지 카드 색과 섞이지 않도록 분리해서 보여줍니다.
                     </p>
                     <div className="mt-4">
                       <ArticlePreviewFrame article={selectedArticle} />

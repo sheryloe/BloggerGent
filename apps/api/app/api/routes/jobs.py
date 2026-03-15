@@ -8,6 +8,7 @@ from app.db.session import get_db
 from app.models.entities import Article, AuditLog, Blog, BloggerPost, Image, Job, PublishMode, Topic
 from app.schemas.api import GeneratedDataResetResponse, JobCreate, JobRead, JobRetryResponse
 from app.services.blog_service import get_blog, list_visible_blog_ids
+from app.services.content_guard_service import DuplicateContentError
 from app.services.job_service import create_job, load_job
 from app.services.providers.factory import get_blogger_provider
 from app.services.settings_service import get_settings_map
@@ -77,14 +78,17 @@ def create_job_endpoint(payload: JobCreate, db: Session = Depends(get_db)) -> Jo
     stop_after_status = _resolve_stop_after(settings_map, override=payload.stop_after_status)
     publish_mode = payload.publish_mode or PublishMode.DRAFT
 
-    job = create_job(
-        db,
-        blog_id=blog.id,
-        keyword=keyword,
-        topic_id=topic.id if topic else None,
-        publish_mode=publish_mode,
-        raw_prompts={PIPELINE_CONTROL_KEY: _serialize_pipeline_control(stop_after_status)},
-    )
+    try:
+        job = create_job(
+            db,
+            blog_id=blog.id,
+            keyword=keyword,
+            topic_id=topic.id if topic else None,
+            publish_mode=publish_mode,
+            raw_prompts={PIPELINE_CONTROL_KEY: _serialize_pipeline_control(stop_after_status)},
+        )
+    except DuplicateContentError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     run_job.delay(job.id)
     return load_job(db, job.id) or job
 

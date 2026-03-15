@@ -2,6 +2,7 @@ import "server-only";
 
 import {
   Article,
+  ArticleSeoMeta,
   Blog,
   BlogImportOptions,
   BlogSeoMeta,
@@ -57,6 +58,10 @@ export async function getJobs(blogId?: number) {
 export async function getArticles(blogId?: number) {
   const query = blogId ? `?blog_id=${blogId}` : "";
   return apiFetch<Article[]>(`/articles${query}`);
+}
+
+export async function getArticleSeoMeta(articleId: number) {
+  return apiFetch<ArticleSeoMeta>(`/articles/${articleId}/seo-meta`);
 }
 
 export async function getSettings() {

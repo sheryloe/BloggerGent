@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models.entities import Article, Blog, Job, JobStatus, LogLevel, PublishMode, Topic
 from app.services.audit_service import add_log
+from app.services.content_guard_service import DuplicateContentError, find_duplicate_match
 
 
 def create_job(
@@ -20,6 +21,10 @@ def create_job(
     raw_prompts: dict | None = None,
     raw_responses: dict | None = None,
 ) -> Job:
+    duplicate = find_duplicate_match(db, blog_id=blog_id, candidate=keyword)
+    if duplicate:
+        raise DuplicateContentError(f"중복 주제로 작업을 만들 수 없습니다. 기준값: {duplicate.value}")
+
     job = Job(
         blog_id=blog_id,
         topic_id=topic_id,

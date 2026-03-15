@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models.entities import Article, Job, Topic
 from app.schemas.ai import ArticleGenerationOutput
+from app.services.content_guard_service import assert_article_not_duplicate
 
 
 TAG_RE = re.compile(r"<[^>]+>")
@@ -57,7 +58,14 @@ def ensure_unique_slug(db: Session, blog_id: int, slug_base: str, article_id: in
 
 def save_article(db: Session, *, job: Job, topic: Topic | None, output: ArticleGenerationOutput) -> Article:
     article = db.execute(select(Article).where(Article.job_id == job.id)).scalar_one_or_none()
-    unique_slug = ensure_unique_slug(db, job.blog_id, output.slug, article.id if article else None)
+    slug_candidate = slugify(output.slug or output.title) or "post"
+    assert_article_not_duplicate(
+        db,
+        blog_id=job.blog_id,
+        title=output.title,
+        slug=slug_candidate,
+        exclude_article_id=article.id if article else None,
+    )
     sanitized_html = sanitize_blog_html(output.html_article)
     payload = {
         "blog_id": job.blog_id,
@@ -65,7 +73,7 @@ def save_article(db: Session, *, job: Job, topic: Topic | None, output: ArticleG
         "title": output.title,
         "meta_description": output.meta_description,
         "labels": output.labels,
-        "slug": unique_slug,
+        "slug": slug_candidate,
         "excerpt": output.excerpt,
         "html_article": sanitized_html,
         "faq_section": [item.model_dump() for item in output.faq_section],

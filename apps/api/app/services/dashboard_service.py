@@ -44,7 +44,7 @@ def build_dashboard_metrics(db: Session, blog_id: int | None = None) -> dict:
 
     latest_post_query = (
         select(BloggerPost)
-        .where(BloggerPost.blog_id.in_(blog_ids))
+        .where(BloggerPost.blog_id.in_(blog_ids), BloggerPost.is_draft.is_(False))
         .order_by(BloggerPost.published_at.desc().nullslast(), BloggerPost.created_at.desc())
         .limit(5)
     )

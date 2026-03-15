@@ -166,6 +166,18 @@ class BlogSeoMetaUpdate(BaseModel):
     seo_theme_patch_installed: bool
 
 
+class ArticleSeoMetaRead(BaseModel):
+    article_id: int
+    blog_id: int
+    article_title: str
+    verification_target_url: str | None = None
+    expected_meta_description: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    head_meta_description_status: SeoMetaStatusRead
+    og_description_status: SeoMetaStatusRead
+    twitter_description_status: SeoMetaStatusRead
+
+
 class WorkflowStepCreate(BaseModel):
     stage_type: WorkflowStageType
 

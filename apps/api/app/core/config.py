@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     seed_demo_data: bool = True
     auto_trigger_on_discovery: bool = True
     related_post_count: int = 3
+    settings_encryption_secret: str = "bloggent-local-dev-secret"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
