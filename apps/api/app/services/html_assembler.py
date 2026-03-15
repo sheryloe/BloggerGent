@@ -86,6 +86,13 @@ def _style_article_body(html: str, *, accent: str, heading: str, body: str) -> s
     return styled
 
 
+def _lead_summary(article: Article) -> str:
+    meta_description = (article.meta_description or "").strip()
+    if meta_description:
+        return meta_description
+    return (article.excerpt or "").strip()
+
+
 def render_faq_html(
     faq_section: list[dict],
     section_title: str = "Frequently Asked Questions",
@@ -139,12 +146,13 @@ def assemble_article_html(article: Article, hero_image_url: str, related_posts: 
         card_background=theme["faq_background"],
         card_border=theme["faq_border"],
     )
+    lead_summary = _lead_summary(article)
     return f"""
 <article style="max-width:860px;margin:0 auto;padding:32px 22px 48px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:{theme['heading']};background:{theme['article_background']};border:1px solid {theme['article_border']};border-radius:{'0px' if category == 'mystery' else '32px'};box-shadow:{theme['article_shadow']};">
-  <header style="margin-bottom:28px;">
-    <p style="font-size:12px;letter-spacing:0.18em;text-transform:uppercase;color:{theme['accent']};font-weight:700;">{eyebrow}</p>
-    <h1 style="font-size:40px;line-height:1.12;margin:10px 0 14px;color:{theme['heading']};">{article.title}</h1>
-    <p style="font-size:18px;line-height:1.8;color:{theme['muted']};margin:0;">{article.excerpt}</p>
+  <header style="margin-bottom:28px;display:flex;flex-direction:column;">
+    <p style="order:3;font-size:18px;line-height:1.8;color:{theme['muted']};margin:0;">{lead_summary}</p>
+    <p style="order:1;font-size:12px;letter-spacing:0.18em;text-transform:uppercase;color:{theme['accent']};font-weight:700;margin:0 0 10px;">{eyebrow}</p>
+    <h1 style="order:2;font-size:40px;line-height:1.12;margin:0 0 14px;color:{theme['heading']};">{article.title}</h1>
   </header>
   <figure style="margin:0 0 32px;">
     <img src="{hero_image_url}" alt="{article.title}" style="width:100%;border-radius:28px;display:block;object-fit:cover;" />

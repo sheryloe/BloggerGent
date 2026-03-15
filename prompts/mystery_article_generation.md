@@ -154,11 +154,16 @@ You are generating a complete blog package for "{blog_name}".
 - meta_description:
   - under 160 characters when possible
   - curiosity-driven but clean
+  - this should be strong enough to appear directly as the public SEO meta description
 - labels:
   - 4 to 6 items
 - excerpt:
-  - 2 to 3 sentences
-  - atmospheric, direct, and useful as preview text
+  - 1 to 2 short sentences
+  - the first sentence must stay very close to meta_description and work as a standalone search snippet
+  - no emoji
+  - optional second sentence may deepen the mood, but keep it tight
+- The first paragraph of html_article must smoothly continue the same hook and core mystery promise from meta_description and excerpt.
+- Do not burn the opening on vague creepiness. Name the case, the unsettling fact, and the central unanswered question early.
 
 [Final Goal]
 - The final package should feel like a professionally structured mystery feature for Google:

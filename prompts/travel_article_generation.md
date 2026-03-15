@@ -209,11 +209,17 @@ You are generating a complete Blogger blog package for "{blog_name}".
   - 140 to 160 characters
   - practical and clear
   - no emoji
+- meta_description is the single source of truth for the public SEO summary.
+- Write it so it can appear directly inside a meta tag without edits.
 - labels:
   - 4 to 6 items
 - excerpt:
-  - 2 to 3 sentences
-  - inviting, useful, and emotionally on-theme
+  - 1 to 2 short sentences
+  - the first sentence must closely mirror meta_description and work as a standalone search snippet
+  - no emoji in the first sentence
+  - optional second sentence may add a little mood or local color
+- The first paragraph of html_article must naturally continue the same promise made by meta_description and excerpt.
+- Do not waste the opening on generic scene-setting. The reader should understand the topic, value, and key practical hook immediately.
 - If the topic explicitly includes a year, use that year naturally.
 - If the topic does not explicitly include a year, do not add one.
 
