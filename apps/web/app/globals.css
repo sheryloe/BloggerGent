@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --background: #fbf7f1;
+  --foreground: #11212d;
+}
+
+* {
+  border-color: rgba(17, 33, 45, 0.1);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background:
+    radial-gradient(circle at top left, rgba(224, 113, 44, 0.16), transparent 32%),
+    radial-gradient(circle at bottom right, rgba(35, 76, 90, 0.12), transparent 36%),
+    var(--background);
+  color: var(--foreground);
+  font-family: var(--font-body), sans-serif;
+}
+
+.font-display {
+  font-family: var(--font-display), sans-serif;
+}
+
+.panel-surface {
+  background: rgba(255, 249, 240, 0.82);
+  backdrop-filter: blur(14px);
+}
+
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(17, 33, 45, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(17, 33, 45, 0.06) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.article-prose h2 {
+  @apply mt-6 text-2xl font-semibold text-ink;
+}
+
+.article-prose h3 {
+  @apply mt-4 text-xl font-semibold text-spruce;
+}
+
+.article-prose p {
+  @apply mt-3 leading-8 text-slate-700;
+}
+
+.article-prose section {
+  @apply mt-6;
+}

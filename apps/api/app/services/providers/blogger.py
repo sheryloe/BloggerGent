@@ -1,0 +1,110 @@
+from __future__ import annotations
+
+from urllib.parse import urlencode
+
+import httpx
+
+from app.models.entities import PublishMode
+
+
+class BloggerPublishingProvider:
+    def __init__(self, *, access_token: str, blog_id: str) -> None:
+        self.access_token = access_token
+        self.blog_id = blog_id
+
+    def _auth_headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self.access_token}"}
+
+    def publish(
+        self,
+        *,
+        title: str,
+        content: str,
+        labels: list[str],
+        meta_description: str,
+        slug: str,
+        publish_mode: PublishMode,
+    ) -> tuple[dict, dict]:
+        params = {"isDraft": str(publish_mode == PublishMode.DRAFT).lower()}
+        url = f"https://www.googleapis.com/blogger/v3/blogs/{self.blog_id}/posts/?{urlencode(params)}"
+        payload = {
+            "kind": "blogger#post",
+            "title": title,
+            "content": content,
+            "labels": labels,
+            "customMetaData": meta_description,
+        }
+        response = httpx.post(
+            url,
+            headers=self._auth_headers(),
+            json=payload,
+            timeout=60.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return {
+            "id": data.get("id", slug),
+            "url": data.get("url", ""),
+            "published": data.get("published"),
+            "isDraft": bool(data.get("status") == "DRAFT" or params["isDraft"] == "true"),
+        }, data
+
+    def update_post(
+        self,
+        *,
+        post_id: str,
+        title: str,
+        content: str,
+        labels: list[str],
+        meta_description: str,
+    ) -> tuple[dict, dict]:
+        url = f"https://www.googleapis.com/blogger/v3/blogs/{self.blog_id}/posts/{post_id}"
+        payload = {
+            "kind": "blogger#post",
+            "id": post_id,
+            "title": title,
+            "content": content,
+            "labels": labels,
+            "customMetaData": meta_description,
+        }
+        response = httpx.put(
+            url,
+            headers=self._auth_headers(),
+            json=payload,
+            timeout=60.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return {
+            "id": data.get("id", post_id),
+            "url": data.get("url", ""),
+            "published": data.get("published"),
+            "isDraft": bool(data.get("status") == "DRAFT"),
+        }, data
+
+    def publish_draft(self, post_id: str) -> tuple[dict, dict]:
+        url = f"https://www.googleapis.com/blogger/v3/blogs/{self.blog_id}/posts/{post_id}/publish"
+        response = httpx.post(
+            url,
+            headers=self._auth_headers(),
+            timeout=60.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return {
+            "id": data.get("id", post_id),
+            "url": data.get("url", ""),
+            "published": data.get("published"),
+            "isDraft": False,
+        }, data
+
+    def delete_post(self, post_id: str) -> None:
+        url = f"https://www.googleapis.com/blogger/v3/blogs/{self.blog_id}/posts/{post_id}?useTrash=true"
+        response = httpx.delete(
+            url,
+            headers=self._auth_headers(),
+            timeout=30.0,
+        )
+        if response.status_code in {200, 204, 404}:
+            return
+        response.raise_for_status()

@@ -1,0 +1,11 @@
+.next/
+node_modules/
+__pycache__/
+.pytest_cache/
+*.pyc
+.env
+.env.local
+storage/images/*
+storage/html/*
+!storage/images/.gitkeep
+!storage/html/.gitkeep

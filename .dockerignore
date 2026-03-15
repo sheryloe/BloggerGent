@@ -1,0 +1,12 @@
+.git
+.gitignore
+.env
+.env.local
+**/.next
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+storage/images/*
+storage/html/*
+!storage/images/.gitkeep
+!storage/html/.gitkeep
