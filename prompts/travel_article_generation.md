@@ -158,7 +158,8 @@ You are generating a complete Blogger blog package for "{blog_name}".
   - Average Budget
 - Add 4 to 6 major H2 sections.
 - Each major section should feel like a mini local guide.
-- Insert <!--RELATED_POSTS--> exactly once in the later half.
+- Do not insert related-post cards, related-post markup, or <!--RELATED_POSTS--> anywhere in html_article.
+- The system appends the related-post section automatically at the very end after the article and FAQ.
 - Add <h2>How to Get There [emoji allowed]</h2>
 - Add <h2>Estimated Budget for This Experience [emoji allowed]</h2>
 - End with <h2>Final Thoughts for Your Korea Trip [emoji allowed]</h2>

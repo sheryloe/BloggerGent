@@ -55,11 +55,22 @@ def find_related_articles(db: Session, article: Article, limit: int | None = Non
     return related
 
 
-def render_related_cards_html(related_posts: list[dict], section_title: str = "Related Posts") -> str:
+def render_related_cards_html(
+    related_posts: list[dict],
+    section_title: str = "Related Posts",
+    *,
+    category: str = "",
+) -> str:
+    category = (category or "").lower()
+    card_background = "rgba(255,255,255,0.05)" if category == "mystery" else "#f8fafc"
+    card_border = "rgba(255,255,255,0.16)" if category == "mystery" else "#e2e8f0"
+    heading_color = "#f8fafc" if category == "mystery" else "#0f172a"
+    body_color = "#e5e7eb" if category == "mystery" else "#475569"
+
     if not related_posts:
         return (
             f"<section class='related-posts'><h2>{section_title}</h2>"
-            "<p>추천 글은 라이브러리가 더 쌓이면 이 영역에 자동으로 채워집니다.</p></section>"
+            "<p>관련 글이 아직 충분하지 않아, 이 영역은 다음 글부터 더 풍성하게 채워집니다.</p></section>"
         )
 
     cards = []
@@ -72,16 +83,16 @@ def render_related_cards_html(related_posts: list[dict], section_title: str = "R
         )
         cards.append(
             "<a href='{link}' style='display:block;text-decoration:none;color:#1f2937;'>"
-            "<div style='border:1px solid #e5e7eb;border-radius:18px;padding:14px;background:#fff;'>"
+            f"<div style='border:1px solid {card_border};border-radius:18px;padding:14px;background:{card_background};backdrop-filter:blur(8px);'>"
             f"{thumbnail}"
-            f"<h3 style='font-size:18px;margin:12px 0 8px;'>{post['title']}</h3>"
-            f"<p style='font-size:14px;line-height:1.6;color:#4b5563;'>{post['excerpt']}</p>"
+            f"<h3 style='font-size:18px;margin:12px 0 8px;color:{heading_color};'>{post['title']}</h3>"
+            f"<p style='font-size:14px;line-height:1.7;color:{body_color};'>{post['excerpt']}</p>"
             "</div></a>".format(link=post["link"])
         )
 
     return (
         "<section class='related-posts' style='margin-top:36px;'>"
-        f"<h2 style='font-size:28px;margin-bottom:16px;'>{section_title}</h2>"
+        f"<h2 style='font-size:28px;margin-bottom:16px;color:{heading_color};'>{section_title}</h2>"
         "<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;'>"
         + "".join(cards)
         + "</div></section>"
