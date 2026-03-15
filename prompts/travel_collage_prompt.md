@@ -40,6 +40,12 @@ Create one final image-generation prompt in English for "{blog_name}".
   - include at least one dreamy photo-spot panel and at least one practical local-life panel such as subway arrival, picnic setup, or convenience-store snacks
   - avoid making all 8 panels look like the same tree from slightly different distances
 
+[Culture and Lifestyle Rules]
+- If the topic is about jazz, art, cafes, neighborhood mood, or an artist-inspired route:
+  - make the collage feel curated, cinematic, and editorial
+  - mix exterior street mood, interior lifestyle detail, walking route atmosphere, and one intimate close-up
+  - avoid making every panel a generic cafe shot
+
 [Style Direction]
 - realistic Korean travel photography
 - cinematic but believable
@@ -50,4 +56,4 @@ Create one final image-generation prompt in English for "{blog_name}".
 - for cherry blossom topics, use pastel pink, blush sunset, warm white, and airy spring light instead of generic travel tones
 
 Use this final format:
-"A single high-resolution image divided into an 8-panel grid layout (collage style). The collage must clearly show 8 separate rectangular photo panels with thin white gutters between them, like a premium travel magazine contact sheet. Each panel shows a different aspect of {keyword}. Panel 1: ... Panel 2: ... Panel 3: ... Panel 4: ... Panel 5: ... Panel 6: ... Panel 7: ... Panel 8: ... Realistic Korean travel photography, cohesive editorial styling, authentic seasonal atmosphere, cinematic lighting, ultra-detailed, no text overlays, vertical composition preferred." 
+"A single high-resolution image divided into an 8-panel grid layout (collage style). The collage must clearly show 8 separate rectangular photo panels with thin white gutters between them, like a premium travel magazine contact sheet. Each panel shows a different aspect of {keyword}. Panel 1: ... Panel 2: ... Panel 3: ... Panel 4: ... Panel 5: ... Panel 6: ... Panel 7: ... Panel 8: ... Realistic Korean travel photography, cohesive editorial styling, authentic seasonal atmosphere, cinematic lighting, ultra-detailed, no text overlays, vertical composition preferred."

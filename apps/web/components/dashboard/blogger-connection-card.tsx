@@ -53,7 +53,7 @@ export function BloggerConnectionCard({
       <CardContent className="space-y-6">
         <div className="grid gap-3 xl:grid-cols-2">
           <div className="rounded-[24px] border border-ink/10 bg-white/70 p-4">
-            <p className="text-xs uppercase tracking-[0.16em] text-slate-500">OAuth 앱 상태</p>
+            <p className="text-xs uppercase tracking-[0.16em] text-slate-500">OAuth 설정 상태</p>
             <div className="mt-3 space-y-2">
               <StatusLine label="앱 이름" value={config.client_name || "-"} />
               <StatusLine label="Client ID" value={config.client_id_configured ? "설정됨" : "미설정"} />
@@ -73,11 +73,11 @@ export function BloggerConnectionCard({
         </div>
 
         <div className="rounded-[24px] border border-ink/10 bg-mist px-4 py-4 text-sm leading-7 text-slate-700">
-          <p className="font-semibold text-ink">다른 사람도 쓰게 하려면</p>
+          <p className="font-semibold text-ink">다른 사람이 쉽게 쓰려면</p>
           <p className="mt-2">
-            Google OAuth 앱이 <strong>Testing</strong> 상태면 실제 로그인할 Google 계정을 <strong>Test users</strong>
-            에 추가해야 합니다. 여러 사람이 계속 쓰는 서비스라면 Google OAuth 앱을 <strong>Production</strong>으로
-            전환하는 것을 권장합니다.
+            Google OAuth 앱이 <strong>Testing</strong> 상태라면 실제 로그인할 Google 계정을{" "}
+            <strong>Test users</strong>에 추가해야 합니다. 계속 운영할 서비스라면 Google OAuth 앱을{" "}
+            <strong>Production</strong>으로 전환하는 것을 권장합니다.
           </p>
         </div>
 
@@ -94,7 +94,7 @@ export function BloggerConnectionCard({
           </div>
 
           <div className="rounded-[24px] border border-ink/10 bg-white/70 p-4">
-            <p className="text-xs uppercase tracking-[0.16em] text-slate-500">승인된 Scope</p>
+            <p className="text-xs uppercase tracking-[0.16em] text-slate-500">허용된 Scope</p>
             {config.granted_scopes.length ? (
               <div className="mt-3 space-y-2">
                 {config.granted_scopes.map((scope) => (
@@ -104,7 +104,7 @@ export function BloggerConnectionCard({
                 ))}
               </div>
             ) : (
-              <p className="mt-3 text-sm leading-7 text-slate-700">아직 승인된 OAuth 권한이 없습니다.</p>
+              <p className="mt-3 text-sm leading-7 text-slate-700">아직 허용된 OAuth 권한이 없습니다.</p>
             )}
           </div>
         </div>
@@ -179,7 +179,7 @@ export function BloggerConnectionCard({
 
           <ResourceSection
             title="Search Console 속성"
-            description="가져온 속성 중 하나를 각 블로그에 매핑해서 씁니다."
+            description="가져온 속성 중 하나를 각 블로그에 매핑해서 사용합니다."
           >
             {config.search_console_sites.length === 0 ? (
               <div className="rounded-[24px] border border-dashed border-ink/15 bg-white/50 px-4 py-5 text-sm text-slate-600">
@@ -199,7 +199,7 @@ export function BloggerConnectionCard({
             )}
           </ResourceSection>
 
-          <ResourceSection title="GA4 속성" description="모니터링 화면에서 사용할 Analytics 속성 목록입니다.">
+          <ResourceSection title="GA4 속성" description="모니터링 화면에 사용할 Analytics 속성 목록입니다.">
             {config.analytics_properties.length === 0 ? (
               <div className="rounded-[24px] border border-dashed border-ink/15 bg-white/50 px-4 py-5 text-sm text-slate-600">
                 아직 GA4 속성이 없습니다.

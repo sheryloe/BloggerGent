@@ -74,8 +74,9 @@ def create_job_endpoint(payload: JobCreate, db: Session = Depends(get_db)) -> Jo
         raise HTTPException(status_code=400, detail="Provide either keyword or topic_id")
 
     settings_map = get_settings_map(db)
-    publish_mode = payload.publish_mode or blog.publish_mode or PublishMode(settings_map.get("default_publish_mode", "draft"))
     stop_after_status = _resolve_stop_after(settings_map, override=payload.stop_after_status)
+    publish_mode = payload.publish_mode or PublishMode.DRAFT
+
     job = create_job(
         db,
         blog_id=blog.id,
@@ -93,8 +94,13 @@ def retry_job(job_id: int, db: Session = Depends(get_db)) -> JobRetryResponse:
     job = load_job(db, job_id)
     if not job or job.blog_id not in set(list_visible_blog_ids(db)):
         raise HTTPException(status_code=404, detail="Job not found")
+
+    job.publish_mode = PublishMode.DRAFT
+    db.add(job)
+    db.commit()
+
     run_job.delay(job_id, force_retry=True)
-    return JobRetryResponse(job_id=job_id, status="queued", message="재시도 요청이 접수되었습니다.")
+    return JobRetryResponse(job_id=job_id, status="queued", message="재시도 요청을 접수했습니다.")
 
 
 @router.delete("/generated-data", response_model=GeneratedDataResetResponse)
@@ -116,7 +122,6 @@ def reset_generated_data(db: Session = Depends(get_db)) -> GeneratedDataResetRes
             if callable(delete_post):
                 delete_post(post_id)
         except Exception:
-            # Cleanup should continue even if a remote draft was already removed or cannot be reached.
             pass
 
     counts = {
@@ -140,5 +145,5 @@ def reset_generated_data(db: Session = Depends(get_db)) -> GeneratedDataResetRes
     return GeneratedDataResetResponse(
         **counts,
         deleted_storage_files=deleted_storage_files,
-        message="생성된 작업, 글, 이미지, 토픽, 감사 로그를 모두 정리했습니다.",
+        message="생성 작업, 글, 이미지, 토픽, 감사 로그를 모두 정리했습니다.",
     )

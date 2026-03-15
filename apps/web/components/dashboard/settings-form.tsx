@@ -28,13 +28,13 @@ type SectionConfig = {
 
 const sections: SectionConfig[] = [
   {
-    title: "기본 운영",
-    description: "실제 API를 쓸지, 기본 발행 모드를 무엇으로 할지 먼저 정합니다.",
+    title: "AI 연결",
+    description: "글 생성과 주제 발굴에 필요한 모델/API를 관리합니다.",
     fields: [
       {
         key: "provider_mode",
         label: "실행 모드",
-        help: "mock은 테스트용, live는 실제 API와 Blogger를 호출합니다.",
+        help: "`mock`은 테스트용, `live`는 실제 API 호출입니다.",
         required: true,
         options: [
           { value: "mock", label: "mock" },
@@ -42,25 +42,9 @@ const sections: SectionConfig[] = [
         ],
       },
       {
-        key: "default_publish_mode",
-        label: "기본 발행 모드",
-        help: "새 작업을 만들 때 기본으로 draft로 둘지, 바로 publish로 갈지 정합니다.",
-        required: true,
-        options: [
-          { value: "draft", label: "draft" },
-          { value: "publish", label: "publish" },
-        ],
-      },
-    ],
-  },
-  {
-    title: "AI 연결",
-    description: "OpenAI는 글과 이미지를 만들고, Gemini는 자동 주제 발굴에 사용합니다.",
-    fields: [
-      {
         key: "openai_api_key",
         label: "OpenAI API Key",
-        help: "본문 생성과 대표 이미지 생성에 사용합니다.",
+        help: "본문 생성과 이미지 생성에 사용합니다.",
         required: true,
         type: "password",
       },
@@ -72,12 +56,12 @@ const sections: SectionConfig[] = [
       {
         key: "openai_image_model",
         label: "OpenAI 이미지 모델",
-        help: "대표 이미지 생성에 사용할 모델입니다.",
+        help: "콜라주 이미지 생성에 사용할 모델입니다.",
       },
       {
         key: "openai_request_saver_mode",
-        label: "요청 절약 모드",
-        help: "이미지 프롬프트 전용 LLM 호출을 줄여 OpenAI 요청 수를 아낍니다.",
+        label: "OpenAI 요청 절약 모드",
+        help: "이미지 프롬프트 전용 호출을 줄여 요청 수를 아낍니다.",
         options: [
           { value: "true", label: "사용" },
           { value: "false", label: "사용 안 함" },
@@ -86,24 +70,24 @@ const sections: SectionConfig[] = [
       {
         key: "gemini_api_key",
         label: "Gemini API Key",
-        help: "자동 주제 발굴을 쓸 때만 필요합니다. 수동 키워드만 쓰면 비워둬도 됩니다.",
+        help: "자동 주제 발굴에만 사용합니다. 수동 키워드만 쓸 거면 비워도 됩니다.",
         type: "password",
       },
       {
         key: "gemini_model",
         label: "Gemini 모델",
-        help: "주제 발굴에 사용할 Gemini 모델입니다.",
+        help: "주제 발굴용 Gemini 모델명입니다.",
       },
     ],
   },
   {
-    title: "이미지 공개 호스팅",
-    description: "공개 글 썸네일이 깨지지 않도록 외부에서 접근 가능한 이미지 호스팅을 설정합니다.",
+    title: "공개 이미지",
+    description: "Blogger 글에서 대표 이미지가 깨지지 않도록 공개 URL이 가능한 저장소를 설정합니다.",
     fields: [
       {
         key: "public_image_provider",
-        label: "공개 이미지 방식",
-        help: "현재는 GitHub Pages 사용을 권장합니다.",
+        label: "이미지 호스팅 방식",
+        help: "현재는 GitHub Pages를 기본 권장값으로 사용합니다.",
         required: true,
         options: [
           { value: "github_pages", label: "GitHub Pages" },
@@ -120,7 +104,7 @@ const sections: SectionConfig[] = [
       },
       {
         key: "github_pages_repo",
-        label: "GitHub Repo",
+        label: "GitHub Repository",
         help: "예: BloManagent",
         required: true,
         showWhen: (values) => values.public_image_provider === "github_pages",
@@ -128,14 +112,14 @@ const sections: SectionConfig[] = [
       {
         key: "github_pages_branch",
         label: "GitHub Branch",
-        help: "보통 main",
+        help: "보통 `main`입니다.",
         required: true,
         showWhen: (values) => values.public_image_provider === "github_pages",
       },
       {
         key: "github_pages_token",
         label: "GitHub Token",
-        help: "Fine-grained token, Contents: Read and write 권한이 필요합니다.",
+        help: "Fine-grained token + `Contents: Read and write` 권한이 필요합니다.",
         required: true,
         type: "password",
         showWhen: (values) => values.public_image_provider === "github_pages",
@@ -150,84 +134,82 @@ const sections: SectionConfig[] = [
       {
         key: "github_pages_assets_dir",
         label: "기본 업로드 폴더",
-        help: "비워두면 날짜별 하위 폴더를 자동으로 붙여 저장합니다.",
+        help: "비워두면 날짜 기준 폴더를 자동으로 생성합니다.",
         showWhen: (values) => values.public_image_provider === "github_pages",
       },
       {
         key: "cloudinary_cloud_name",
         label: "Cloudinary Cloud Name",
-        help: "Cloudinary를 쓸 때만 입력합니다.",
-        required: true,
+        help: "Cloudinary를 사용할 때만 입력합니다.",
+        type: "text",
         showWhen: (values) => values.public_image_provider === "cloudinary",
       },
       {
         key: "cloudinary_api_key",
         label: "Cloudinary API Key",
-        help: "Cloudinary를 쓸 때만 입력합니다.",
-        required: true,
+        help: "Cloudinary를 사용할 때만 입력합니다.",
         type: "password",
         showWhen: (values) => values.public_image_provider === "cloudinary",
       },
       {
         key: "cloudinary_api_secret",
         label: "Cloudinary API Secret",
-        help: "Cloudinary를 쓸 때만 입력합니다.",
-        required: true,
+        help: "Cloudinary를 사용할 때만 입력합니다.",
         type: "password",
         showWhen: (values) => values.public_image_provider === "cloudinary",
       },
       {
         key: "cloudinary_folder",
         label: "Cloudinary 폴더",
-        help: "업로드할 기본 폴더 이름입니다.",
+        help: "업로드할 기본 폴더명입니다.",
         showWhen: (values) => values.public_image_provider === "cloudinary",
       },
       {
         key: "public_asset_base_url",
         label: "공개 베이스 URL",
-        help: "local 방식일 때만 필요합니다. 외부에서 접근 가능한 실제 주소여야 합니다.",
+        help: "Local URL 방식을 쓸 때만 필요합니다.",
         showWhen: (values) => values.public_image_provider === "local",
       },
     ],
   },
   {
-    title: "Google OAuth 앱",
-    description: "Blogger 게시와 Blogger / Search Console / GA4 목록 조회에 필요한 Google OAuth 앱 정보입니다.",
+    title: "Google OAuth",
+    description: "Blogger, Search Console, GA4 연결에 필요한 OAuth 정보를 입력합니다.",
     fields: [
       {
         key: "blogger_client_name",
-        label: "앱 표시 이름",
-        help: "Google 동의 화면에 보이는 이름입니다.",
+        label: "OAuth 표시 이름",
+        help: "Google 동의 화면에 보이는 앱 이름입니다.",
       },
       {
         key: "blogger_client_id",
         label: "Client ID",
-        help: "Google Cloud에서 발급한 Web application Client ID",
+        help: "Google Cloud에서 만든 Web application Client ID입니다.",
         required: true,
       },
       {
         key: "blogger_client_secret",
         label: "Client Secret",
-        help: "Google Cloud에서 발급한 Client Secret",
+        help: "Google Cloud에서 발급한 Client Secret입니다.",
         required: true,
         type: "password",
       },
       {
         key: "blogger_redirect_uri",
         label: "Redirect URI",
-        help: "Google Cloud에 등록한 값과 정확히 같아야 합니다. 기본값은 http://localhost:8000/api/v1/blogger/oauth/callback",
+        help: "보통 `http://localhost:8000/api/v1/blogger/oauth/callback` 입니다.",
         required: true,
       },
     ],
   },
   {
-    title: "스케줄과 운영 최적화",
-    description: "자동 주제 발굴 시간과 무료 API 보호용 제한을 관리합니다.",
+    title: "운영 옵션",
+    description: "자동 주제 발굴 시간과 무료 티어 보호 제한만 최소한으로 관리합니다. 공개 게시 여부는 글 목록에서 직접 결정합니다.",
     fields: [
       {
         key: "schedule_enabled",
         label: "자동 스케줄 사용",
-        help: "매일 자동 주제 발굴을 실행할지 결정합니다.",
+        help: "매일 자동 주제 발굴을 돌릴지 결정합니다.",
         options: [
           { value: "true", label: "사용" },
           { value: "false", label: "사용 안 함" },
@@ -235,8 +217,8 @@ const sections: SectionConfig[] = [
       },
       {
         key: "schedule_time",
-        label: "실행 시간",
-        help: "HH:MM 형식, 예: 09:00",
+        label: "스케줄 시간",
+        help: "형식: HH:MM",
       },
       {
         key: "schedule_timezone",
@@ -257,14 +239,14 @@ const sections: SectionConfig[] = [
       },
       {
         key: "pipeline_stop_after",
-        label: "파이프라인 중간 종료 단계",
-        help: "테스트용 옵션입니다. 운영 중에는 none을 권장합니다.",
+        label: "테스트용 중간 종료 단계",
+        help: "운영 중에는 `전체 실행`을 권장합니다.",
         options: [
           { value: "none", label: "전체 실행" },
-          { value: "GENERATING_ARTICLE", label: "본문 생성 후 중지" },
-          { value: "GENERATING_IMAGE_PROMPT", label: "이미지 프롬프트 후 중지" },
-          { value: "GENERATING_IMAGE", label: "이미지 생성 후 중지" },
-          { value: "ASSEMBLING_HTML", label: "HTML 조립 후 중지" },
+          { value: "GENERATING_ARTICLE", label: "본문 생성까지만" },
+          { value: "GENERATING_IMAGE_PROMPT", label: "이미지 프롬프트까지만" },
+          { value: "GENERATING_IMAGE", label: "이미지 생성까지만" },
+          { value: "ASSEMBLING_HTML", label: "HTML 조립까지만" },
         ],
       },
     ],
@@ -308,23 +290,23 @@ export function SettingsForm({ settings }: { settings: SettingItem[] }) {
     <form onSubmit={onSubmit} className="space-y-6">
       <Card>
         <CardHeader>
-          <CardDescription>빠른 체크</CardDescription>
-          <CardTitle>이 화면에서 꼭 필요한 것만 먼저 입력하세요</CardTitle>
+          <CardDescription>빠른 안내</CardDescription>
+          <CardTitle>먼저 이것만 입력하면 됩니다</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-3 text-sm leading-7 text-slate-700 lg:grid-cols-2">
+        <CardContent className="grid gap-3 text-sm leading-7 text-slate-700 lg:grid-cols-3">
           <div className="rounded-[24px] border border-ink/10 bg-white/70 px-4 py-4">
             <p className="font-semibold text-ink">필수</p>
-            <p className="mt-1">OpenAI API Key, Google OAuth Client ID / Secret, Redirect URI, 공개 이미지 방식</p>
+            <p className="mt-1">
+              OpenAI API Key, Google OAuth Client ID/Secret, Redirect URI, 공개 이미지 저장소
+            </p>
           </div>
           <div className="rounded-[24px] border border-ink/10 bg-white/70 px-4 py-4">
             <p className="font-semibold text-ink">선택</p>
-            <p className="mt-1">Gemini API Key는 자동 주제 발굴을 쓸 때만 필요합니다.</p>
+            <p className="mt-1">Gemini API Key는 자동 주제 발굴까지 쓸 때만 필요합니다.</p>
           </div>
-          <div className="rounded-[24px] border border-ink/10 bg-white/70 px-4 py-4 lg:col-span-2">
-            <p className="font-semibold text-ink">주의</p>
-            <p className="mt-1">
-              비밀 입력칸을 비워두고 저장하면 기존 DB 값은 유지됩니다. 값을 바꾸고 싶을 때만 다시 입력해 주세요.
-            </p>
+          <div className="rounded-[24px] border border-ink/10 bg-white/70 px-4 py-4">
+            <p className="font-semibold text-ink">게시 방식</p>
+            <p className="mt-1">글은 생성 후 초안으로 두고, 공개 게시 버튼을 눌러 직접 올리는 흐름을 권장합니다.</p>
           </div>
         </CardContent>
       </Card>

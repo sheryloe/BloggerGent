@@ -46,10 +46,10 @@ const usageSteps = [
   "전역 설정에서 AI 키, 이미지 공개 방식, Google OAuth 앱 정보를 입력합니다.",
   "Google 계정을 연결하고 Blogger 블로그 목록을 불러옵니다.",
   "가져온 블로그를 서비스용 블로그로 import 한 뒤 Search Console / GA4를 매핑합니다.",
-  "블로그별 워크플로 단계와 프롬프트를 확인합니다.",
+  "블로그별 워크플로 단계와 프롬프트를 확인하고, 필요하면 공용 프롬프트 템플릿도 수정합니다.",
   "주제를 수동 입력하거나 Gemini로 자동 발굴합니다.",
   "글 생성 후 HTML 미리보기와 대표 이미지를 확인합니다.",
-  "문제가 없으면 draft 또는 publish 모드로 Blogger에 반영합니다.",
+  "문제가 없으면 생성 글 목록의 공개 게시 버튼을 눌러 Blogger에 반영합니다.",
 ];
 
 const githubPagesSteps = [

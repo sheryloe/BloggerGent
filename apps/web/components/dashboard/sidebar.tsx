@@ -17,12 +17,12 @@ export function Sidebar() {
     <aside className="grid-bg hidden min-h-screen w-72 border-r border-ink/10 px-6 py-8 lg:block">
       <div className="sticky top-8 space-y-8">
         <div className="space-y-4">
-          <Badge className="w-fit bg-white/90 text-spruce">Google Blogger 반자동 SEO 운영</Badge>
+          <Badge className="w-fit bg-white/90 text-spruce">Google Blogger 반자동 운영</Badge>
           <div>
             <h1 className="font-display text-3xl font-semibold tracking-tight text-ink">Bloggent</h1>
             <p className="mt-3 max-w-xs text-sm leading-6 text-slate-600">
-              블로그마다 다른 프롬프트와 워크플로를 배정하고, 주제 발굴부터 글 생성, 이미지, Blogger 발행,
-              Google 성과 확인까지 한 화면에서 관리합니다.
+              블로그마다 다른 프롬프트와 워크플로를 배정하고, 주제 발굴부터 글 생성, 이미지, Blogger 게시와
+              성과 확인까지 한 화면에서 관리합니다.
             </p>
           </div>
         </div>

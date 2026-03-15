@@ -13,7 +13,7 @@ export function ResetGeneratedDataButton() {
   const [status, setStatus] = useState("");
 
   async function handleReset() {
-    if (!window.confirm("기존 테스트 작업, 생성 글, 이미지, 토픽을 모두 정리할까요?")) {
+    if (!window.confirm("생성 작업, 글, 이미지, 주제를 모두 정리할까요?")) {
       return;
     }
 

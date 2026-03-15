@@ -275,7 +275,7 @@ def discover_topics_and_enqueue(
     topics = upsert_topics(db, blog, payload.topics)
 
     settings_map = get_settings_map(db)
-    mode_value = publish_mode or blog.publish_mode.value or settings_map.get("default_publish_mode", "draft")
+    mode_value = publish_mode or "draft"
     mode = PublishMode(mode_value)
     stop_after_status = _resolve_stop_after(settings_map, override=stop_after)
 
@@ -469,6 +469,25 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
     html_path, html_url = save_html(slug=article.slug, html=assembled_html)
     merge_response(db, job, html_assembly_step.stage_type.value, {"file_path": html_path, "public_url": html_url})
     if _complete_early_if_needed(db, job, completed_stage=JobStatus.ASSEMBLING_HTML, blog=blog):
+        return
+
+    if job.publish_mode == PublishMode.DRAFT:
+        merge_response(
+            db,
+            job,
+            publishing_step.stage_type.value,
+            {
+                "mode": "manual_publish_pending",
+                "message": "초안 생성이 완료되었습니다. 공개 게시 버튼을 눌러 Blogger에 게시하세요.",
+            },
+        )
+        set_status(
+            db,
+            job,
+            JobStatus.COMPLETED,
+            f"{blog.name} 글 초안을 완성했습니다. 글 목록의 공개 게시 버튼에서 Blogger 게시를 진행하세요.",
+            {"article_id": article.id, "publish_action": "manual_button"},
+        )
         return
 
     set_status(db, job, JobStatus.PUBLISHING, f"{blog.name} Blogger 블로그에 게시하고 있습니다.")
