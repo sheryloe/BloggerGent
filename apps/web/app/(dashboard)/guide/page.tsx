@@ -46,10 +46,17 @@ const usageSteps = [
   "전역 설정에서 AI 키, 이미지 공개 방식, Google OAuth 앱 정보를 입력합니다.",
   "Google 계정을 연결하고 Blogger 블로그 목록을 불러옵니다.",
   "가져온 블로그를 서비스용 블로그로 import 한 뒤 Search Console / GA4를 매핑합니다.",
-  "블로그별 워크플로 단계와 프롬프트를 확인하고, 필요하면 공용 프롬프트 템플릿도 수정합니다.",
+  "블로그별 워크플로 단계와 프롬프트를 확인하고, 필요하면 프리셋 라이브러리를 초기값으로 다시 적용합니다.",
   "주제를 수동 입력하거나 Gemini로 자동 발굴합니다.",
   "글 생성 후 HTML 미리보기와 대표 이미지를 확인합니다.",
   "문제가 없으면 생성 글 목록의 공개 게시 버튼을 눌러 Blogger에 반영합니다.",
+];
+
+const seoPatchSteps = [
+  "설정 > 블로그별 워크플로 > 연결 탭에서 Blogger SEO 메타 패치 카드를 엽니다.",
+  "제공된 스니펫을 Blogger 테마 HTML의 <head> 영역에 추가합니다.",
+  "적용 후 공개 글 URL을 기준으로 head meta description / og:description / twitter:description을 검증합니다.",
+  "앱 저장값과 실제 공개 페이지 값이 모두 일치하면 검증 완료 상태가 됩니다.",
 ];
 
 const githubPagesSteps = [
@@ -169,6 +176,21 @@ export default async function GuidePage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardDescription>앱 저장값과 실제 공개 페이지 head 반영을 함께 맞춰야 합니다.</CardDescription>
+          <CardTitle>Blogger SEO 메타 패치</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3 text-sm leading-7 text-slate-700 lg:grid-cols-2">
+          {seoPatchSteps.map((step, index) => (
+            <div key={step} className="rounded-[20px] border border-ink/10 px-4 py-3">
+              <p className="font-semibold text-ink">Step {index + 1}</p>
+              <p className="mt-1">{step}</p>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

@@ -4,6 +4,7 @@ import {
   Article,
   Blog,
   BlogImportOptions,
+  BlogSeoMeta,
   BloggerConfig,
   DashboardMetrics,
   GoogleBlogOverview,
@@ -81,4 +82,8 @@ export async function getGoogleIntegrations() {
 
 export async function getGoogleBlogOverview(blogId: number, days = 28) {
   return apiFetch<GoogleBlogOverview>(`/google/blogs/${blogId}/overview?days=${days}`);
+}
+
+export async function getBlogSeoMeta(blogId: number) {
+  return apiFetch<BlogSeoMeta>(`/blogs/${blogId}/seo-meta`);
 }

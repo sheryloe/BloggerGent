@@ -109,6 +109,7 @@ export interface WorkflowStep {
   objective?: string | null;
   prompt_template: string;
   provider_hint?: string | null;
+  provider_model?: string | null;
   is_enabled: boolean;
   is_required: boolean;
   sort_order: number;
@@ -133,11 +134,16 @@ export interface Blog {
   blogger_url?: string | null;
   search_console_site_url?: string | null;
   ga4_property_id?: string | null;
+  seo_theme_patch_installed: boolean;
+  seo_theme_patch_verified_at?: string | null;
   publish_mode: PublishMode;
   is_active: boolean;
   created_at: string;
   updated_at: string;
   workflow_steps: WorkflowStep[];
+  user_visible_steps: WorkflowStep[];
+  system_steps: WorkflowStep[];
+  execution_path_labels: string[];
   selected_connections: BlogConnectionSummary;
   job_count: number;
   completed_jobs: number;
@@ -303,6 +309,30 @@ export interface PromptTemplate {
   file_name: string;
   placeholders: string[];
   content: string;
+}
+
+export interface SeoMetaStatus {
+  key: string;
+  label: string;
+  status: "idle" | "ok" | "warning";
+  actual?: string | null;
+  expected?: string | null;
+  message: string;
+}
+
+export interface BlogSeoMeta {
+  blog_id: number;
+  seo_theme_patch_installed: boolean;
+  seo_theme_patch_verified: boolean;
+  seo_theme_patch_verified_at?: string | null;
+  verification_target_url?: string | null;
+  expected_meta_description?: string | null;
+  patch_snippet: string;
+  patch_steps: string[];
+  warnings: string[];
+  head_meta_description_status: SeoMetaStatus;
+  og_description_status: SeoMetaStatus;
+  twitter_description_status: SeoMetaStatus;
 }
 
 export interface BloggerPageview {

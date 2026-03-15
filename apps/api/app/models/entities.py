@@ -74,6 +74,8 @@ class Blog(TimestampMixin, Base):
     blogger_url: Mapped[str | None] = mapped_column(sa.String(500), nullable=True)
     search_console_site_url: Mapped[str | None] = mapped_column(sa.String(500), nullable=True)
     ga4_property_id: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
+    seo_theme_patch_installed: Mapped[bool] = mapped_column(sa.Boolean, default=False, nullable=False)
+    seo_theme_patch_verified_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     publish_mode: Mapped[PublishMode] = mapped_column(
         sa.Enum(PublishMode, name="publish_mode", values_callable=_enum_values),
         default=PublishMode.DRAFT,
@@ -112,6 +114,7 @@ class BlogAgentConfig(TimestampMixin, Base):
     objective: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     prompt_template: Mapped[str] = mapped_column(sa.Text, nullable=False, default="")
     provider_hint: Mapped[str | None] = mapped_column(sa.String(50), nullable=True)
+    provider_model: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
     is_enabled: Mapped[bool] = mapped_column(sa.Boolean, default=True, nullable=False)
     is_required: Mapped[bool] = mapped_column(sa.Boolean, default=False, nullable=False)
     sort_order: Mapped[int] = mapped_column(sa.Integer, default=0, nullable=False)

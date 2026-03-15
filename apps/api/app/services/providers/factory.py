@@ -26,24 +26,24 @@ def get_runtime_config(db: Session) -> RuntimeProviderConfig:
     )
 
 
-def get_topic_provider(db: Session):
+def get_topic_provider(db: Session, model_override: str | None = None):
     runtime = get_runtime_config(db)
     if runtime.provider_mode == "live" and runtime.gemini_api_key:
-        return GeminiTopicDiscoveryProvider(api_key=runtime.gemini_api_key, model=runtime.gemini_model)
+        return GeminiTopicDiscoveryProvider(api_key=runtime.gemini_api_key, model=model_override or runtime.gemini_model)
     return MockTopicDiscoveryProvider()
 
 
-def get_article_provider(db: Session):
+def get_article_provider(db: Session, model_override: str | None = None):
     runtime = get_runtime_config(db)
     if runtime.provider_mode == "live" and runtime.openai_api_key:
-        return OpenAIArticleProvider(api_key=runtime.openai_api_key, model=runtime.openai_text_model)
+        return OpenAIArticleProvider(api_key=runtime.openai_api_key, model=model_override or runtime.openai_text_model)
     return MockArticleProvider()
 
 
-def get_image_provider(db: Session):
+def get_image_provider(db: Session, model_override: str | None = None):
     runtime = get_runtime_config(db)
     if runtime.provider_mode == "live" and runtime.openai_api_key:
-        return OpenAIImageProvider(api_key=runtime.openai_api_key, model=runtime.openai_image_model)
+        return OpenAIImageProvider(api_key=runtime.openai_api_key, model=model_override or runtime.openai_image_model)
     return MockImageProvider()
 
 

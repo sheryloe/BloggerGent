@@ -21,6 +21,7 @@ class WorkflowStageDefinition:
     is_required: bool
     removable: bool
     provider_hint: str | None
+    provider_model: str | None
     default_name: str
     default_role_name: str
     default_objective: str
@@ -34,6 +35,7 @@ class WorkflowStepBlueprint:
     objective: str
     prompt_file: str | None
     provider_hint: str | None
+    provider_model: str | None
     is_enabled: bool
     sort_order: int
 
@@ -91,6 +93,18 @@ WORKFLOW_DEPENDENCIES: tuple[tuple[WorkflowStageType, WorkflowStageType], ...] =
     (WorkflowStageType.HTML_ASSEMBLY, WorkflowStageType.PUBLISHING),
 )
 
+USER_VISIBLE_STAGE_ORDER: tuple[WorkflowStageType, ...] = (
+    WorkflowStageType.TOPIC_DISCOVERY,
+    WorkflowStageType.ARTICLE_GENERATION,
+    WorkflowStageType.IMAGE_PROMPT_GENERATION,
+)
+
+SYSTEM_STAGE_ORDER: tuple[WorkflowStageType, ...] = (
+    WorkflowStageType.IMAGE_GENERATION,
+    WorkflowStageType.HTML_ASSEMBLY,
+    WorkflowStageType.PUBLISHING,
+)
+
 STAGE_DEFINITIONS: dict[WorkflowStageType, WorkflowStageDefinition] = {
     WorkflowStageType.TOPIC_DISCOVERY: WorkflowStageDefinition(
         stage_type=WorkflowStageType.TOPIC_DISCOVERY,
@@ -99,42 +113,46 @@ STAGE_DEFINITIONS: dict[WorkflowStageType, WorkflowStageDefinition] = {
         is_required=False,
         removable=True,
         provider_hint="gemini",
+        provider_model="gemini-2.5-flash",
         default_name="주제 발굴 에이전트",
         default_role_name="Trend Discovery Agent",
         default_objective="국가와 독자층에 맞는 검색 수요 주제를 찾아 작업 대기열을 채웁니다.",
     ),
     WorkflowStageType.ARTICLE_GENERATION: WorkflowStageDefinition(
         stage_type=WorkflowStageType.ARTICLE_GENERATION,
-        label="본문 생성",
+        label="글쓰기 패키지",
         prompt_enabled=True,
         is_required=True,
         removable=False,
         provider_hint="openai_text",
-        default_name="본문 생성 에이전트",
-        default_role_name="SEO Article Agent",
-        default_objective="SEO 중심 HTML 본문과 FAQ, 기본 이미지 방향을 생성합니다.",
+        provider_model="gpt-4.1-mini",
+        default_name="글쓰기 패키지 에이전트",
+        default_role_name="SEO Writing Package Agent",
+        default_objective="제목, 검색 설명, 라벨, 슬러그, 본문, FAQ, 기본 이미지 프롬프트를 한 번에 생성합니다.",
     ),
     WorkflowStageType.IMAGE_PROMPT_GENERATION: WorkflowStageDefinition(
         stage_type=WorkflowStageType.IMAGE_PROMPT_GENERATION,
-        label="이미지 프롬프트",
+        label="이미지 프롬프트 정교화",
         prompt_enabled=True,
         is_required=False,
         removable=True,
         provider_hint="openai_text",
-        default_name="이미지 프롬프트 에이전트",
-        default_role_name="Image Prompt Agent",
-        default_objective="본문을 바탕으로 고해상도 콜라주 이미지 프롬프트를 다시 설계합니다.",
+        provider_model="gpt-4.1-mini",
+        default_name="이미지 프롬프트 정교화 에이전트",
+        default_role_name="Image Prompt Refinement Agent",
+        default_objective="글쓰기 패키지 결과에 포함된 기본 이미지 프롬프트를 더 세밀한 장면 지시로 다듬습니다.",
     ),
     WorkflowStageType.RELATED_POSTS: WorkflowStageDefinition(
         stage_type=WorkflowStageType.RELATED_POSTS,
         label="관련 글 구성",
         prompt_enabled=False,
         is_required=False,
-        removable=True,
+        removable=False,
         provider_hint=None,
+        provider_model=None,
         default_name="관련 글 시스템 단계",
         default_role_name="System Related Posts Step",
-        default_objective="레이블과 유사도를 기준으로 관련 글을 찾아 HTML 카드 섹션을 만듭니다.",
+        default_objective="관련 글 후보를 찾아 HTML 조립 단계에 연결합니다.",
     ),
     WorkflowStageType.IMAGE_GENERATION: WorkflowStageDefinition(
         stage_type=WorkflowStageType.IMAGE_GENERATION,
@@ -143,6 +161,7 @@ STAGE_DEFINITIONS: dict[WorkflowStageType, WorkflowStageDefinition] = {
         is_required=True,
         removable=False,
         provider_hint="openai_image",
+        provider_model="dall-e-3",
         default_name="이미지 생성 시스템 단계",
         default_role_name="System Image Generation Step",
         default_objective="이미지 프롬프트를 기반으로 대표 이미지를 생성합니다.",
@@ -154,20 +173,22 @@ STAGE_DEFINITIONS: dict[WorkflowStageType, WorkflowStageDefinition] = {
         is_required=True,
         removable=False,
         provider_hint=None,
+        provider_model=None,
         default_name="HTML 조립 시스템 단계",
         default_role_name="System HTML Assembly Step",
         default_objective="대표 이미지, 본문, FAQ, 관련 글을 조합해 최종 HTML을 완성합니다.",
     ),
     WorkflowStageType.PUBLISHING: WorkflowStageDefinition(
         stage_type=WorkflowStageType.PUBLISHING,
-        label="Blogger 발행",
+        label="게시 대기",
         prompt_enabled=False,
         is_required=True,
         removable=False,
         provider_hint="blogger",
-        default_name="Blogger 발행 시스템 단계",
+        provider_model="blogger-v3",
+        default_name="게시 대기 시스템 단계",
         default_role_name="System Publishing Step",
-        default_objective="최종 HTML을 Blogger에 draft 또는 publish 모드로 게시합니다.",
+        default_objective="최종 HTML을 게시 가능한 상태로 준비하고, 실제 공개 게시 입력을 기다립니다.",
     ),
 }
 
@@ -203,27 +224,30 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="외국인에게 인기 있는 한국 여행 검색 수요 주제를 찾습니다.",
                 prompt_file="travel_topic_discovery.md",
                 provider_hint="gemini",
+                provider_model="gemini-2.5-flash",
                 is_enabled=True,
                 sort_order=10,
             ),
             WorkflowStepBlueprint(
                 stage_type=WorkflowStageType.ARTICLE_GENERATION,
-                name="SEO 여행 글 생성 에이전트",
+                name="SEO 글쓰기 패키지 에이전트",
                 role_name="Donggri, a local Korea travel insider",
-                objective="한국 여행 검색 유입과 체류 시간을 높이는 Blogger용 글을 생성합니다.",
+                objective="여행/축제/행사형 제목, 검색 설명, 태그, 본문, FAQ, 이미지 프롬프트를 한 번에 생성합니다.",
                 prompt_file="travel_article_generation.md",
                 provider_hint="openai_text",
+                provider_model="gpt-4.1-mini",
                 is_enabled=True,
                 sort_order=20,
             ),
             WorkflowStepBlueprint(
                 stage_type=WorkflowStageType.IMAGE_PROMPT_GENERATION,
-                name="여행 콜라주 프롬프트 에이전트",
+                name="여행 이미지 프롬프트 정교화 에이전트",
                 role_name="Korea Travel Visual Director",
-                objective="여행 주제에 맞는 고해상도 대표 이미지 프롬프트를 설계합니다.",
+                objective="여행 주제에 맞는 8컷 콜라주 대표 이미지 프롬프트를 더 정교하게 다듬습니다.",
                 prompt_file="travel_collage_prompt.md",
                 provider_hint="openai_text",
-                is_enabled=True,
+                provider_model="gpt-4.1-mini",
+                is_enabled=False,
                 sort_order=30,
             ),
             WorkflowStepBlueprint(
@@ -233,6 +257,7 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="유사한 여행 글을 연결합니다.",
                 prompt_file=None,
                 provider_hint=None,
+                provider_model=None,
                 is_enabled=True,
                 sort_order=40,
             ),
@@ -243,6 +268,7 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="여행 대표 이미지를 생성합니다.",
                 prompt_file=None,
                 provider_hint="openai_image",
+                provider_model="dall-e-3",
                 is_enabled=True,
                 sort_order=50,
             ),
@@ -253,16 +279,18 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="본문과 대표 이미지를 최종 게시 형식으로 조립합니다.",
                 prompt_file=None,
                 provider_hint=None,
+                provider_model=None,
                 is_enabled=True,
                 sort_order=60,
             ),
             WorkflowStepBlueprint(
                 stage_type=WorkflowStageType.PUBLISHING,
-                name="Blogger 발행 시스템 단계",
+                name="게시 대기 시스템 단계",
                 role_name="System Publishing Step",
-                objective="최종 글을 Blogger에 게시합니다.",
+                objective="최종 글을 게시 가능한 상태로 준비하고, 공개 게시 버튼 입력을 기다립니다.",
                 prompt_file=None,
                 provider_hint="blogger",
+                provider_model="blogger-v3",
                 is_enabled=True,
                 sort_order=70,
             ),
@@ -288,27 +316,30 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="글로벌 검색 수요가 높은 세계 미스터리 주제를 찾습니다.",
                 prompt_file="mystery_topic_discovery.md",
                 provider_hint="gemini",
+                provider_model="gemini-2.5-flash",
                 is_enabled=True,
                 sort_order=10,
             ),
             WorkflowStepBlueprint(
                 stage_type=WorkflowStageType.ARTICLE_GENERATION,
-                name="미스터리 글 생성 에이전트",
+                name="미스터리 글쓰기 패키지 에이전트",
                 role_name="Investigative documentary storyteller",
-                objective="검색성과 몰입감을 동시에 노리는 미스터리 글을 생성합니다.",
+                objective="제목, 검색 설명, 태그, 본문, FAQ, 이미지 프롬프트까지 포함한 미스터리 글쓰기 패키지를 생성합니다.",
                 prompt_file="mystery_article_generation.md",
                 provider_hint="openai_text",
+                provider_model="gpt-4.1-mini",
                 is_enabled=True,
                 sort_order=20,
             ),
             WorkflowStepBlueprint(
                 stage_type=WorkflowStageType.IMAGE_PROMPT_GENERATION,
-                name="미스터리 이미지 프롬프트 에이전트",
+                name="미스터리 이미지 프롬프트 정교화 에이전트",
                 role_name="Documentary cover prompt designer",
-                objective="사건 분위기에 맞는 다큐 스타일 대표 이미지 프롬프트를 설계합니다.",
+                objective="사건 분위기에 맞는 다큐 스타일 이미지 프롬프트를 더 정교하게 다듬습니다.",
                 prompt_file="mystery_collage_prompt.md",
                 provider_hint="openai_text",
-                is_enabled=True,
+                provider_model="gpt-4.1-mini",
+                is_enabled=False,
                 sort_order=30,
             ),
             WorkflowStepBlueprint(
@@ -318,6 +349,7 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="연관 미스터리 글을 연결합니다.",
                 prompt_file=None,
                 provider_hint=None,
+                provider_model=None,
                 is_enabled=True,
                 sort_order=40,
             ),
@@ -328,6 +360,7 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="대표 이미지를 생성합니다.",
                 prompt_file=None,
                 provider_hint="openai_image",
+                provider_model="dall-e-3",
                 is_enabled=True,
                 sort_order=50,
             ),
@@ -338,16 +371,18 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="본문과 대표 이미지를 최종 게시 형식으로 조립합니다.",
                 prompt_file=None,
                 provider_hint=None,
+                provider_model=None,
                 is_enabled=True,
                 sort_order=60,
             ),
             WorkflowStepBlueprint(
                 stage_type=WorkflowStageType.PUBLISHING,
-                name="Blogger 발행 시스템 단계",
+                name="게시 대기 시스템 단계",
                 role_name="System Publishing Step",
-                objective="최종 글을 Blogger에 게시합니다.",
+                objective="최종 글을 게시 가능한 상태로 준비하고, 공개 게시 버튼 입력을 기다립니다.",
                 prompt_file=None,
                 provider_hint="blogger",
+                provider_model="blogger-v3",
                 is_enabled=True,
                 sort_order=70,
             ),
@@ -370,27 +405,30 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="블로그 주제에 맞는 검색 수요 키워드를 발굴합니다.",
                 prompt_file="topic_discovery.md",
                 provider_hint="gemini",
+                provider_model="gemini-2.5-flash",
                 is_enabled=True,
                 sort_order=10,
             ),
             WorkflowStepBlueprint(
                 stage_type=WorkflowStageType.ARTICLE_GENERATION,
-                name="기본 본문 생성 에이전트",
+                name="기본 글쓰기 패키지 에이전트",
                 role_name="General SEO Article Agent",
-                objective="선택한 블로그 주제에 맞는 기본 SEO 글을 생성합니다.",
+                objective="선택한 블로그 주제에 맞는 제목, 검색 설명, 본문, FAQ, 이미지 프롬프트를 생성합니다.",
                 prompt_file="article_generation.md",
                 provider_hint="openai_text",
+                provider_model="gpt-4.1-mini",
                 is_enabled=True,
                 sort_order=20,
             ),
             WorkflowStepBlueprint(
                 stage_type=WorkflowStageType.IMAGE_PROMPT_GENERATION,
-                name="기본 이미지 프롬프트 에이전트",
+                name="기본 이미지 프롬프트 정교화 에이전트",
                 role_name="General Image Prompt Agent",
-                objective="본문 기반 대표 이미지 프롬프트를 정리합니다.",
+                objective="본문 기반 대표 이미지 프롬프트를 추가로 정교화합니다.",
                 prompt_file="collage_prompt.md",
                 provider_hint="openai_text",
-                is_enabled=True,
+                provider_model="gpt-4.1-mini",
+                is_enabled=False,
                 sort_order=30,
             ),
             WorkflowStepBlueprint(
@@ -400,6 +438,7 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="관련 글을 연결합니다.",
                 prompt_file=None,
                 provider_hint=None,
+                provider_model=None,
                 is_enabled=True,
                 sort_order=40,
             ),
@@ -410,6 +449,7 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="대표 이미지를 생성합니다.",
                 prompt_file=None,
                 provider_hint="openai_image",
+                provider_model="dall-e-3",
                 is_enabled=True,
                 sort_order=50,
             ),
@@ -420,16 +460,18 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="최종 HTML을 조립합니다.",
                 prompt_file=None,
                 provider_hint=None,
+                provider_model=None,
                 is_enabled=True,
                 sort_order=60,
             ),
             WorkflowStepBlueprint(
                 stage_type=WorkflowStageType.PUBLISHING,
-                name="Blogger 발행 시스템 단계",
+                name="게시 대기 시스템 단계",
                 role_name="System Publishing Step",
-                objective="최종 글을 Blogger에 게시합니다.",
+                objective="최종 글을 게시 가능한 상태로 준비하고, 공개 게시 버튼 입력을 기다립니다.",
                 prompt_file=None,
                 provider_hint="blogger",
+                provider_model="blogger-v3",
                 is_enabled=True,
                 sort_order=70,
             ),
@@ -511,6 +553,57 @@ def stage_label(stage_type: WorkflowStageType) -> str:
     return STAGE_DEFINITIONS[stage_type].label
 
 
+def user_visible_stage_types() -> tuple[WorkflowStageType, ...]:
+    return USER_VISIBLE_STAGE_ORDER
+
+
+def system_stage_types() -> tuple[WorkflowStageType, ...]:
+    return SYSTEM_STAGE_ORDER
+
+
+def list_user_visible_steps(blog: Blog) -> list[BlogAgentConfig]:
+    visible_types = set(USER_VISIBLE_STAGE_ORDER)
+    return [step for step in list_workflow_steps(blog) if step.stage_type in visible_types]
+
+
+def list_system_steps(blog: Blog) -> list[BlogAgentConfig]:
+    system_types = set(SYSTEM_STAGE_ORDER)
+    return [step for step in list_workflow_steps(blog) if step.stage_type in system_types]
+
+
+def _get_enabled_step_state(blog: Blog, stage_type: WorkflowStageType) -> bool:
+    step = get_workflow_step(blog, stage_type)
+    return bool(step and step.is_enabled)
+
+
+def get_execution_path_labels(blog: Blog) -> list[str]:
+    steps = list_workflow_steps(blog)
+    labels: list[str] = []
+    if get_workflow_step(blog, WorkflowStageType.TOPIC_DISCOVERY) and _get_enabled_step_state(blog, WorkflowStageType.TOPIC_DISCOVERY):
+        labels.append("1. 주제 발굴")
+        offset = 2
+    else:
+        offset = 1
+
+    labels.append(f"{offset}. 글쓰기 패키지")
+    next_index = offset + 1
+
+    if get_workflow_step(blog, WorkflowStageType.IMAGE_PROMPT_GENERATION) and _get_enabled_step_state(
+        blog, WorkflowStageType.IMAGE_PROMPT_GENERATION
+    ):
+        labels.append(f"{next_index}. 이미지 프롬프트 정교화")
+        next_index += 1
+
+    labels.extend(
+        [
+            f"{next_index}. 이미지 생성",
+            f"{next_index + 1}. HTML 조립",
+            f"{next_index + 2}. 게시 대기",
+        ]
+    )
+    return labels
+
+
 def _stage_rank(stage_type: WorkflowStageType) -> int:
     return CANONICAL_STAGE_ORDER.index(stage_type)
 
@@ -541,6 +634,7 @@ def _build_step_defaults(profile_key: str, stage_type: WorkflowStageType) -> dic
             "objective": blueprint.objective,
             "prompt_template": _load_prompt_file(blueprint.prompt_file),
             "provider_hint": blueprint.provider_hint,
+            "provider_model": blueprint.provider_model,
             "is_enabled": blueprint.is_enabled,
             "is_required": definition.is_required,
             "sort_order": blueprint.sort_order,
@@ -554,6 +648,7 @@ def _build_step_defaults(profile_key: str, stage_type: WorkflowStageType) -> dic
         "objective": definition.default_objective,
         "prompt_template": "",
         "provider_hint": definition.provider_hint,
+        "provider_model": definition.provider_model,
         "is_enabled": definition.is_required,
         "is_required": definition.is_required,
         "sort_order": (_stage_rank(stage_type) + 1) * 10,
@@ -967,6 +1062,7 @@ def update_blog_agent(
     objective: str | None,
     prompt_template: str,
     provider_hint: str | None,
+    provider_model: str | None,
     is_enabled: bool,
 ) -> BlogAgentConfig:
     if agent.is_required and not is_enabled:
@@ -977,12 +1073,74 @@ def update_blog_agent(
     agent.objective = objective
     agent.prompt_template = prompt_template.strip() + ("\n" if prompt_template.strip() else "")
     agent.provider_hint = provider_hint
+    agent.provider_model = (provider_model or "").strip() or None
     agent.is_enabled = is_enabled if not agent.is_required else True
     validate_workflow_steps(list(agent.blog.agent_configs))
     db.add(agent)
     db.commit()
     db.refresh(agent)
     return agent
+
+
+def update_blog_seo_meta(
+    db: Session,
+    blog: Blog,
+    *,
+    seo_theme_patch_installed: bool,
+) -> Blog:
+    blog.seo_theme_patch_installed = seo_theme_patch_installed
+    if not seo_theme_patch_installed:
+        blog.seo_theme_patch_verified_at = None
+    db.add(blog)
+    db.commit()
+    db.refresh(blog)
+    return blog
+
+
+def mark_blog_seo_meta_verified(db: Session, blog: Blog, *, verified_at) -> Blog:
+    blog.seo_theme_patch_verified_at = verified_at
+    db.add(blog)
+    db.commit()
+    db.refresh(blog)
+    return blog
+
+
+def clear_blog_seo_meta_verified(db: Session, blog: Blog) -> Blog:
+    blog.seo_theme_patch_verified_at = None
+    db.add(blog)
+    db.commit()
+    db.refresh(blog)
+    return blog
+
+
+def apply_profile_preset(
+    db: Session,
+    blog: Blog,
+    *,
+    overwrite_prompts: bool,
+) -> list[BlogAgentConfig]:
+    profile_key = _resolve_profile_key(blog)
+    blueprint_map = _workflow_blueprint_map(profile_key)
+
+    for step in blog.agent_configs:
+        definition = get_stage_definition(step.stage_type)
+        blueprint = blueprint_map.get(step.stage_type)
+        step.name = blueprint.name if blueprint else definition.default_name
+        step.role_name = blueprint.role_name if blueprint else definition.default_role_name
+        step.objective = blueprint.objective if blueprint else definition.default_objective
+        step.provider_hint = blueprint.provider_hint if blueprint else definition.provider_hint
+        step.provider_model = blueprint.provider_model if blueprint else definition.provider_model
+        step.is_enabled = blueprint.is_enabled if blueprint else definition.is_required
+        step.is_required = definition.is_required
+        if overwrite_prompts and blueprint:
+            step.prompt_template = _load_prompt_file(blueprint.prompt_file)
+        db.add(step)
+
+    _normalize_workflow_sort_order(list(blog.agent_configs))
+    validate_workflow_steps(list(blog.agent_configs))
+    db.commit()
+    refreshed = get_blog(db, blog.id) or blog
+    return list_workflow_steps(refreshed)
 
 
 def create_workflow_step(db: Session, blog: Blog, stage_type: WorkflowStageType) -> BlogAgentConfig:

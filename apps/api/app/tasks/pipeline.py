@@ -24,14 +24,13 @@ from app.services.job_service import (
 from app.services.providers.base import ProviderRuntimeError
 from app.services.providers.factory import (
     get_article_provider,
-    get_blogger_provider,
     get_image_provider,
     get_runtime_config,
     get_topic_provider,
 )
 from app.services.related_posts import find_related_articles
 from app.services.settings_service import get_settings_map
-from app.services.storage_service import is_private_asset_url, save_html, save_public_binary
+from app.services.storage_service import save_html, save_public_binary
 from app.services.topic_service import upsert_topics
 
 GEMINI_TOPIC_REQUEST_STAGE = "GEMINI_TOPIC_REQUEST"
@@ -268,7 +267,7 @@ def discover_topics_and_enqueue(
         raise ValueError(f"Blog {blog_id} not found")
 
     topic_step = _require_enabled_step(blog, WorkflowStageType.TOPIC_DISCOVERY)
-    provider = get_topic_provider(db)
+    provider = get_topic_provider(db, model_override=topic_step.provider_model)
     prompt = render_agent_prompt(blog, topic_step)
     _enforce_gemini_topic_limits(db, blog=blog)
     payload, raw_response = provider.discover_topics(prompt)
@@ -333,10 +332,8 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
     image_prompt_step = _get_optional_enabled_step(blog, WorkflowStageType.IMAGE_PROMPT_GENERATION)
     related_posts_step = _get_optional_enabled_step(blog, WorkflowStageType.RELATED_POSTS)
 
-    article_provider = get_article_provider(db)
-    image_provider = get_image_provider(db)
-    blogger_provider = get_blogger_provider(db, blog)
-
+    article_provider = get_article_provider(db, model_override=article_step.provider_model)
+    image_provider = get_image_provider(db, model_override=image_generation_step.provider_model)
     set_status(db, job, JobStatus.GENERATING_ARTICLE, f"{blog.name} 블로그용 본문을 생성하고 있습니다.")
     rendered_article_prompt = render_agent_prompt(blog, article_step, keyword=job.keyword_snapshot)
     merge_prompt(db, job, article_step.stage_type.value, rendered_article_prompt)
@@ -369,7 +366,10 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
             ),
         )
         merge_prompt(db, job, image_prompt_step.stage_type.value, rendered_visual_prompt_request)
-        rendered_visual_prompt, visual_prompt_raw = article_provider.generate_visual_prompt(rendered_visual_prompt_request)
+        prompt_refinement_provider = get_article_provider(db, model_override=image_prompt_step.provider_model)
+        rendered_visual_prompt, visual_prompt_raw = prompt_refinement_provider.generate_visual_prompt(
+            rendered_visual_prompt_request
+        )
         merge_response(
             db,
             job,
@@ -471,50 +471,22 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
     if _complete_early_if_needed(db, job, completed_stage=JobStatus.ASSEMBLING_HTML, blog=blog):
         return
 
-    if job.publish_mode == PublishMode.DRAFT:
-        merge_response(
-            db,
-            job,
-            publishing_step.stage_type.value,
-            {
-                "mode": "manual_publish_pending",
-                "message": "초안 생성이 완료되었습니다. 공개 게시 버튼을 눌러 Blogger에 게시하세요.",
-            },
-        )
-        set_status(
-            db,
-            job,
-            JobStatus.COMPLETED,
-            f"{blog.name} 글 초안을 완성했습니다. 글 목록의 공개 게시 버튼에서 Blogger 게시를 진행하세요.",
-            {"article_id": article.id, "publish_action": "manual_button"},
-        )
-        return
-
-    set_status(db, job, JobStatus.PUBLISHING, f"{blog.name} Blogger 블로그에 게시하고 있습니다.")
-    if getattr(blogger_provider, "access_token", "") and is_private_asset_url(public_url):
-        raise ProviderRuntimeError(
-            provider="public_image_delivery",
-            status_code=422,
-            message="Public image URL is still private, so Blogger publishing cannot proceed.",
-            detail="Configure public_asset_base_url or Cloudinary so the hero image can be fetched from a public URL.",
-        )
-    publish_summary, publish_raw = blogger_provider.publish(
-        title=article.title,
-        content=assembled_html,
-        labels=article.labels,
-        meta_description=article.meta_description,
-        slug=article.slug,
-        publish_mode=job.publish_mode,
+    merge_response(
+        db,
+        job,
+        publishing_step.stage_type.value,
+        {
+            "mode": "manual_publish_pending",
+            "publish_mode_requested": job.publish_mode.value,
+            "message": "초안 생성이 완료되었습니다. 생성 글 목록의 공개 게시 버튼으로 최종 게시를 진행하세요.",
+        },
     )
-    _upsert_blogger_post(db, job_id=job.id, blog_id=blog.id, article_id=article.id, summary=publish_summary, raw_payload=publish_raw)
-    merge_response(db, job, publishing_step.stage_type.value, publish_raw)
-
     set_status(
         db,
         job,
         JobStatus.COMPLETED,
-        f"{blog.name} 파이프라인이 정상적으로 완료되었습니다.",
-        {"published_url": publish_summary.get("url", ""), "published_at": publish_summary.get("published")},
+        f"{blog.name} 글 초안을 완성했습니다. 생성 글 목록의 공개 게시 버튼에서 최종 게시를 진행하세요.",
+        {"article_id": article.id, "publish_action": "manual_button"},
     )
 
 

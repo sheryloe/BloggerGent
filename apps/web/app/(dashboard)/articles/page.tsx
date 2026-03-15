@@ -67,7 +67,7 @@ export default async function ArticlesPage({
                         <p className="mt-1 break-words font-semibold">{article.title}</p>
                       </div>
                       <Badge className={selected ? "border-white/30 bg-white/10 text-white" : "bg-ink text-white"}>
-                        {published ? "공개" : drafted ? "초안" : "미게시"}
+                        {published ? "공개" : drafted ? "초안" : "게시 대기"}
                       </Badge>
                     </div>
                   </Link>
@@ -133,7 +133,7 @@ export default async function ArticlesPage({
                         {selectedArticle.blogger_post.is_draft ? "Blogger 초안 보기" : "공개 글 보기"}
                       </a>
                     ) : (
-                      <p className="text-sm text-slate-600">아직 Blogger에 공개 게시되지 않았습니다. 아래 버튼에서 직접 게시할 수 있습니다.</p>
+                      <p className="text-sm text-slate-600">아직 공개 게시되지 않았습니다. HTML과 대표 이미지를 확인한 뒤 아래 버튼에서 직접 게시하세요.</p>
                     )}
                     <PublishArticleButton
                       articleId={selectedArticle.id}

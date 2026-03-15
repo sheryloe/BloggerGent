@@ -70,7 +70,7 @@ export default async function JobsPage({
         </Card>
         <Card>
           <CardContent className="p-5">
-            <p className="text-xs uppercase tracking-[0.16em] text-slate-500">게시 대기</p>
+            <p className="text-xs uppercase tracking-[0.16em] text-slate-500">공개 게시 대기</p>
             <p className="mt-2 text-3xl font-semibold text-ink">{pendingPublish}</p>
           </CardContent>
         </Card>
@@ -188,7 +188,7 @@ export default async function JobsPage({
                         </a>
                       </>
                     ) : selectedJob.article ? (
-                      <p>HTML과 이미지 생성이 끝났습니다. 글 목록의 공개 게시 버튼에서 최종 게시하세요.</p>
+                      <p>HTML과 이미지 생성이 끝났습니다. 생성 글 목록의 공개 게시 버튼에서 최종 게시하세요.</p>
                     ) : (
                       <p>아직 게시 가능한 글이 없습니다.</p>
                     )}

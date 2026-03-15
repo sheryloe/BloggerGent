@@ -15,22 +15,29 @@ from app.schemas.api import (
     BlogImportOptionsRead,
     BlogImportRequest,
     BlogRead,
+    BlogSeoMetaRead,
+    BlogSeoMetaUpdate,
     BlogUpdate,
+    BlogPresetApplyRequest,
     DiscoveryRunResponse,
     WorkflowStepCreate,
     WorkflowStepReorder,
 )
 from app.services.blog_service import (
+    apply_profile_preset,
     create_workflow_step,
     delete_workflow_step,
     get_agent_config,
     get_blog,
     get_blog_by_remote_id,
     get_blog_summary_map,
+    get_execution_path_labels,
     get_missing_optional_stage_types,
     import_blog_from_remote,
     list_blog_profiles,
     list_blogs,
+    list_system_steps,
+    list_user_visible_steps,
     list_workflow_steps,
     reorder_workflow_steps,
     stage_is_removable,
@@ -40,7 +47,9 @@ from app.services.blog_service import (
     update_blog,
     update_blog_agent,
     update_blog_connections,
+    update_blog_seo_meta,
 )
+from app.services.blog_seo_meta_service import get_blog_seo_meta_overview, verify_blog_seo_meta
 from app.services.blogger_oauth_service import BloggerOAuthError, list_blogger_blogs
 from app.services.google_reporting_service import list_analytics_properties, list_search_console_sites
 from app.services.providers.base import ProviderRuntimeError
@@ -84,6 +93,7 @@ def _serialize_workflow_step(step: BlogAgentConfig) -> dict:
         "objective": step.objective,
         "prompt_template": step.prompt_template,
         "provider_hint": step.provider_hint,
+        "provider_model": step.provider_model,
         "is_enabled": step.is_enabled,
         "is_required": step.is_required,
         "sort_order": step.sort_order,
@@ -172,11 +182,16 @@ def _serialize_blog(blog, google_refs: dict | None = None, summary_metrics=None)
         "blogger_url": blog.blogger_url,
         "search_console_site_url": blog.search_console_site_url,
         "ga4_property_id": blog.ga4_property_id,
+        "seo_theme_patch_installed": blog.seo_theme_patch_installed,
+        "seo_theme_patch_verified_at": blog.seo_theme_patch_verified_at,
         "publish_mode": blog.publish_mode,
         "is_active": blog.is_active,
         "created_at": blog.created_at,
         "updated_at": blog.updated_at,
         "workflow_steps": [_serialize_workflow_step(step) for step in list_workflow_steps(blog)],
+        "user_visible_steps": [_serialize_workflow_step(step) for step in list_user_visible_steps(blog)],
+        "system_steps": [_serialize_workflow_step(step) for step in list_system_steps(blog)],
+        "execution_path_labels": get_execution_path_labels(blog),
         "selected_connections": _find_selected_summary_with_fallback(blog, google_refs),
         "job_count": summary.get("job_count", 0),
         "completed_jobs": summary.get("completed_jobs", 0),
@@ -324,12 +339,53 @@ def update_blog_connection_values(blog_id: int, payload: BlogConnectionUpdate, d
     )
 
 
+@router.get("/{blog_id}/seo-meta", response_model=BlogSeoMetaRead)
+def get_blog_seo_meta(blog_id: int, db: Session = Depends(get_db)) -> dict:
+    blog = get_blog(db, blog_id)
+    if not blog:
+        raise HTTPException(status_code=404, detail="Blog not found")
+    return get_blog_seo_meta_overview(db, blog)
+
+
+@router.put("/{blog_id}/seo-meta", response_model=BlogSeoMetaRead)
+def update_blog_seo_meta_status(blog_id: int, payload: BlogSeoMetaUpdate, db: Session = Depends(get_db)) -> dict:
+    blog = get_blog(db, blog_id)
+    if not blog:
+        raise HTTPException(status_code=404, detail="Blog not found")
+    updated = update_blog_seo_meta(db, blog, seo_theme_patch_installed=payload.seo_theme_patch_installed)
+    return get_blog_seo_meta_overview(db, updated)
+
+
+@router.post("/{blog_id}/seo-meta/verify", response_model=BlogSeoMetaRead)
+def verify_blog_seo_meta_status(blog_id: int, db: Session = Depends(get_db)) -> dict:
+    blog = get_blog(db, blog_id)
+    if not blog:
+        raise HTTPException(status_code=404, detail="Blog not found")
+    return verify_blog_seo_meta(db, blog)
+
+
 @router.get("/{blog_id}/workflow", response_model=list[BlogAgentConfigRead])
 def get_blog_workflow(blog_id: int, db: Session = Depends(get_db)) -> list[dict]:
     blog = get_blog(db, blog_id)
     if not blog:
         raise HTTPException(status_code=404, detail="Blog not found")
     return _workflow_list_response(blog)
+
+
+@router.post("/{blog_id}/workflow/apply-preset", response_model=list[BlogAgentConfigRead])
+def apply_blog_workflow_preset(
+    blog_id: int,
+    payload: BlogPresetApplyRequest,
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    blog = get_blog(db, blog_id)
+    if not blog:
+        raise HTTPException(status_code=404, detail="Blog not found")
+    try:
+        steps = apply_profile_preset(db, blog, overwrite_prompts=payload.overwrite_prompts)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return [_serialize_workflow_step(step) for step in steps]
 
 
 @router.post("/{blog_id}/workflow", response_model=list[BlogAgentConfigRead])

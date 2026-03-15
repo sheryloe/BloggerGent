@@ -46,7 +46,7 @@ export default async function SettingsPage({
         <CardHeader>
           <CardTitle>설정 순서</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-3 text-sm leading-7 text-slate-700 lg:grid-cols-4">
+        <CardContent className="grid gap-3 text-sm leading-7 text-slate-700 lg:grid-cols-5">
           <div className="rounded-[24px] border border-ink/10 bg-white/70 px-4 py-4">
             <p className="font-semibold text-ink">1. 전역 API 입력</p>
             <p className="mt-1">OpenAI, Gemini, 이미지 호스팅부터 먼저 저장합니다.</p>
@@ -61,7 +61,11 @@ export default async function SettingsPage({
           </div>
           <div className="rounded-[24px] border border-ink/10 bg-white/70 px-4 py-4">
             <p className="font-semibold text-ink">4. 블로그별 워크플로</p>
-            <p className="mt-1">Search Console, GA4, 프롬프트, 단계 순서를 블로그별로 정리합니다.</p>
+            <p className="mt-1">모델, 프롬프트, 단계 순서를 블로그별 워크플로에서 직접 수정합니다.</p>
+          </div>
+          <div className="rounded-[24px] border border-ink/10 bg-white/70 px-4 py-4">
+            <p className="font-semibold text-ink">5. SEO 메타 검증</p>
+            <p className="mt-1">Blogger 테마 패치를 적용하고 실제 공개 페이지 head 메타를 검증합니다.</p>
           </div>
         </CardContent>
       </Card>
@@ -78,9 +82,9 @@ export default async function SettingsPage({
 
       <section className="space-y-4">
         <div>
-          <h2 className="text-2xl font-semibold text-ink">공용 프롬프트 템플릿</h2>
+          <h2 className="text-2xl font-semibold text-ink">프리셋 라이브러리</h2>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            블로그 프로필별 기본 프롬프트입니다. 새 블로그를 가져오거나 커스텀 블로그를 만들 때 기준 템플릿으로 사용됩니다.
+            새 블로그를 가져올 때 기본값으로 쓰는 프롬프트 프리셋입니다. 실제 운영용 프롬프트 수정은 위의 블로그별 워크플로 탭에서 진행합니다.
           </p>
         </div>
         <PromptTemplatesForm prompts={prompts} />

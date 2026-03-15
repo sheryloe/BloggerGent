@@ -16,6 +16,7 @@ class BlogAgentConfigRead(BaseModel):
     objective: str | None = None
     prompt_template: str
     provider_hint: str | None = None
+    provider_model: str | None = None
     is_enabled: bool
     is_required: bool
     sort_order: int
@@ -57,11 +58,16 @@ class BlogRead(BaseModel):
     blogger_url: str | None = None
     search_console_site_url: str | None = None
     ga4_property_id: str | None = None
+    seo_theme_patch_installed: bool = False
+    seo_theme_patch_verified_at: datetime | None = None
     publish_mode: PublishMode
     is_active: bool
     created_at: datetime
     updated_at: datetime
     workflow_steps: list[BlogAgentConfigRead] = []
+    user_visible_steps: list[BlogAgentConfigRead] = []
+    system_steps: list[BlogAgentConfigRead] = []
+    execution_path_labels: list[str] = []
     selected_connections: BlogConnectionSummaryRead = Field(default_factory=BlogConnectionSummaryRead)
     job_count: int = 0
     completed_jobs: int = 0
@@ -88,6 +94,7 @@ class BlogAgentConfigUpdate(BaseModel):
     objective: str | None = None
     prompt_template: str = ""
     provider_hint: str | None = None
+    provider_model: str | None = None
     is_enabled: bool = True
 
 
@@ -125,6 +132,38 @@ class BlogConnectionOptionsRead(BaseModel):
 class BlogConnectionUpdate(BaseModel):
     search_console_site_url: str | None = None
     ga4_property_id: str | None = None
+
+
+class BlogPresetApplyRequest(BaseModel):
+    overwrite_prompts: bool = True
+
+
+class SeoMetaStatusRead(BaseModel):
+    key: str
+    label: str
+    status: str
+    actual: str | None = None
+    expected: str | None = None
+    message: str
+
+
+class BlogSeoMetaRead(BaseModel):
+    blog_id: int
+    seo_theme_patch_installed: bool = False
+    seo_theme_patch_verified: bool = False
+    seo_theme_patch_verified_at: datetime | None = None
+    verification_target_url: str | None = None
+    expected_meta_description: str | None = None
+    patch_snippet: str
+    patch_steps: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    head_meta_description_status: SeoMetaStatusRead
+    og_description_status: SeoMetaStatusRead
+    twitter_description_status: SeoMetaStatusRead
+
+
+class BlogSeoMetaUpdate(BaseModel):
+    seo_theme_patch_installed: bool
 
 
 class WorkflowStepCreate(BaseModel):

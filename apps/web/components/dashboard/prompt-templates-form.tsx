@@ -31,11 +31,11 @@ export function PromptTemplatesForm({ prompts }: { prompts: PromptTemplate[] }) 
     );
 
     if (responses.some((response) => !response.ok)) {
-      setStatus("프롬프트 저장에 실패했습니다. API 로그를 확인해 주세요.");
+      setStatus("프리셋 저장에 실패했습니다. API 로그를 확인해 주세요.");
       return;
     }
 
-    setStatus("프롬프트 템플릿을 저장했습니다.");
+    setStatus("프리셋 라이브러리를 저장했습니다.");
     startTransition(() => {
       router.refresh();
     });
@@ -67,7 +67,7 @@ export function PromptTemplatesForm({ prompts }: { prompts: PromptTemplate[] }) 
 
       <div className="flex items-center gap-3">
         <Button type="button" onClick={handleSaveAll} disabled={isPending}>
-          {isPending ? "저장 중..." : "프롬프트 템플릿 저장"}
+          {isPending ? "저장 중..." : "프리셋 라이브러리 저장"}
         </Button>
         {status ? <p className="text-sm text-slate-600">{status}</p> : null}
       </div>

@@ -41,7 +41,6 @@ def assemble_article_html(article: Article, hero_image_url: str, related_posts: 
     faq_html = render_faq_html(article.faq_section or [], section_title=faq_title)
     return f"""
 <article style="max-width:860px;margin:0 auto;padding:20px 16px;font-family:'Arial',sans-serif;color:#111827;">
-  <meta name="description" content="{article.meta_description}" />
   <header style="margin-bottom:24px;">
     <p style="font-size:12px;letter-spacing:0.18em;text-transform:uppercase;color:#fb923c;">{eyebrow}</p>
     <h1 style="font-size:40px;line-height:1.15;margin:8px 0 12px;">{article.title}</h1>
