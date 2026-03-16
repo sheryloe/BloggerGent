@@ -36,7 +36,7 @@ def create_job(
         include_topics=False,
     )
     if duplicate:
-        raise DuplicateContentError(f"중복 주제로 작업을 만들 수 없습니다. 기준값: {duplicate.value}")
+        raise DuplicateContentError(f"작업을 만들 수 없습니다. {duplicate.reason} 기준값: {duplicate.value}")
 
     job = Job(
         blog_id=blog_id,

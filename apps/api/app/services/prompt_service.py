@@ -49,7 +49,7 @@ PROMPT_DEFINITIONS: list[PromptDefinition] = [
         title="한국 여행/축제 글쓰기 패키지 프리셋",
         description="외국인 대상 한국 여행, 행사, 축제 소개 블로그용 글쓰기 패키지 프리셋입니다.",
         file_name="travel_article_generation.md",
-        placeholders=["{keyword}", "{blog_name}", "{target_audience}", "{content_brief}"],
+        placeholders=["{keyword}", "{blog_name}", "{target_audience}", "{content_brief}", "{current_date}"],
     ),
     PromptDefinition(
         key="travel_collage_prompt",
