@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from slugify import slugify
 from sqlalchemy import func, select
@@ -772,6 +774,7 @@ def get_missing_optional_stage_types(blog: Blog) -> list[WorkflowStageType]:
 
 
 def render_agent_prompt(blog: Blog, agent: BlogAgentConfig, **replacements: str) -> str:
+    local_now = datetime.now(ZoneInfo(settings.schedule_timezone))
     base_context = {
         "blog_name": blog.name,
         "blog_slug": blog.slug,
@@ -781,6 +784,7 @@ def render_agent_prompt(blog: Blog, agent: BlogAgentConfig, **replacements: str)
         "target_audience": blog.target_audience or "",
         "content_brief": blog.content_brief or "",
         "blogger_url": blog.blogger_url or "",
+        "current_date": f"{local_now:%B} {local_now.day}, {local_now:%Y} ({settings.schedule_timezone})",
     }
     base_context.update(replacements)
     return render_prompt_template(agent.prompt_template, **base_context)

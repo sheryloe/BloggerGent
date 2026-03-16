@@ -42,7 +42,7 @@ PROMPT_DEFINITIONS: list[PromptDefinition] = [
         title="한국 여행/축제 주제 발굴 프리셋",
         description="외국인 대상 한국 여행, 행사, 축제 블로그용 주제 발굴 프리셋입니다.",
         file_name="travel_topic_discovery.md",
-        placeholders=["{blog_name}", "{content_brief}", "{target_audience}"],
+        placeholders=["{blog_name}", "{content_brief}", "{target_audience}", "{current_date}"],
     ),
     PromptDefinition(
         key="travel_article_generation",
