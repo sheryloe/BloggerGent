@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="forest">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bloggent | 여러 Blogger 블로그를 운영하는 AI 발행 워크스페이스</title>
+  <meta name="description" content="다중 Blogger 블로그 운영, AI 글 생성, 이미지 생성, 수동 발행 보호, SEO 검증을 묶는 서비스형 워크스페이스">
+  <meta name="theme-color" content="#0f2c20">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Bloggent | 여러 Blogger 블로그를 운영하는 AI 발행 워크스페이스">
+  <meta property="og:description" content="블로그별 워크플로, 프롬프트, 발행 안전장치, SEO 검증을 하나의 서비스로 묶는 Bloggent">
+  <meta property="og:url" content="https://github.com/sheryloe/BloggerGent">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=Noto+Serif+KR:wght@600;700;800&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.24/dist/full.min.css" rel="stylesheet" type="text/css">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    body {
+      font-family: "Manrope", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(74, 222, 128, 0.18), transparent 24rem),
+        radial-gradient(circle at top right, rgba(253, 224, 71, 0.14), transparent 24rem),
+        linear-gradient(180deg, #071610 0%, #0c1f18 48%, #143126 100%);
+    }
+    .display-font { font-family: "Noto Serif KR", serif; }
+    .glass {
+      background: rgba(11, 27, 21, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 28px 60px rgba(0, 0, 0, 0.24);
+      backdrop-filter: blur(16px);
+    }
+  </style>
+</head>
+<body class="text-emerald-50">
+  <header class="sticky top-0 z-50 border-b border-white/10 bg-slate-950/60 backdrop-blur">
+    <div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-4">
+      <a href="#top" class="flex items-center gap-3">
+        <div class="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-400 text-slate-950 shadow-lg shadow-emerald-500/25">
+          <span class="display-font text-lg font-bold">BG</span>
+        </div>
+        <div>
+          <p class="display-font text-lg font-bold">Bloggent</p>
+          <p class="text-xs uppercase tracking-[0.24em] text-emerald-200/70">Blogger ops workspace</p>
+        </div>
+      </a>
+      <nav class="hidden gap-3 md:flex">
+        <a class="btn btn-ghost btn-sm text-emerald-50" href="#problem">문제</a>
+        <a class="btn btn-ghost btn-sm text-emerald-50" href="#pipeline">파이프라인</a>
+        <a class="btn btn-ghost btn-sm text-emerald-50" href="#todo">TODO</a>
+        <a class="btn btn-success btn-sm text-slate-950" href="https://github.com/sheryloe/BloggerGent">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top" class="mx-auto flex max-w-7xl flex-col gap-10 px-6 pb-24 pt-10">
+    <section class="grid gap-6 lg:grid-cols-[1.08fr_0.92fr]">
+      <div class="glass rounded-[2rem] p-8 lg:p-10">
+        <span class="badge badge-success badge-outline mb-5">Service concept</span>
+        <h1 class="display-font max-w-3xl text-4xl font-black leading-tight md:text-6xl">
+          블로그 여러 개를
+          사람 손이 닿는
+          서비스처럼
+          운영하기 위한 워크스페이스
+        </h1>
+        <p class="mt-6 max-w-2xl text-lg leading-8 text-emerald-50/80">
+          Bloggent는 “글을 하나 만들어주는 툴”보다, “블로그 여러 개를 사고 없이 운영하는 서비스”에 가깝습니다.
+          생성, 이미지, HTML 조립, 수동 발행, SEO 검증을 분리해서 운영자가 마지막 판단을 하도록 설계했습니다.
+        </p>
+        <div class="mt-7 flex flex-wrap gap-3">
+          <a class="btn btn-success text-slate-950" href="https://github.com/sheryloe/BloggerGent">저장소 보기</a>
+          <a class="btn btn-outline text-emerald-50" href="https://github.com/sheryloe/BloggerGent/issues">이슈 확인</a>
+        </div>
+      </div>
+      <div class="grid gap-4">
+        <div class="glass rounded-[1.75rem] p-6">
+          <p class="text-xs uppercase tracking-[0.24em] text-emerald-200/70">Why it exists</p>
+          <p class="mt-4 text-xl leading-8 text-white">블로그마다 프롬프트와 말투가 다르고, 발행은 마지막에 사람이 확인해야 합니다.</p>
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div class="glass rounded-[1.75rem] p-5">
+            <i data-lucide="files" class="h-8 w-8 text-emerald-300"></i>
+            <p class="mt-4 text-lg font-semibold text-white">다중 블로그 운영</p>
+            <p class="mt-2 text-sm text-emerald-50/75">블로그별 워크플로와 프롬프트를 분리합니다.</p>
+          </div>
+          <div class="glass rounded-[1.75rem] p-5">
+            <i data-lucide="shield-check" class="h-8 w-8 text-amber-300"></i>
+            <p class="mt-4 text-lg font-semibold text-white">발행 보호</p>
+            <p class="mt-2 text-sm text-emerald-50/75">공개 포스트 덮어쓰기를 막고, 수동 발행을 유지합니다.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="problem" class="grid gap-5 lg:grid-cols-3">
+      <article class="glass rounded-[1.75rem] p-6">
+        <i data-lucide="pencil-line" class="h-8 w-8 text-emerald-300"></i>
+        <h2 class="display-font mt-4 text-2xl font-bold text-white">콘텐츠 생성</h2>
+        <p class="mt-3 text-emerald-50/80">토픽 탐색, 초안 작성, 이미지 생성, HTML 조립이 같은 흐름으로 이어져야 합니다.</p>
+      </article>
+      <article class="glass rounded-[1.75rem] p-6">
+        <i data-lucide="badge-check" class="h-8 w-8 text-emerald-300"></i>
+        <h2 class="display-font mt-4 text-2xl font-bold text-white">안전한 발행</h2>
+        <p class="mt-3 text-emerald-50/80">생성과 발행을 분리하고, 공개 포스트 보호와 중복 주제 차단이 필요합니다.</p>
+      </article>
+      <article class="glass rounded-[1.75rem] p-6">
+        <i data-lucide="search-check" class="h-8 w-8 text-emerald-300"></i>
+        <h2 class="display-font mt-4 text-2xl font-bold text-white">실제 SEO 확인</h2>
+        <p class="mt-3 text-emerald-50/80">API 메타데이터가 아니라 공개 페이지에서 진짜 노출 상태를 봐야 합니다.</p>
+      </article>
+    </section>
+
+    <section id="pipeline" class="glass rounded-[2rem] p-8 lg:p-10">
+      <div class="max-w-3xl">
+        <span class="badge badge-outline badge-success">Pipeline</span>
+        <h2 class="display-font mt-4 text-3xl font-black text-white md:text-4xl">Bloggent가 풀고 있는 운영 루프</h2>
+      </div>
+      <div class="mt-8 grid gap-4 lg:grid-cols-5">
+        <div class="rounded-2xl border border-white/10 bg-white/5 p-5"><p class="font-semibold text-emerald-200">01 Import</p><p class="mt-2 text-white">Blogger 블로그와 데이터를 가져옵니다.</p></div>
+        <div class="rounded-2xl border border-white/10 bg-white/5 p-5"><p class="font-semibold text-emerald-200">02 Configure</p><p class="mt-2 text-white">블로그별 프롬프트와 워크플로를 분리합니다.</p></div>
+        <div class="rounded-2xl border border-white/10 bg-white/5 p-5"><p class="font-semibold text-emerald-200">03 Generate</p><p class="mt-2 text-white">토픽, 글, 이미지, HTML을 생성합니다.</p></div>
+        <div class="rounded-2xl border border-white/10 bg-white/5 p-5"><p class="font-semibold text-emerald-200">04 Review</p><p class="mt-2 text-white">생성 결과를 검토하고 발행 대기 상태로 둡니다.</p></div>
+        <div class="rounded-2xl border border-white/10 bg-white/5 p-5"><p class="font-semibold text-emerald-200">05 Verify</p><p class="mt-2 text-white">공개 페이지 기준 SEO 상태를 재검증합니다.</p></div>
+      </div>
+    </section>
+
+    <section id="todo" class="grid gap-5 lg:grid-cols-3">
+      <article class="glass rounded-[1.75rem] p-6">
+        <span class="badge badge-warning">Product</span>
+        <h2 class="display-font mt-4 text-2xl font-bold text-white">예약 발행 캘린더</h2>
+        <p class="mt-3 text-emerald-50/80">운영 서비스로 가려면 생성 결과를 시간표 기준으로 관리할 수 있어야 합니다.</p>
+      </article>
+      <article class="glass rounded-[1.75rem] p-6">
+        <span class="badge badge-info">Workflow</span>
+        <h2 class="display-font mt-4 text-2xl font-bold text-white">승인 큐와 QA</h2>
+        <p class="mt-3 text-emerald-50/80">발행 버튼 전 단계에서 제목, 메타, 이미지, 중복성 체크가 필요합니다.</p>
+      </article>
+      <article class="glass rounded-[1.75rem] p-6">
+        <span class="badge badge-success">Growth</span>
+        <h2 class="display-font mt-4 text-2xl font-bold text-white">다중 운영자 모델</h2>
+        <p class="mt-3 text-emerald-50/80">사용량, 역할, 블로그별 접근 범위를 나누면 서비스화 가능성이 크게 올라갑니다.</p>
+      </article>
+    </section>
+  </main>
+
+  <script>lucide.createIcons();</script>
+</body>
+</html>
