@@ -3,13 +3,28 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: light;
-  --background: #fbf7f1;
-  --foreground: #11212d;
+  color-scheme: light dark;
+  --background: #f5f7fb;
+  --background-elevated: rgba(255, 255, 255, 0.86);
+  --foreground: #0f172a;
+  --foreground-muted: #475569;
+  --border: rgba(148, 163, 184, 0.26);
+  --shadow-soft: 0 24px 60px rgba(15, 23, 42, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #09090b;
+    --background-elevated: rgba(24, 24, 27, 0.78);
+    --foreground: #f8fafc;
+    --foreground-muted: #a1a1aa;
+    --border: rgba(255, 255, 255, 0.1);
+    --shadow-soft: 0 24px 60px rgba(0, 0, 0, 0.42);
+  }
 }
 
 * {
-  border-color: rgba(17, 33, 45, 0.1);
+  border-color: var(--border);
 }
 
 html {
@@ -17,9 +32,12 @@ html {
 }
 
 body {
+  min-height: 100vh;
+  overflow-x: hidden;
   background:
-    radial-gradient(circle at top left, rgba(224, 113, 44, 0.16), transparent 32%),
-    radial-gradient(circle at bottom right, rgba(35, 76, 90, 0.12), transparent 36%),
+    radial-gradient(circle at top left, rgba(79, 70, 229, 0.14), transparent 26%),
+    radial-gradient(circle at top right, rgba(16, 185, 129, 0.1), transparent 24%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.22), transparent 40%),
     var(--background);
   color: var(--foreground);
   font-family: var(--font-body), sans-serif;
@@ -30,27 +48,62 @@ body {
 }
 
 .panel-surface {
-  background: rgba(255, 249, 240, 0.82);
-  backdrop-filter: blur(14px);
+  background: var(--background-elevated);
+  backdrop-filter: blur(20px);
 }
 
 .grid-bg {
   background-image:
-    linear-gradient(rgba(17, 33, 45, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(17, 33, 45, 0.06) 1px, transparent 1px);
+    linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
   background-size: 28px 28px;
 }
 
+.dashboard-shell {
+  position: relative;
+  isolation: isolate;
+}
+
+.dashboard-shell::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 20% 15%, rgba(99, 102, 241, 0.12), transparent 22%),
+    radial-gradient(circle at 85% 10%, rgba(16, 185, 129, 0.08), transparent 18%);
+  z-index: -1;
+}
+
+.hover-lift {
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease,
+    background-color 180ms ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 24px 65px rgba(15, 23, 42, 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  .hover-lift:hover {
+    box-shadow: 0 24px 65px rgba(0, 0, 0, 0.4);
+  }
+}
+
 .article-prose h2 {
-  @apply mt-6 text-2xl font-semibold text-ink;
+  @apply mt-6 text-2xl font-semibold text-slate-900 dark:text-white;
 }
 
 .article-prose h3 {
-  @apply mt-4 text-xl font-semibold text-spruce;
+  @apply mt-4 text-xl font-semibold text-slate-800 dark:text-zinc-100;
 }
 
 .article-prose p {
-  @apply mt-3 leading-8 text-slate-700;
+  @apply mt-3 leading-8 text-slate-600 dark:text-zinc-300;
 }
 
 .article-prose section {

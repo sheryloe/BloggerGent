@@ -1,4 +1,5 @@
 import { Article } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 function buildPreviewDocument(article: Article) {
   const previewHtml =
@@ -13,25 +14,39 @@ function buildPreviewDocument(article: Article) {
     <style>
       :root { color-scheme: light; }
       * { box-sizing: border-box; }
-      html, body { margin: 0; padding: 0; background: #f8fafc; }
-      body { min-height: 100vh; color: #0f172a; }
-      img { max-width: 100%; }
-      a { color: #0f766e; }
+      html, body { margin: 0; padding: 0; background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%); }
+      body { min-height: 100vh; color: #0f172a; font-family: ui-sans-serif, system-ui, sans-serif; }
+      img { max-width: 100%; border-radius: 18px; height: auto; }
+      table { width: 100%; overflow: hidden; }
+      pre, code { white-space: pre-wrap; word-break: break-word; }
+      * { max-width: 100%; }
+      a { color: #4f46e5; }
     </style>
   </head>
   <body>${previewHtml}</body>
 </html>`;
 }
 
-export function ArticlePreviewFrame({ article }: { article: Article }) {
-  const height = Math.max(1500, article.reading_time_minutes * 320 + 720);
+export function ArticlePreviewFrame({
+  article,
+  height,
+  className,
+}: {
+  article: Article;
+  height?: number;
+  className?: string;
+}) {
+  const resolvedHeight = height ?? Math.max(920, article.reading_time_minutes * 180 + 420);
 
   return (
     <iframe
       title={`${article.title} preview`}
       srcDoc={buildPreviewDocument(article)}
-      className="w-full rounded-[28px] border border-ink/10 bg-white"
-      style={{ height }}
+      className={cn(
+        "w-full rounded-[28px] border border-slate-200/80 bg-white shadow-sm dark:border-white/10 dark:bg-zinc-950",
+        className,
+      )}
+      style={{ height: resolvedHeight }}
     />
   );
 }

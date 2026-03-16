@@ -1,47 +1,116 @@
+"use client";
+
 import Link from "next/link";
-import { BarChart3, BookOpenText, LayoutDashboard, Newspaper, Settings2, Workflow } from "lucide-react";
+import { usePathname } from "next/navigation";
+import {
+  BarChart3,
+  BookOpenText,
+  LayoutDashboard,
+  MoonStar,
+  Newspaper,
+  Settings2,
+  Sparkles,
+  Workflow,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 const items = [
   { href: "/", label: "대시보드", icon: LayoutDashboard },
-  { href: "/guide", label: "사용 가이드", icon: BookOpenText },
-  { href: "/google", label: "Google 데이터", icon: BarChart3 },
+  { href: "/guide", label: "가이드", icon: BookOpenText },
+  { href: "/google", label: "구글 데이터", icon: BarChart3 },
   { href: "/jobs", label: "작업 현황", icon: Workflow },
-  { href: "/articles", label: "생성 글", icon: Newspaper },
+  { href: "/articles", label: "글 보관함", icon: Newspaper },
   { href: "/settings", label: "설정", icon: Settings2 },
 ];
 
 export function Sidebar() {
+  const pathname = usePathname();
+
   return (
-    <aside className="grid-bg hidden min-h-screen w-72 border-r border-ink/10 px-6 py-8 lg:block">
-      <div className="sticky top-8 space-y-8">
-        <div className="space-y-4">
-          <Badge className="w-fit bg-white/90 text-spruce">Google Blogger 반자동 운영</Badge>
-          <div>
-            <h1 className="font-display text-3xl font-semibold tracking-tight text-ink">Bloggent</h1>
-            <p className="mt-3 max-w-xs text-sm leading-6 text-slate-600">
-              블로그마다 다른 프롬프트와 워크플로를 배정하고, 주제 발굴부터 글 생성, 이미지, Blogger 게시와
-              성과 확인까지 한 화면에서 관리합니다.
+    <aside className="hidden min-h-screen w-[292px] shrink-0 border-r border-slate-200/70 bg-white/78 px-5 py-5 backdrop-blur-2xl dark:border-white/10 dark:bg-zinc-950/75 lg:block xl:w-[308px]">
+      <div className="sticky top-5 flex h-[calc(100vh-2.5rem)] flex-col">
+        <div className="space-y-5">
+          <Badge className="w-fit border-indigo-200/80 bg-indigo-500/10 text-indigo-700 dark:border-indigo-500/20 dark:bg-indigo-500/15 dark:text-indigo-200">
+            Publishing Console
+          </Badge>
+
+          <div className="rounded-[30px] border border-slate-200/70 bg-white/85 p-5 shadow-sm dark:border-white/10 dark:bg-white/5">
+            <div className="flex items-center gap-3">
+              <div className="rounded-2xl bg-slate-950 p-3 text-white dark:bg-white dark:text-slate-950">
+                <Sparkles className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <h1 className="font-display text-3xl font-semibold tracking-tight text-slate-950 dark:text-zinc-50">
+                  Bloggent
+                </h1>
+                <p className="text-xs uppercase tracking-[0.24em] text-slate-400 dark:text-zinc-500">
+                  Content Ops
+                </p>
+              </div>
+            </div>
+            <p className="mt-4 text-sm leading-7 text-slate-500 dark:text-zinc-400">
+              글 생성, 작업 큐, 프리뷰, 구글 연동 상태를 왼쪽 탐색과 한 화면 구조로 정리한 작업 공간입니다.
             </p>
           </div>
         </div>
 
-        <nav className="space-y-2">
+        <nav className="mt-8 space-y-2">
           {items.map((item) => {
             const Icon = item.icon;
+            const active = pathname === item.href;
+
             return (
               <Link
                 key={item.href}
                 href={item.href}
-                className="flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium text-ink transition hover:bg-white/70"
+                className={cn(
+                  "group flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition",
+                  active
+                    ? "bg-slate-950 text-white shadow-[0_18px_36px_rgba(15,23,42,0.18)] dark:bg-white dark:text-slate-950"
+                    : "text-slate-600 hover:bg-slate-100/85 hover:text-slate-950 dark:text-zinc-300 dark:hover:bg-white/5 dark:hover:text-zinc-50",
+                )}
               >
-                <Icon className="h-4 w-4 text-ember" />
-                {item.label}
+                <span
+                  className={cn(
+                    "flex h-10 w-10 items-center justify-center rounded-xl transition",
+                    active
+                      ? "bg-white/15 text-white dark:bg-slate-950/10 dark:text-slate-950"
+                      : "bg-slate-100 text-slate-500 group-hover:bg-white group-hover:text-slate-900 dark:bg-white/5 dark:text-zinc-400 dark:group-hover:bg-white/10 dark:group-hover:text-zinc-100",
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                </span>
+                <span className="truncate">{item.label}</span>
               </Link>
             );
           })}
         </nav>
+
+        <div className="mt-auto space-y-4">
+          <div className="rounded-[28px] border border-slate-200/70 bg-gradient-to-br from-slate-950 to-slate-800 p-5 text-white shadow-[0_18px_40px_rgba(15,23,42,0.18)] dark:border-white/10 dark:from-zinc-900 dark:to-zinc-800">
+            <div className="flex items-center gap-3">
+              <div className="rounded-2xl bg-white/10 p-2">
+                <MoonStar className="h-4 w-4" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold">자동 테마</p>
+                <p className="text-xs uppercase tracking-[0.2em] text-white/55">Light / Dark</p>
+              </div>
+            </div>
+            <p className="mt-4 text-sm leading-6 text-white/75">
+              디바이스 설정에 맞춰 밝기만 바뀌고, 데이터와 백엔드 동작은 손대지 않습니다.
+            </p>
+          </div>
+
+          <div className="rounded-[28px] border border-slate-200/70 bg-slate-50/80 p-5 dark:border-white/10 dark:bg-white/5">
+            <p className="text-sm font-medium text-slate-500 dark:text-zinc-400">이번 변경 범위</p>
+            <p className="mt-3 text-sm leading-7 text-slate-600 dark:text-zinc-300">
+              배치, 여백, 가독성, 오버플로우 처리만 조정했습니다. API, DB, 발행 설정 로직은 그대로입니다.
+            </p>
+          </div>
+        </div>
       </div>
     </aside>
   );
