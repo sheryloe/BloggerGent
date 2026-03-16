@@ -4,50 +4,49 @@ title: FAQ
 
 # FAQ
 
-## Is Bloggent fully automatic?
+## Bloggent는 완전 자동 발행 도구인가요?
 
-No.
-Generation is automated, but public release is intentionally manual from the article review flow.
+아닙니다.
+생성은 자동화되지만, 공개 발행은 의도적으로 글 검토 흐름에서 수동으로 하게 되어 있습니다.
 
-## Why not auto-publish everything?
+## 왜 전부 자동 발행하지 않나요?
 
-Because Blogger posts are public-facing content.
-The safer workflow is generate first, review second, publish third.
+Blogger 글은 바로 공개되는 사용자 노출 콘텐츠이기 때문입니다.
+더 안전한 흐름은 “생성 -> 검토 -> 발행” 순서입니다.
 
-## Is the dashboard SEO number a full content score?
+## 대시보드 SEO 숫자는 글 전체 점수인가요?
 
-No.
-The current dashboard label is a metadata verification state.
-It reflects live checks for `description`, `og:description`, and `twitter:description`, not a complete body-quality evaluation.
+아닙니다.
+현재 대시보드에서 보이는 값은 `description`, `og:description`, `twitter:description` 기준의 공개 메타 검증 상태입니다.
+본문 전체 품질을 한 숫자로 환산한 점수는 아닙니다.
 
-## Why does Blogger SEO still need a theme patch?
+## Blogger SEO에 왜 테마 패치가 아직도 필요한가요?
 
-Because Blogger API metadata fields do not reliably become the final public `<head>` tags.
-The theme patch is the practical fallback that Bloggent can verify on the live page.
+Blogger API 메타 필드만으로는 실제 공개 `<head>` 태그가 안정적으로 보장되지 않기 때문입니다.
+그래서 Bloggent는 필요한 경우 테마 패치를 쓰고, 공개 페이지에서 다시 검증합니다.
 
-## Can different blogs use different prompts?
+## 블로그마다 다른 프롬프트를 쓸 수 있나요?
 
-Yes.
-That is one of the core design decisions.
-Each imported blog has its own workflow and prompt configuration.
+네.
+이건 Bloggent의 핵심 설계 중 하나입니다.
+가져온 각 블로그는 자체 워크플로와 프롬프트 구성을 가질 수 있습니다.
 
-## Does Bloggent support only travel blogs?
+## 여행 블로그만 지원하나요?
 
-No.
-The current prompt system includes general, travel, and mystery-focused article generation paths.
-The model is meant to support multiple blog identities through per-blog workflows.
+아닙니다.
+현재 프롬프트는 일반형, 여행형, 미스터리형을 포함하고 있고, 블로그별 워크플로를 통해 다른 채널 정체성을 운영할 수 있습니다.
 
-## Can I use GitHub Pages with this project?
+## GitHub Pages도 쓸 수 있나요?
 
-Yes.
-The project supports GitHub Pages as an asset delivery target, and the `docs/` folder is also ready to be published as a GitHub Pages documentation site.
+네.
+GitHub Pages를 공개 에셋 전달용으로 쓸 수 있고, `docs/` 자체도 GitHub Pages 문서 사이트로 배포할 수 있습니다.
 
-## What should I do if metadata verification stays weak?
+## 메타 검증 상태가 계속 약하면 어떻게 해야 하나요?
 
-Check these in order:
+아래 순서로 확인하는 게 좋습니다.
 
-1. Is the article public yet?
-2. Is the meta description clear and aligned with the article?
-3. Was search description sync run?
-4. Is the Blogger theme patch installed?
-5. Did live verification run after publishing?
+1. 글이 실제로 공개됐는지
+2. 메타 설명이 본문 약속과 맞는지
+3. 검색 설명 동기화를 실행했는지
+4. Blogger 테마 패치가 설치됐는지
+5. 발행 후 라이브 검증을 다시 돌렸는지

@@ -1,97 +1,95 @@
 ---
-title: Workflow Model
+title: 워크플로 구조
 ---
 
-# Workflow Model
+# 워크플로 구조
 
-Bloggent uses a guided workflow model where each blog can have its own content pipeline.
+Bloggent는 블로그마다 다른 콘텐츠 파이프라인을 유지할 수 있는 워크플로 구조를 사용합니다.
 
-## Quick Answer
+## 빠른 답변
 
-The workflow is split so operators can control the stages that matter while the system still handles assembly and publishing mechanics behind the scenes.
+운영자가 직접 보고 판단해야 하는 단계와, 시스템이 뒤에서 처리하면 되는 단계를 분리해서 운영 흐름은 단순하게 유지하고 내부 파이프라인은 유연하게 가져가는 방식입니다.
 
-## At a Glance
+## 한눈에 보기
 
-User-facing stages:
+운영자에게 보이는 단계:
 
-1. Topic discovery
-2. Article generation
-3. Image generation
+1. 주제 발굴
+2. 글 생성
+3. 이미지 생성
 
-Optional advanced stage:
+선택 가능한 고급 단계:
 
-4. Image prompt refinement
+4. 이미지 프롬프트 보정
 
-System stages:
+시스템 단계:
 
-- HTML assembly
-- publish queue
+- HTML 조립
+- 발행 큐
 
-## Why the workflow is blog-specific
+## 왜 블로그별 워크플로인가
 
-One blog may be travel-focused and another may be mystery-focused.
-They should not share the same voice, structure, metadata style, or image guidance.
+여행 블로그와 미스터리 블로그는 같은 말투, 같은 구조, 같은 메타 스타일을 쓰면 안 됩니다.
+그래서 Bloggent는 전체 서비스에 하나의 글로벌 파이프라인을 강제하지 않고, 블로그별 워크플로와 프롬프트를 따로 가집니다.
 
-That is why Bloggent stores workflow and prompt logic per imported blog instead of forcing one global pipeline.
+## 운영자가 보는 핵심 흐름
 
-## Operator-visible flow
+현재 제품에서 가장 중요한 운영 루프는 아래와 같습니다.
 
-In the current product, the most important operator loop is:
+1. 블로그를 선택합니다.
+2. 주제를 직접 넣거나 주제 발굴을 실행합니다.
+3. 글 패키지를 생성합니다.
+4. `/articles`에서 글을 검토합니다.
+5. 수동으로 발행합니다.
+6. 공개 메타를 검증합니다.
 
-1. Choose a blog
-2. Enter a topic or run topic discovery
-3. Generate the article package
-4. Review the article in `/articles`
-5. Publish manually
-6. Verify public metadata
+## 시스템이 처리하는 흐름
 
-## System-managed flow
+운영자가 직접 누르지 않아도 파이프라인 내부에서는 여러 단계가 함께 돌아갑니다.
 
-Several stages still happen as part of the pipeline even when the operator does not interact with them directly:
+- 프롬프트 렌더링
+- 본문 생성
+- 이미지 생성
+- HTML 조립
+- 발행 상태 추적
 
-- prompt rendering
-- content generation
-- image generation
-- HTML assembly
-- publish-state tracking
+## 왜 발행을 분리했나
 
-## Why publishing stays separate
+Bloggent에서 발행은 생성과 같은 단계가 아닙니다.
+이 설계는 아래 위험을 줄이기 위한 핵심 구조입니다.
 
-Publishing is intentionally not the same step as generation.
-That design protects against:
+- 약한 초안의 실수 발행
+- 이미 공개된 Blogger 포스트의 덮어쓰기
+- 메타와 최종 화면을 보지 못한 채 넘어가는 일
 
-- accidental publication of weak drafts
-- accidental overwrite of already public Blogger posts
-- operators losing the chance to review metadata and preview layout
+## GEO + SEO가 워크플로에 들어가는 방식
 
-## GEO + SEO in the workflow
+현재 글 생성 프롬프트는 검색엔진과 답변형 엔진을 둘 다 고려하는 구조입니다.
+그래서 워크플로도 아래를 자연스럽게 기대하게 됩니다.
 
-The current article prompts are written for both search engines and answer engines.
-That means the workflow now expects:
+- 글 초반의 직접 답변
+- 섹션별 하위 질문 해소
+- `meta_description`과 `excerpt` 정렬
+- 공개 페이지 기준 검증 가능한 메타 구조
 
-- a direct answer early in the article
-- clear section-level sub-questions
-- aligned `meta_description` and `excerpt`
-- metadata that can be verified on the public page
+## 현재 UI와 워크플로 매핑
 
-## Current UI surfaces that map to the workflow
+- `/` : 액션 패널, 작업 큐, 프리뷰, 메타 상태 요약
+- `/articles` : 글 검토, 발행, 메타 검증
+- `/jobs` : 파이프라인 상태 확인
+- `/settings` : 자격증명, 블로그 가져오기, 블로그별 매핑
+- `/google` : Google 연결 및 리포팅 확인
 
-- `/` for the action panel, queue, preview, and summary state
-- `/articles` for review, publish, and metadata verification
-- `/jobs` for pipeline status
-- `/settings` for credentials, imports, and per-blog mappings
-- `/google` for reporting connections and visibility
+## 예시 경로
 
-## Example paths
-
-Basic path:
+기본 경로:
 
 ```text
-Topic Discovery -> Article Generation -> Image Generation -> HTML Assembly -> Manual Publish -> Meta Verification
+주제 발굴 -> 글 생성 -> 이미지 생성 -> HTML 조립 -> 수동 발행 -> 메타 검증
 ```
 
-Advanced path:
+고급 경로:
 
 ```text
-Topic Discovery -> Article Generation -> Image Prompt Refinement -> Image Generation -> HTML Assembly -> Manual Publish -> Meta Verification
+주제 발굴 -> 글 생성 -> 이미지 프롬프트 보정 -> 이미지 생성 -> HTML 조립 -> 수동 발행 -> 메타 검증
 ```

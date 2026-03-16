@@ -1,34 +1,34 @@
 ---
-title: SEO Metadata Strategy
+title: SEO 메타데이터 전략
 ---
 
-# SEO Metadata Strategy
+# SEO 메타데이터 전략
 
-Blogger SEO metadata looks simple until you verify the real public page.
+Blogger의 SEO 메타데이터는 API만 보면 단순해 보이지만, 실제 공개 페이지 기준으로 보면 생각보다 까다롭습니다.
 
-## Quick Answer
+## 빠른 답변
 
-Bloggent does not assume Blogger API metadata is enough.
-It verifies the real published page and checks whether the expected description is visible in:
+Bloggent는 Blogger API 메타만 믿지 않습니다.
+실제 공개된 페이지에서 아래 값이 기대한 설명과 맞는지 검증합니다.
 
 - `description`
 - `og:description`
 - `twitter:description`
 
-## At a Glance
+## 한눈에 보기
 
-- The dashboard state is not a full SEO quality score
-- It is a metadata verification state
-- Blogger `customMetaData` is not a reliable public `<head>` source
-- A theme patch fallback may still be needed
-- Verification should happen after publishing
+- 대시보드 메타 상태는 글 전체 SEO 점수가 아닙니다.
+- 공개 메타 검증 상태에 가깝습니다.
+- Blogger `customMetaData`는 실제 `<head>`의 신뢰 가능한 단일 소스가 아닙니다.
+- 테마 패치가 필요할 수 있습니다.
+- 검증은 발행 후에 하는 것이 맞습니다.
 
-## The Blogger limitation
+## Blogger 한계
 
-At first glance, Blogger API appears to support metadata through `customMetaData`.
-In practice, that field does not reliably become the final public `<head>` output that crawlers read.
+겉으로 보면 Blogger API는 `customMetaData` 같은 필드로 메타를 지원하는 것처럼 보입니다.
+하지만 실제로는 이 값이 공개 페이지 `<head>`에 최종 메타 태그로 안정적으로 반영되지 않는 경우가 있습니다.
 
-That means this assumption is unsafe:
+즉 아래 같은 가정은 안전하지 않습니다.
 
 ```json
 {
@@ -38,85 +38,85 @@ That means this assumption is unsafe:
 }
 ```
 
-The post may still render with:
+실제 공개 페이지에서는 아래처럼 보일 수 있습니다.
 
-- no `meta[name="description"]`
-- no `og:description`
-- no `twitter:description`
-- or only a blog-wide fallback description
+- `meta[name="description"]` 없음
+- `og:description` 없음
+- `twitter:description` 없음
+- 또는 블로그 전체 기본 설명만 노출
 
-## What Bloggent does instead
+## Bloggent가 쓰는 방식
 
-Bloggent uses a more practical verification-first strategy:
+Bloggent는 “일단 넣고 끝”이 아니라, 검증 가능한 우회 전략을 씁니다.
 
-1. store the expected article description
-2. keep the article metadata aligned with the generation prompt
-3. embed fallback metadata markers into the assembled post flow
-4. support a Blogger theme patch in `<head>`
-5. verify the live public result after publishing
+1. 기대하는 글 설명을 저장합니다.
+2. 생성 프롬프트 단계에서 메타 설명과 본문 약속을 맞춥니다.
+3. 조립된 포스트 안에 fallback용 메타 마커를 넣습니다.
+4. 필요시 Blogger 테마 `<head>` 패치를 사용합니다.
+5. 발행 후 실제 공개 결과를 검증합니다.
 
-## What the dashboard status means
+## 대시보드 메타 상태의 의미
 
-The current dashboard card is best read as a metadata verification state.
+현재 대시보드 카드의 값은 “메타 검증 상태”로 이해하는 것이 가장 정확합니다.
 
-### `Not verified`
+### `검증 전`
 
-No live verification has been run yet, or the article is not yet public.
-This does not automatically mean the content is low quality.
+아직 라이브 검증을 실행하지 않았거나, 글이 공개되지 않은 상태입니다.
+이 값이 낮다고 해서 본문 품질이 자동으로 나쁘다는 뜻은 아닙니다.
 
-### `Warning`
+### `주의`
 
-Some public tags do not match the expected description.
-Usually this points to:
+공개 페이지 메타 일부가 기대값과 다르다는 뜻입니다.
+보통 아래 같은 원인과 연결됩니다.
 
-- theme patch missing
-- old blog-wide metadata winning
-- search description not yet synced
+- 테마 패치 미설치
+- 예전 블로그 기본 설명이 우선 적용됨
+- 검색 설명 동기화 미실행
 
-### `OK`
+### `정상`
 
-The expected description matches the public tags Bloggent checks.
+기대한 설명이 공개 페이지 메타와 잘 맞는 상태입니다.
 
-## Article-level vs blog-level verification
+## 글 단위와 블로그 단위 검증
 
-Bloggent works at two levels:
+Bloggent는 두 레벨에서 메타를 봅니다.
 
-### Article level
+### 글 단위
 
-This verifies the published article URL and compares the expected description with the live metadata on that page.
+특정 발행 URL을 직접 확인해서, 기대한 설명과 실제 메타를 비교합니다.
 
-### Blog level
+### 블로그 단위
 
-This checks whether the broader theme-patch path is in place for the blog.
-If the patch is missing, article verification may still warn even when the article copy itself is good.
+해당 블로그의 테마 패치 경로가 제대로 갖춰졌는지를 봅니다.
+패치가 빠져 있으면 글 본문이 좋아도 메타 검증은 계속 약하게 나올 수 있습니다.
 
-## How to improve the result
+## 메타 상태를 올리는 방법
 
-If the metadata state is weak, the fix is usually operational, not only prompt-related:
+메타 상태가 약하면, 문제는 프롬프트만이 아니라 운영 설정일 가능성이 큽니다.
 
-1. write a clear `meta_description`
-2. keep `excerpt` aligned with that promise
-3. sync the search description if needed
-4. install the Blogger theme patch fallback
-5. re-run live verification
+1. `meta_description`을 명확하게 씁니다.
+2. `excerpt`가 같은 약속을 하도록 맞춥니다.
+3. 필요하면 검색 설명 동기화를 실행합니다.
+4. Blogger 테마 패치를 설치합니다.
+5. 다시 라이브 검증을 돌립니다.
 
-## How GEO + SEO prompts help
+## GEO + SEO 프롬프트가 도움이 되는 이유
 
-The new GEO + SEO prompts improve metadata quality by making the article promise clearer from the start.
-They now push the model to:
+새 GEO + SEO 프롬프트는 글이 처음부터 더 선명한 메타 약속을 하게 만듭니다.
+지금은 아래 방향으로 프롬프트가 구성되어 있습니다.
 
-- answer the core query early
-- define the main entity sooner
-- keep section structure easier to summarize
-- align the public snippet with the actual article body
+- 핵심 질문에 먼저 답하기
+- 메인 엔티티를 초반에 분명히 드러내기
+- 섹션 구조를 요약하기 쉽게 만들기
+- 공개 스니펫과 본문 첫 부분을 맞추기
 
-Prompt files:
+관련 프롬프트 파일:
 
 - `prompts/article_generation.md`
 - `prompts/travel_article_generation.md`
 - `prompts/mystery_article_generation.md`
 
-## Practical takeaway
+## 실전 해석
 
-Do not read a low dashboard number as "the article body is bad."
-Read it as "the live public metadata path still needs verification or repair."
+대시보드에서 메타 상태가 낮다고 해서 “글 전체가 형편없다”고 읽으면 안 됩니다.
+더 정확한 해석은 “공개 메타 경로가 아직 검증되지 않았거나, 설정상 보완이 더 필요하다”입니다.

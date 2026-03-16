@@ -1,26 +1,24 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Bloggent Docs | GEO + SEO Blogger Publishing Workspace</title>
-  <meta name="description" content="Bloggent is a multi-blog Blogger publishing workspace with GEO + SEO prompts, manual-safe publishing, and live metadata verification.">
+  <title>Bloggent 문서 | GEO + SEO 기반 Blogger 운영 워크스페이스</title>
+  <meta name="description" content="Bloggent는 GEO + SEO 글 생성, 수동 발행, 공개 메타 검증을 포함한 Blogger 운영 워크스페이스입니다.">
   <meta name="theme-color" content="#0f172a">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="Bloggent Docs | GEO + SEO Blogger Publishing Workspace">
-  <meta property="og:description" content="Run Blogger content operations with AI-assisted generation, manual publishing, and public-page SEO verification.">
-  <meta property="og:url" content="https://github.com/sheryloe/BloggerGent">
+  <meta property="og:title" content="Bloggent 문서 | GEO + SEO 기반 Blogger 운영 워크스페이스">
+  <meta property="og:description" content="AI 글 생성부터 최종 발행 검토와 공개 메타 검증까지 Blogger 운영 흐름을 한곳에서 관리합니다.">
+  <meta property="og:url" content="https://sheryloe.github.io/BloggerGent/">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%2310b981'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-family='Arial' font-size='28' font-weight='700' fill='%23022c22'%3EBG%3C/text%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&family=Noto+Serif+KR:wght@600;700&display=swap" rel="stylesheet">
   <style>
     :root {
       color-scheme: dark;
-      --bg: #09090b;
       --panel: rgba(15, 23, 42, 0.74);
-      --panel-strong: rgba(15, 23, 42, 0.92);
       --border: rgba(148, 163, 184, 0.18);
       --text: #f8fafc;
       --muted: #cbd5e1;
@@ -43,7 +41,7 @@
 
     body {
       margin: 0;
-      font-family: "Manrope", sans-serif;
+      font-family: "Noto Sans KR", sans-serif;
       color: var(--text);
       background:
         radial-gradient(circle at top left, rgba(52, 211, 153, 0.16), transparent 24rem),
@@ -62,7 +60,7 @@
     }
 
     .display {
-      font-family: "Fraunces", serif;
+      font-family: "Noto Serif KR", serif;
       letter-spacing: -0.03em;
     }
 
@@ -71,7 +69,7 @@
       top: 0;
       z-index: 40;
       border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-      background: rgba(2, 6, 23, 0.76);
+      background: rgba(2, 6, 23, 0.78);
       backdrop-filter: blur(20px);
     }
 
@@ -174,7 +172,7 @@
     }
 
     .hero {
-      grid-template-columns: 1.2fr 0.8fr;
+      grid-template-columns: 1.18fr 0.82fr;
       align-items: stretch;
       padding: 44px 0 24px;
     }
@@ -194,16 +192,17 @@
 
     .hero h1 {
       margin: 16px 0 18px;
-      font-size: clamp(44px, 7vw, 76px);
-      line-height: 0.95;
+      font-size: clamp(38px, 6vw, 68px);
+      line-height: 1.08;
     }
 
     .hero p {
       margin: 0;
       max-width: 46rem;
       font-size: 18px;
-      line-height: 1.85;
+      line-height: 1.9;
       color: var(--muted);
+      word-break: keep-all;
     }
 
     .hero-actions {
@@ -213,7 +212,6 @@
       margin-top: 28px;
     }
 
-    .stack-list,
     .metric-list,
     .flow-list,
     .todo-list {
@@ -225,7 +223,6 @@
     }
 
     .metric-list li,
-    .stack-list li,
     .flow-list li,
     .todo-list li {
       display: flex;
@@ -251,21 +248,22 @@
     }
 
     .section-head {
-      max-width: 52rem;
+      max-width: 54rem;
       margin-bottom: 24px;
     }
 
     .section-head h2 {
       margin: 12px 0 10px;
-      font-size: clamp(32px, 4vw, 48px);
-      line-height: 1.04;
+      font-size: clamp(30px, 4vw, 46px);
+      line-height: 1.18;
     }
 
     .section-head p {
       margin: 0;
       color: var(--muted);
-      line-height: 1.85;
+      line-height: 1.9;
       font-size: 17px;
+      word-break: keep-all;
     }
 
     .grid-2 {
@@ -286,13 +284,15 @@
     .card h3 {
       margin: 18px 0 10px;
       font-size: 24px;
-      line-height: 1.15;
+      line-height: 1.35;
+      word-break: keep-all;
     }
 
     .card p {
       margin: 0;
       color: var(--muted);
-      line-height: 1.8;
+      line-height: 1.85;
+      word-break: keep-all;
     }
 
     .mini {
@@ -368,14 +368,14 @@
       <a class="brand" href="#top">
         <span class="brand-mark">BG</span>
         <span class="brand-meta">
-          <small>GEO + SEO blogger ops</small>
+          <small>Blogger 운영 워크스페이스</small>
           <strong>Bloggent</strong>
         </span>
       </a>
       <nav class="nav-links" aria-label="Primary">
-        <a class="pill" href="#workflow">Workflow</a>
+        <a class="pill" href="#workflow">워크플로</a>
         <a class="pill" href="#seo">SEO</a>
-        <a class="pill" href="#docs">Guides</a>
+        <a class="pill" href="#docs">가이드</a>
         <a class="pill" href="#roadmap">TODO</a>
         <a class="button button-primary" href="https://github.com/sheryloe/BloggerGent">GitHub</a>
       </nav>
@@ -385,93 +385,94 @@
   <main id="top" class="wrap">
     <section class="hero">
       <article class="hero-card">
-        <span class="eyebrow">Quick Answer</span>
-        <h1 class="display">Run Blogger content operations without blind auto-publishing.</h1>
+        <span class="eyebrow">빠른 답변</span>
+        <h1 class="display">글 생성은 빠르게, 공개는 신중하게. Bloggent는 그 흐름을 위한 Blogger 운영 워크스페이스입니다.</h1>
         <p>
-          Bloggent is a multi-blog Blogger workspace that combines AI-assisted topic discovery, article generation,
-          image generation, inline post review, manual publishing, and live metadata verification. It is built for
-          operators who want speed, but still want the last call before anything public goes out.
+          Bloggent는 여러 Blogger 블로그를 하나의 작업 공간에서 관리하면서, AI 주제 발굴, 글 생성, 이미지 생성,
+          최종 포스트 프리뷰, 수동 발행, 공개 메타 검증까지 이어지는 실제 운영 흐름을 정리해 주는 도구입니다.
+          자동화는 하되, 발행 전 마지막 판단은 운영자가 직접 하도록 설계했습니다.
         </p>
         <div class="hero-actions">
-          <a class="button button-primary" href="./getting-started.html">Start with the setup guide</a>
-          <a class="button button-secondary" href="./roadmap.html">Read the roadmap</a>
+          <a class="button button-primary" href="./getting-started.html">설치 가이드 보기</a>
+          <a class="button button-secondary" href="./roadmap.html">로드맵 보기</a>
         </div>
         <div class="accent-bar">
-          <span class="chip">Multi-blog workflows</span>
-          <span class="chip">GEO + SEO prompts</span>
-          <span class="chip">Manual-safe publish</span>
-          <span class="chip">Live meta verification</span>
+          <span class="chip">멀티 블로그 운영</span>
+          <span class="chip">GEO + SEO 프롬프트</span>
+          <span class="chip">수동 발행 보호</span>
+          <span class="chip">실제 메타 검증</span>
         </div>
       </article>
 
       <aside class="hero-card">
-        <span class="eyebrow">At a Glance</span>
-        <h2 class="display" style="margin-top:12px;font-size:34px;line-height:1.05;">What the product does right now</h2>
+        <span class="eyebrow">한눈에 보기</span>
+        <h2 class="display" style="margin-top:12px;font-size:34px;line-height:1.2;">지금 기준으로 Bloggent가 해주는 것</h2>
         <ul class="metric-list" style="margin-top:20px;">
-          <li><span class="dot"></span><span>One dashboard for content actions, queue visibility, full preview, and metadata state.</span></li>
-          <li><span class="dot"></span><span>Blog-specific workflows and prompts for different content identities.</span></li>
-          <li><span class="dot"></span><span>Inline review in <code>/articles</code> before manual Blogger release.</span></li>
-          <li><span class="dot"></span><span>Verification for <code>description</code>, <code>og:description</code>, and <code>twitter:description</code>.</span></li>
-          <li><span class="dot"></span><span>Docker-first local stack with Next.js, FastAPI, Celery, PostgreSQL, and Redis.</span></li>
+          <li><span class="dot"></span><span>대시보드 한 화면에서 글 작성, 작업 큐, 실제 포스트 프리뷰, 메타 상태를 함께 확인할 수 있습니다.</span></li>
+          <li><span class="dot"></span><span>블로그마다 다른 워크플로와 프롬프트를 유지해 채널 정체성을 분리합니다.</span></li>
+          <li><span class="dot"></span><span><code>/articles</code>에서 최종 글 모양을 검토한 뒤 수동으로 Blogger에 발행합니다.</span></li>
+          <li><span class="dot"></span><span><code>description</code>, <code>og:description</code>, <code>twitter:description</code> 메타를 실제 공개 페이지 기준으로 검증합니다.</span></li>
+          <li><span class="dot"></span><span>Next.js, FastAPI, Celery, PostgreSQL, Redis 기반의 Docker 중심 로컬 스택으로 바로 띄울 수 있습니다.</span></li>
         </ul>
       </aside>
     </section>
 
     <section>
       <div class="section-head">
-        <span class="eyebrow">Why it exists</span>
-        <h2 class="display">Most Blogger tools stop at generation. Operators need the review and verification layers too.</h2>
+        <span class="eyebrow">왜 만들었나</span>
+        <h2 class="display">대부분의 Blogger 도구는 생성까지만 다룹니다. 실제 운영에는 검토와 검증 단계가 더 중요합니다.</h2>
         <p>
-          Bloggent is opinionated about the risky parts of publishing. It treats generation, publishing, and public metadata
-          verification as separate moments because those are the moments where bad automation usually breaks trust.
+          Bloggent는 생성, 발행, 메타 검증을 서로 다른 순간으로 나눕니다.
+          위험한 초안이 바로 공개되거나, Blogger 메타가 제대로 반영됐는지 모른 채 넘어가는 상황을 줄이기 위해서입니다.
         </p>
       </div>
       <div class="feature-grid">
         <article class="card">
-          <span class="mini">Content ops</span>
-          <h3 class="display">Topic to post flow</h3>
-          <p>Discover topics, generate the article package, create imagery, assemble HTML, then review the real post shape before release.</p>
+          <span class="mini">운영 흐름</span>
+          <h3 class="display">주제부터 포스트까지</h3>
+          <p>주제 발굴, 글 생성, 이미지 생성, HTML 조립까지 이어진 뒤, 운영자가 실제 공개 형태를 보고 마지막 검토를 할 수 있습니다.</p>
         </article>
         <article class="card">
-          <span class="mini">Safety</span>
-          <h3 class="display">Manual by design</h3>
-          <p>Publishing is intentionally separate from generation so weak drafts do not become public just because a model responded.</p>
+          <span class="mini">안전장치</span>
+          <h3 class="display">생성과 발행의 분리</h3>
+          <p>모델이 글을 만들었다고 바로 공개하지 않습니다. 생성과 발행을 분리해서 공개 전 검토 시간을 확보합니다.</p>
         </article>
         <article class="card">
-          <span class="mini">Verification</span>
-          <h3 class="display">Live metadata checks</h3>
-          <p>Bloggent verifies the public page instead of assuming Blogger metadata fields turned into real head tags.</p>
+          <span class="mini">검증</span>
+          <h3 class="display">실제 공개 페이지 기준 확인</h3>
+          <p>Blogger API가 메타를 받았다는 이유만으로 끝내지 않고, 공개 페이지에서 실제 메타 태그가 어떻게 보이는지 확인합니다.</p>
         </article>
       </div>
     </section>
 
     <section id="workflow">
       <div class="section-head">
-        <span class="eyebrow">Workflow</span>
-        <h2 class="display">The product loop is simple for operators, but the pipeline underneath stays flexible per blog.</h2>
+        <span class="eyebrow">워크플로</span>
+        <h2 class="display">운영자에게는 단순하게, 내부 파이프라인은 블로그별로 유연하게 유지하는 구조입니다.</h2>
         <p>
-          Different blogs can keep different prompt systems and category rules while the operator still sees one clear review path.
+          여행 블로그와 미스터리 블로그는 같은 말투와 구조를 쓰면 안 됩니다.
+          Bloggent는 블로그마다 다른 프롬프트와 카테고리 규칙을 유지하면서도, 운영자 화면에서는 한눈에 보이는 검토 흐름을 제공합니다.
         </p>
       </div>
       <div class="grid-2">
         <article class="card">
-          <span class="mini">Operator path</span>
-          <h3 class="display">What the user sees</h3>
+          <span class="mini">운영자 관점</span>
+          <h3 class="display">운영자가 보는 흐름</h3>
           <ul class="flow-list">
-            <li><span class="dot"></span><span>Choose a blog and enter a topic or run discovery.</span></li>
-            <li><span class="dot"></span><span>Generate the article package and review it in <code>/articles</code>.</span></li>
-            <li><span class="dot"></span><span>Preview the fully assembled post inline, not inside a cramped inner frame.</span></li>
-            <li><span class="dot"></span><span>Publish manually and verify the live metadata afterwards.</span></li>
+            <li><span class="dot"></span><span>블로그를 고르고 주제를 직접 넣거나 AI 주제 발굴을 실행합니다.</span></li>
+            <li><span class="dot"></span><span>생성된 글 패키지를 <code>/articles</code>에서 검토합니다.</span></li>
+            <li><span class="dot"></span><span>작은 iframe이 아니라 실제 조립된 포스트를 페이지 안에서 바로 확인합니다.</span></li>
+            <li><span class="dot"></span><span>수동 발행 후 공개 페이지 메타 상태를 다시 검증합니다.</span></li>
           </ul>
         </article>
         <article class="card">
-          <span class="mini">System path</span>
-          <h3 class="display">What the platform manages</h3>
+          <span class="mini">시스템 관점</span>
+          <h3 class="display">시스템이 관리하는 흐름</h3>
           <ul class="flow-list">
-            <li><span class="dot"></span><span>Prompt rendering per blog workflow.</span></li>
-            <li><span class="dot"></span><span>AI article generation and optional topic discovery.</span></li>
-            <li><span class="dot"></span><span>Image generation and HTML assembly.</span></li>
-            <li><span class="dot"></span><span>Publish-state tracking, queueing, and verification support.</span></li>
+            <li><span class="dot"></span><span>블로그별 워크플로에 맞춘 프롬프트 렌더링</span></li>
+            <li><span class="dot"></span><span>AI 글 생성과 필요시 주제 발굴</span></li>
+            <li><span class="dot"></span><span>이미지 생성과 HTML 조립</span></li>
+            <li><span class="dot"></span><span>발행 상태 추적, 작업 큐, 메타 검증 보조</span></li>
           </ul>
         </article>
       </div>
@@ -480,80 +481,79 @@
     <section id="seo">
       <div class="section-head">
         <span class="eyebrow">GEO + SEO</span>
-        <h2 class="display">The writing system is now answer-first, metadata-aware, and easier for both search engines and answer engines to quote.</h2>
+        <h2 class="display">현재 글 생성 프롬프트는 답을 먼저 주고, 메타 약속을 맞추며, 검색과 답변형 엔진 모두가 읽기 쉽게 구성됩니다.</h2>
         <p>
-          Bloggent's current article prompts are built around direct openings, quote-ready section starts, metadata alignment,
-          and structure that makes the final article easier to summarize and easier to trust.
+          핵심 질문에 빠르게 답하고, 각 섹션이 실제 하위 질문을 해결하며, 메타 설명과 본문 첫 부분이 같은 약속을 하도록 맞추는 것이 현재 Bloggent 글 구조의 기본 원칙입니다.
         </p>
       </div>
       <div class="feature-grid">
         <article class="card">
-          <span class="mini">Prompt structure</span>
-          <h3 class="display">Answer early</h3>
-          <p>The first part of the article should answer the real query fast, name the entity early, and explain practical value before long scene-setting.</p>
+          <span class="mini">프롬프트 구조</span>
+          <h3 class="display">처음부터 답하기</h3>
+          <p>글 첫 부분에서 핵심 질문에 바로 답하고, 주체와 실용 가치를 초반에 드러내서 군더더기 도입을 줄입니다.</p>
         </article>
         <article class="card">
-          <span class="mini">Metadata</span>
-          <h3 class="display">Align the promise</h3>
-          <p><code>meta_description</code>, <code>excerpt</code>, and the opening body copy should promise the same thing instead of pulling in different directions.</p>
+          <span class="mini">메타 구조</span>
+          <h3 class="display">메타와 본문 약속 맞추기</h3>
+          <p><code>meta_description</code>, <code>excerpt</code>, 본문 첫 부분이 서로 다른 말을 하지 않도록 구조적으로 맞춥니다.</p>
         </article>
         <article class="card">
-          <span class="mini">Blogger reality</span>
-          <h3 class="display">Verify the live page</h3>
-          <p>The dashboard meta state is not a body-quality score. It is a live verification state for the public description tags the crawler may actually see.</p>
+          <span class="mini">Blogger 특성</span>
+          <h3 class="display">실제 공개 메타 확인</h3>
+          <p>대시보드 메타 상태는 본문 품질 점수가 아니라, 공개 페이지에서 크롤러가 읽는 설명 메타가 제대로 반영됐는지 보는 상태값입니다.</p>
         </article>
       </div>
     </section>
 
     <section id="docs">
       <div class="section-head">
-        <span class="eyebrow">Guides</span>
-        <h2 class="display">Read the setup, publishing, SEO, and roadmap guides from one place.</h2>
+        <span class="eyebrow">가이드</span>
+        <h2 class="display">설치부터 운영, SEO, 로드맵까지 한글 가이드로 바로 이어집니다.</h2>
         <p>
-          The docs are structured for quick answers first, then the operational details you need when you are actually wiring a Blogger workflow.
+          각 문서는 먼저 빠른 답을 주고, 그다음 실제 운영에 필요한 설정과 판단 기준을 설명하는 구조로 정리되어 있습니다.
         </p>
       </div>
       <div class="docs-grid">
         <a href="./getting-started.html">
           <article class="card">
-            <span class="mini">Start here</span>
-            <h3 class="display">Getting Started</h3>
-            <p>Boot the stack, fill the right environment variables, connect Google, import blogs, and reach your first publish-and-verify loop.</p>
+            <span class="mini">먼저 보기</span>
+            <h3 class="display">시작하기</h3>
+            <p>환경변수 설정, Docker 실행, Google 연결, 블로그 가져오기, 첫 발행과 검증 루프까지 순서대로 정리했습니다.</p>
           </article>
         </a>
         <a href="./workflow.html">
           <article class="card">
-            <span class="mini">Product model</span>
-            <h3 class="display">Workflow</h3>
-            <p>See how blog-specific prompts, review-first release, and system-managed pipeline stages fit together.</p>
+            <span class="mini">제품 구조</span>
+            <h3 class="display">워크플로 구조</h3>
+            <p>블로그별 워크플로 분리, 생성과 발행의 분리, 시스템 단계와 운영자 단계가 어떻게 나뉘는지 설명합니다.</p>
           </article>
         </a>
         <a href="./seo-metadata.html">
           <article class="card">
-            <span class="mini">Publishing reality</span>
-            <h3 class="display">SEO Metadata</h3>
-            <p>Understand why Blogger metadata is tricky, what Bloggent verifies, and how to improve weak verification states.</p>
+            <span class="mini">운영 현실</span>
+            <h3 class="display">SEO 메타데이터 전략</h3>
+            <p>Blogger 메타가 왜 까다로운지, Bloggent가 무엇을 검증하는지, 메타 상태를 어떻게 개선하는지 다룹니다.</p>
           </article>
         </a>
         <a href="./architecture.html">
           <article class="card">
-            <span class="mini">Stack</span>
-            <h3 class="display">Architecture</h3>
-            <p>Read how the web app, API, workers, queue, and data boundaries are split for operator visibility and safer publishing.</p>
+            <span class="mini">구성</span>
+            <h3 class="display">아키텍처</h3>
+            <p>웹, API, 워커, 큐, 데이터 경계를 어떻게 나눴는지와 왜 수동 발행이 구조적인 선택인지 설명합니다.</p>
           </article>
         </a>
         <a href="./deployment.html">
           <article class="card">
-            <span class="mini">Ops</span>
-            <h3 class="display">Deployment</h3>
-            <p>Use the Docker-first local deployment guide, rebuild commands, health checks, and GitHub Pages asset settings.</p>
+            <span class="mini">운영</span>
+            <h3 class="display">배포</h3>
+            <p>Docker 기반 로컬 실행, 재빌드 명령, 헬스체크, GitHub Pages 관련 환경설정을 빠르게 확인할 수 있습니다.</p>
           </article>
         </a>
         <a href="./faq.html">
           <article class="card">
-            <span class="mini">Answers</span>
+            <span class="mini">질문 모음</span>
             <h3 class="display">FAQ</h3>
-            <p>Get fast answers to the recurring questions around automation, publishing safety, metadata, and multi-blog support.</p>
+            <p>자동 발행, 메타 상태 의미, Blogger 테마 패치, 멀티 블로그 지원 같은 자주 묻는 질문을 모았습니다.</p>
           </article>
         </a>
       </div>
@@ -562,37 +562,37 @@
     <section id="roadmap">
       <div class="section-head">
         <span class="eyebrow">TODO</span>
-        <h2 class="display">The roadmap favors operator clarity first, automation second.</h2>
+        <h2 class="display">로드맵은 무조건 더 자동화하는 방향이 아니라, 더 신뢰할 수 있는 운영 흐름을 만드는 방향에 맞춰져 있습니다.</h2>
         <p>
-          The current priority is not "make it publish even faster at any cost." It is to make the system easier to trust, easier to verify, and easier to operate across multiple blogs.
+          지금 우선순위는 “더 빨리 아무 글이나 올리기”가 아니라, 운영자가 빠르게 판단하면서도 실수는 줄일 수 있게 만드는 것입니다.
         </p>
       </div>
       <div class="roadmap-grid">
         <article class="card">
-          <span class="mini">Now</span>
-          <h3 class="display">Tighten the current loop</h3>
+          <span class="mini">현재</span>
+          <h3 class="display">현재 루프 다듬기</h3>
           <ul class="todo-list">
-            <li><span class="dot"></span><span>Improve Blogger theme patch onboarding for metadata.</span></li>
-            <li><span class="dot"></span><span>Reduce dashboard refresh latency after content actions.</span></li>
-            <li><span class="dot"></span><span>Finish UI consistency across the remaining views.</span></li>
+            <li><span class="dot"></span><span>Blogger 테마 메타 패치 안내를 더 쉽게 만들기</span></li>
+            <li><span class="dot"></span><span>대시보드 액션 후 전체 새로고침 체감 속도 줄이기</span></li>
+            <li><span class="dot"></span><span>남은 화면들의 UI와 문구 톤 통일하기</span></li>
           </ul>
         </article>
         <article class="card">
-          <span class="mini">Next</span>
-          <h3 class="display">Strengthen release quality</h3>
+          <span class="mini">다음</span>
+          <h3 class="display">발행 품질 강화</h3>
           <ul class="todo-list">
-            <li><span class="dot"></span><span>Add pre-publish QA checks for metadata, images, and duplicate coverage.</span></li>
-            <li><span class="dot"></span><span>Expand Search Console and GA4 visibility per connected blog.</span></li>
-            <li><span class="dot"></span><span>Add scheduled publishing while keeping operator approval.</span></li>
+            <li><span class="dot"></span><span>발행 전 제목, 메타, 이미지, 중복 주제 QA 체크 추가</span></li>
+            <li><span class="dot"></span><span>Search Console과 GA4 가시성 확장</span></li>
+            <li><span class="dot"></span><span>운영자 승인 유지형 예약 발행 흐름 추가</span></li>
           </ul>
         </article>
         <article class="card">
-          <span class="mini">Later</span>
-          <h3 class="display">Scale the workspace</h3>
+          <span class="mini">이후</span>
+          <h3 class="display">워크스페이스 확장</h3>
           <ul class="todo-list">
-            <li><span class="dot"></span><span>Add multi-user permissions.</span></li>
-            <li><span class="dot"></span><span>Support stronger production deployment profiles.</span></li>
-            <li><span class="dot"></span><span>Expand provider and asset-delivery choices.</span></li>
+            <li><span class="dot"></span><span>멀티 유저 권한 관리 추가</span></li>
+            <li><span class="dot"></span><span>웹 앱의 프로덕션 실행 프로파일 정리</span></li>
+            <li><span class="dot"></span><span>에셋 공급자와 프롬프트 팩 확장</span></li>
           </ul>
         </article>
       </div>
@@ -600,8 +600,8 @@
   </main>
 
   <footer class="wrap footer-row">
-    <div>Bloggent docs for GEO + SEO Blogger publishing operations.</div>
-    <a href="https://github.com/sheryloe/BloggerGent">Repository</a>
+    <div>Bloggent GitHub Pages 문서</div>
+    <a href="https://github.com/sheryloe/BloggerGent">저장소 보기</a>
   </footer>
 </body>
 </html>

@@ -1,46 +1,46 @@
 ---
-title: Roadmap
+title: 로드맵
 ---
 
-# Roadmap
+# 로드맵
 
-This page tracks the current product direction for Bloggent.
+이 문서는 Bloggent의 현재 제품 방향과 TODO 우선순위를 정리합니다.
 
-## Quick Answer
+## 빠른 답변
 
-The current roadmap is focused on shipping a stronger operator workflow, not chasing one-click automation for its own sake.
+지금 Bloggent의 로드맵은 “아무거나 더 자동화하기”보다 “운영자가 더 빠르게 판단하고, 더 안전하게 발행하게 만들기”에 초점을 둡니다.
 
-## Already in place
+## 이미 들어간 것
 
-- multi-blog import and workflow separation
-- manual-safe publishing
-- generated article review
-- inline full-post preview
-- GEO + SEO article prompt structure
-- public metadata verification flow
+- 멀티 블로그 가져오기와 워크플로 분리
+- 수동 발행 보호 흐름
+- 생성 글 검토 화면
+- 전체 포스트 프리뷰
+- GEO + SEO 글 생성 프롬프트 구조
+- 공개 메타 검증 흐름
 
 ## Now
 
-- improve the Blogger SEO theme patch onboarding flow
-- reduce dashboard refresh latency after content actions
-- finish visual and copy consistency across the remaining dashboard views
-- make verification states easier to understand at both article and blog levels
+- Blogger 테마 메타 패치 안내 흐름 개선
+- 대시보드 액션 후 새로고침 체감 속도 개선
+- 남은 화면들의 UI와 문구 톤 통일
+- 글 단위와 블로그 단위 메타 상태를 더 쉽게 이해하게 만들기
 
 ## Next
 
-- add pre-publish QA checks for title, metadata, image readiness, and duplicate coverage
-- expand Search Console and GA4 reporting visibility per connected blog
-- add scheduled publishing flows that still preserve operator approval
-- improve error recovery for failed jobs and retried publish runs
+- 제목, 메타, 이미지, 중복 주제 기준의 발행 전 QA 체크 추가
+- Search Console과 GA4 가시성 확장
+- 운영자 승인 유지형 예약 발행 추가
+- 실패 작업과 재시도 이력 가시성 개선
 
 ## Later
 
-- add multi-user permissions
-- add stronger production deployment profiles for the web app
-- add more public asset provider options
-- extend prompt packs for more blog categories
+- 멀티 유저 권한 관리
+- 웹 앱의 프로덕션 실행 프로파일 보강
+- 공개 에셋 공급자 확장
+- 더 다양한 블로그 카테고리용 프롬프트 팩 추가
 
-## Product principle behind the roadmap
+## 제품 원칙
 
-Bloggent should help operators move faster without hiding the risky parts of publishing.
-The roadmap follows that principle: clarity first, automation second, blind autonomy never.
+Bloggent는 운영자가 더 빨리 움직이도록 도와야 하지만, 위험한 단계를 가려서는 안 됩니다.
+그래서 이 로드맵은 “명확성 우선, 자동화는 그다음, 무조건 자동은 지양”이라는 원칙을 따릅니다.

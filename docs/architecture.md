@@ -1,87 +1,87 @@
 ---
-title: Architecture
+title: 아키텍처
 ---
 
-# Architecture
+# 아키텍처
 
-Bloggent is split into a web dashboard, an API app, and background workers so publishing operations stay observable and reviewable.
+Bloggent는 웹 대시보드, API 앱, 백그라운드 워커를 분리한 구조로 만들어져 있어서, 퍼블리싱 운영 상태를 더 쉽게 보고 검토할 수 있습니다.
 
-## Quick Answer
+## 빠른 답변
 
-The product is designed as an operator workspace, not just a one-click content generator.
-That is why UI, orchestration, publishing state, and verification logic are separated into services with clear boundaries.
+Bloggent는 단순한 “원클릭 글 생성기”가 아니라 운영용 워크스페이스입니다.
+그래서 UI, 생성 오케스트레이션, 발행 상태, 메타 검증 로직을 서로 다른 책임으로 나눠 두었습니다.
 
-## At a Glance
+## 한눈에 보기
 
-- Frontend: Next.js 14, TypeScript, Tailwind CSS
-- Backend: FastAPI, SQLAlchemy, Alembic, Pydantic
-- Background work: Celery worker plus Celery beat scheduler
-- Data and queues: PostgreSQL and Redis
-- Local runtime: Docker Compose
-- Asset options: local storage plus GitHub Pages support
+- 프론트엔드: Next.js 14, TypeScript, Tailwind CSS
+- 백엔드: FastAPI, SQLAlchemy, Alembic, Pydantic
+- 백그라운드 작업: Celery worker, Celery beat scheduler
+- 데이터와 큐: PostgreSQL, Redis
+- 로컬 실행: Docker Compose
+- 에셋 옵션: 로컬 저장소, GitHub Pages 지원
 
-## Frontend responsibilities
+## 프론트엔드 역할
 
-The dashboard focuses on operational clarity.
-Its current key views are:
+대시보드는 예쁜 화면보다 운영 판단을 돕는 데 더 초점을 둡니다.
+현재 핵심 화면은 아래와 같습니다.
 
-- `/` for actions, queue, preview, and summary state
-- `/articles` for review, publish, and metadata verification
-- `/jobs` for pipeline execution visibility
-- `/settings` for secrets, imports, and connections
-- `/google` for connected reporting views
+- `/` : 액션, 작업 큐, 프리뷰, 상태 요약
+- `/articles` : 글 검토, 발행, 메타 검증
+- `/jobs` : 파이프라인 실행 상태
+- `/settings` : 자격증명, 블로그 가져오기, 연결 설정
+- `/google` : Google 연동 리포팅 화면
 
-## Backend responsibilities
+## 백엔드 역할
 
-The FastAPI app handles:
+FastAPI 앱은 아래를 처리합니다.
 
 - Blogger OAuth
-- blog import
-- workflow configuration
-- prompt rendering
-- content generation orchestration
-- HTML assembly
-- publishing
-- SEO metadata verification
+- 블로그 가져오기
+- 워크플로 설정
+- 프롬프트 렌더링
+- 글 생성 오케스트레이션
+- HTML 조립
+- 발행
+- SEO 메타 검증
 
-## Background processing
+## 백그라운드 처리
 
-Long-running or scheduled work is delegated to Celery:
+오래 걸리거나 예약성 작업은 Celery로 넘깁니다.
 
-- `worker` processes generation jobs
-- `scheduler` runs timed automation
+- `worker` : 생성 작업 처리
+- `scheduler` : 예약 작업 실행
 
-This keeps the dashboard responsive while heavy generation and publishing tasks run in the background.
+이렇게 해야 대시보드는 계속 반응성을 유지하고, 긴 작업은 뒤에서 안전하게 돌릴 수 있습니다.
 
-## Data boundaries
+## 데이터 경계
 
-Bloggent separates several domains on purpose:
+Bloggent는 아래 도메인을 의도적으로 분리합니다.
 
-- blog configuration
-- agent prompt configuration
-- topics
-- articles
-- Blogger publish records
-- jobs
-- encrypted settings and tokens
+- 블로그 설정
+- 에이전트 프롬프트 설정
+- 토픽
+- 글
+- Blogger 발행 기록
+- 작업 기록
+- 암호화된 설정과 토큰
 
-That separation makes it easier to review drafts, prevent accidental overwrites, and inspect failures without collapsing everything into one record.
+이 구조 덕분에 초안 검토, 공개 상태 추적, 실패 분석을 한 테이블에 우겨 넣지 않고 관리할 수 있습니다.
 
-## Why manual publish is architectural, not cosmetic
+## 수동 발행이 구조적인 이유
 
-Manual publish is not just a UI preference.
-It is one of the core product boundaries.
+수동 발행은 단순히 버튼 하나를 더 두는 UI 선택이 아닙니다.
+Bloggent 아키텍처의 핵심 경계 중 하나입니다.
 
-The system intentionally treats these as different moments:
+시스템은 아래를 서로 다른 순간으로 취급합니다.
 
-1. generate content
-2. review content
-3. publish content
-4. verify live metadata
+1. 글 생성
+2. 글 검토
+3. 글 발행
+4. 공개 메타 검증
 
-That prevents AI generation from automatically becoming public output without operator approval.
+이렇게 해야 AI가 만든 결과물이 자동으로 바로 공개되는 일을 막을 수 있습니다.
 
-## Why Blogger SEO needs its own path
+## Blogger SEO를 별도로 다루는 이유
 
-Blogger metadata is platform-constrained, so Bloggent treats SEO verification as a first-class service concern.
-The app compares expected metadata with the real live page instead of trusting API acceptance as proof.
+Blogger 메타는 플랫폼 제약이 크기 때문에, Bloggent는 SEO 검증을 별도의 1급 관심사로 다룹니다.
+API가 값을 받았다고 끝내지 않고, 실제 공개 페이지 기준으로 기대한 메타와 비교합니다.

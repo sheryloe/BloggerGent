@@ -1,18 +1,18 @@
 ---
-title: Deployment
+title: 배포
 ---
 
-# Deployment
+# 배포
 
-Bloggent is designed for Docker-first local deployment and operator-friendly rebuilds.
+Bloggent는 Docker 중심 로컬 배포와 빠른 재기동 흐름에 맞춰 설계되어 있습니다.
 
-## Quick Answer
+## 빠른 답변
 
-For local use, fill `.env`, start Docker Compose, verify web and API health, and rebuild only the services you changed.
+로컬에서는 `.env`를 채우고 Docker Compose를 실행한 뒤, 웹과 API가 살아 있는지 확인하고, 변경한 서비스만 골라 재빌드하면 됩니다.
 
-## At a Glance
+## 한눈에 보기
 
-Services in the current compose stack:
+현재 compose 스택 서비스:
 
 - `postgres`
 - `redis`
@@ -22,41 +22,41 @@ Services in the current compose stack:
 - `scheduler`
 - `web`
 
-Main local addresses:
+주요 로컬 주소:
 
-- Web: `http://localhost:3001`
-- API docs: `http://localhost:8000/docs`
-- API health: `http://localhost:8000/healthz`
+- 웹: `http://localhost:3001`
+- API 문서: `http://localhost:8000/docs`
+- API 헬스체크: `http://localhost:8000/healthz`
 
-## Full local boot
+## 전체 로컬 부팅
 
 ```bash
 docker compose up --build -d
 ```
 
-## Narrow rebuild after app changes
+## 앱만 재빌드
 
-If you changed only the application layers, this is usually enough:
+애플리케이션 레이어만 바꿨다면 보통 아래로 충분합니다.
 
 ```bash
 docker compose up --build -d api worker scheduler web
 ```
 
-## Health checks
+## 헬스체크
 
 ```bash
 curl http://localhost:8000/healthz
 ```
 
-Expected:
+예상 응답:
 
 ```json
 {"status":"ok"}
 ```
 
-## Environment groups
+## 환경변수 묶음
 
-### Core app
+### 핵심 앱 설정
 
 - `DATABASE_URL`
 - `REDIS_URL`
@@ -64,7 +64,7 @@ Expected:
 - `PUBLIC_WEB_BASE_URL`
 - `SETTINGS_ENCRYPTION_SECRET`
 
-### Model providers
+### 모델 공급자
 
 - `OPENAI_API_KEY`
 - `OPENAI_TEXT_MODEL`
@@ -80,7 +80,7 @@ Expected:
 - `BLOGGER_REDIRECT_URI`
 - `BLOGGER_REFRESH_TOKEN`
 
-### GitHub Pages assets
+### GitHub Pages 에셋
 
 - `PUBLIC_IMAGE_PROVIDER`
 - `GITHUB_PAGES_OWNER`
@@ -90,36 +90,36 @@ Expected:
 - `GITHUB_PAGES_BASE_URL`
 - `GITHUB_PAGES_ASSETS_DIR`
 
-## Current local note
+## 현재 로컬 실행 주의점
 
-The current `web` service in `docker-compose.yml` runs the Next.js development server.
-That is convenient for local UI work, but it is not the fastest production profile.
+지금 `docker-compose.yml`의 `web` 서비스는 Next.js 개발 서버(`npm run dev`)로 뜹니다.
+로컬 UI 작업에는 편하지만, 프로덕션 기준 가장 빠른 실행 방식은 아닙니다.
 
-For production-style deployment later, the web container should move toward a build plus `next start` style setup.
+나중에는 `next build + next start`에 가까운 프로필로 분리하는 것이 좋습니다.
 
-## Verification commands
+## 검증 명령
 
-API verification:
+API 검증:
 
 ```bash
 python -m compileall apps/api/app
 ```
 
-Web verification:
+웹 검증:
 
 ```bash
 cd apps/web
 npm run build
 ```
 
-## Practical deployment checklist
+## 실전 배포 체크리스트
 
-1. Fill `.env`
-2. Start the full stack
-3. Verify the health endpoint
-4. Open the dashboard
-5. Test Google OAuth
-6. Import a blog
-7. Generate a draft
-8. Publish one safe test article
-9. Verify metadata on the live page
+1. `.env`를 채웁니다.
+2. 전체 스택을 실행합니다.
+3. 헬스체크를 확인합니다.
+4. 대시보드를 엽니다.
+5. Google OAuth를 테스트합니다.
+6. 블로그를 가져옵니다.
+7. 테스트용 초안을 생성합니다.
+8. 안전한 테스트 글 한 개를 발행합니다.
+9. 공개 메타를 검증합니다.

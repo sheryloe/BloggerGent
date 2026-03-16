@@ -1,57 +1,57 @@
 ---
-title: Security
+title: 보안
 ---
 
-# Security
+# 보안
 
-Bloggent is an operator tool, so safe workflow choices and secret handling both matter.
+Bloggent는 운영 도구이기 때문에, 코드 수준 보호와 워크플로 수준 보호가 둘 다 중요합니다.
 
-## Quick Answer
+## 빠른 답변
 
-The product already protects secrets, blocks some unsafe publishing mistakes, and keeps review in the loop before public release.
+현재 제품은 민감정보 암호화, 수동 발행 보호, 일부 발행 안전장치를 이미 가지고 있고, 공개 전 검토가 반드시 개입되도록 설계되어 있습니다.
 
-## Current protections
+## 현재 보호 장치
 
-### Secret storage
+### 민감정보 저장
 
-Sensitive settings such as API keys and refresh tokens are encrypted before they are stored.
+API 키와 리프레시 토큰 같은 값은 저장 전에 암호화됩니다.
 
-Protected values include:
+대표 예시:
 
-- OpenAI API key
-- Gemini API key
-- GitHub token
-- Blogger refresh token
+- OpenAI API 키
+- Gemini API 키
+- GitHub 토큰
+- Blogger 리프레시 토큰
 
-### Publish safety
+### 발행 보호
 
-The service is built around manual release.
-That reduces the risk of weak drafts going public without human review.
+서비스 구조 자체가 수동 발행 기준입니다.
+그래서 약한 초안이 사람 검토 없이 바로 공개될 위험을 줄입니다.
 
-### Overwrite protection
+### 덮어쓰기 방지
 
-The pipeline is designed to avoid blindly overwriting already public Blogger posts.
+파이프라인은 이미 공개된 Blogger 포스트를 무작정 덮어쓰지 않도록 설계되어 있습니다.
 
-### Topic safety
+### 중복 주제 방지
 
-Duplicate-topic checks reduce the chance of repeatedly generating the same angle across the same blog.
+같은 블로그에서 비슷한 주제를 반복 생성할 확률을 낮추기 위해 중복 주제 체크를 둡니다.
 
-## Operational safety notes
+## 운영상 보안 메모
 
-For real deployments, keep these in mind:
+실사용 환경에서는 아래를 꼭 신경 써야 합니다.
 
-- set a strong `SETTINGS_ENCRYPTION_SECRET`
-- restrict who can access the running dashboard
-- treat Blogger OAuth credentials like production secrets
-- verify public metadata after publishing instead of assuming the API succeeded
+- 강한 `SETTINGS_ENCRYPTION_SECRET` 사용
+- 대시보드 접근 제어
+- Blogger OAuth 자격증명 보호
+- 발행 후 공개 메타 재검증
 
-## Remaining limitations
+## 남아 있는 한계
 
-Some limitations are platform-level, not only code-level.
-Blogger metadata still needs verification and sometimes theme-level fallback logic.
+일부 한계는 코드보다 플랫폼 쪽 문제입니다.
+Blogger 메타는 여전히 테마 패치와 라이브 검증이 필요한 경우가 있습니다.
 
-That is why Bloggent emphasizes:
+그래서 Bloggent는 아래를 계속 강조합니다.
 
-- manual review
-- publish separation
-- live metadata verification
+- 수동 검토
+- 생성과 발행의 분리
+- 실제 공개 메타 검증
