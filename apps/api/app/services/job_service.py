@@ -21,13 +21,26 @@ def create_job(
     raw_prompts: dict | None = None,
     raw_responses: dict | None = None,
 ) -> Job:
-    duplicate = find_duplicate_match(db, blog_id=blog_id, candidate=keyword)
+    resolved_topic_id = topic_id
+    if resolved_topic_id is None:
+        existing_topic = db.execute(
+            select(Topic).where(Topic.blog_id == blog_id, Topic.keyword == keyword)
+        ).scalar_one_or_none()
+        if existing_topic:
+            resolved_topic_id = existing_topic.id
+
+    duplicate = find_duplicate_match(
+        db,
+        blog_id=blog_id,
+        candidate=keyword,
+        include_topics=False,
+    )
     if duplicate:
         raise DuplicateContentError(f"중복 주제로 작업을 만들 수 없습니다. 기준값: {duplicate.value}")
 
     job = Job(
         blog_id=blog_id,
-        topic_id=topic_id,
+        topic_id=resolved_topic_id,
         keyword_snapshot=keyword,
         publish_mode=publish_mode,
         status=initial_status,

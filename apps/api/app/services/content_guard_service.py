@@ -51,10 +51,11 @@ def _is_similar(candidate: str, existing: str) -> bool:
     return ratio >= 0.9
 
 
-def _iter_existing_candidates(db: Session, blog_id: int):
-    topics = db.execute(select(Topic).where(Topic.blog_id == blog_id)).scalars().all()
-    for topic in topics:
-        yield DuplicateMatch("topic", topic.id, topic.keyword, "이미 저장된 주제와 겹칩니다.")
+def _iter_existing_candidates(db: Session, blog_id: int, *, include_topics: bool = True):
+    if include_topics:
+        topics = db.execute(select(Topic).where(Topic.blog_id == blog_id)).scalars().all()
+        for topic in topics:
+            yield DuplicateMatch("topic", topic.id, topic.keyword, "이미 저장된 주제 후보와 겹칩니다.")
 
     jobs = db.execute(select(Job).where(Job.blog_id == blog_id)).scalars().all()
     for job in jobs:
@@ -78,11 +79,12 @@ def find_duplicate_match(
     *,
     blog_id: int,
     candidate: str,
+    include_topics: bool = True,
     exclude_topic_id: int | None = None,
     exclude_job_id: int | None = None,
     exclude_article_id: int | None = None,
 ) -> DuplicateMatch | None:
-    for item in _iter_existing_candidates(db, blog_id):
+    for item in _iter_existing_candidates(db, blog_id, include_topics=include_topics):
         if item.source_type == "topic" and item.source_id == exclude_topic_id:
             continue
         if item.source_type == "job" and item.source_id == exclude_job_id:
@@ -110,7 +112,7 @@ def filter_duplicate_topic_items(
             skipped.append(
                 {
                     "keyword": item.keyword,
-                    "reason": f"같은 실행 안에서 이미 선택된 '{intra_match}'와 너무 비슷합니다.",
+                    "reason": f"같은 배치 안에 이미 선택된 '{intra_match}'와 너무 비슷합니다.",
                 }
             )
             continue
