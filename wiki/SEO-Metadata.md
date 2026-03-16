@@ -1,16 +1,25 @@
 # SEO Metadata
 
-## Blogger limitation
+Bloggent treats Blogger SEO metadata as a live verification problem, not as a solved API field.
 
-`customMetaData` is not a reliable public `<head>` metadata path for Blogger.
+## Quick Answer
 
-## Bloggent strategy
+The dashboard state is not a full SEO body score.
+It is a metadata verification state for:
 
-1. store expected description
-2. embed it into the article body
-3. use a Blogger theme patch in `<head>`
-4. verify the public result
+- `description`
+- `og:description`
+- `twitter:description`
 
-## Result
+## Why this exists
 
-Bloggent verifies the real public page instead of assuming the API solved metadata correctly.
+Blogger `customMetaData` does not reliably become the final public `<head>` output.
+That is why Bloggent stores the expected description, supports a theme patch fallback, and verifies the live page after publishing.
+
+## What to do if the result is weak
+
+1. check whether the article is public
+2. confirm the meta description matches the article promise
+3. run search description sync if needed
+4. install the Blogger theme patch
+5. run live verification again

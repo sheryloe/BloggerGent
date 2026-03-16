@@ -1,5 +1,5 @@
 title: Bloggent
-description: Multi-blog Blogger automation workspace documentation
+description: Blogger publishing workspace documentation for GEO + SEO operations
 theme: minima
 markdown: kramdown
 header_pages:
@@ -10,3 +10,4 @@ header_pages:
   - deployment.md
   - security.md
   - faq.md
+  - roadmap.md

@@ -168,7 +168,7 @@ export default async function ArticlesPage({
                   <div className="rounded-[24px] border border-ink/10 bg-white/70 p-5">
                     <p className="text-xs uppercase tracking-[0.16em] text-slate-500">실제 게시 미리보기</p>
                     <p className="mt-2 text-sm leading-7 text-slate-600">
-                      아래 프레임은 조립된 HTML을 별도 프레임에서 렌더링한 결과입니다. 페이지 카드 색과 섞이지 않도록 분리해서 보여줍니다.
+                      아래 미리보기는 조립된 HTML을 실제 게시물 형태에 가깝게 바로 렌더링한 결과입니다. 내부 스크롤 없이 페이지 흐름 안에서 전체 내용을 확인할 수 있습니다.
                     </p>
                     <div className="mt-4">
                       <ArticlePreviewFrame article={selectedArticle} />

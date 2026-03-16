@@ -1,22 +1,33 @@
 # Workflow
 
-Bloggent splits workflow stages into user-visible stages and system stages.
+Bloggent keeps the workflow blog-specific and review-first.
 
-## User-visible
+## Quick Answer
 
-- Topic Discovery
-- Writing Package
-- Image Generation
+Generation and publishing are different steps on purpose.
+The system can automate the heavy pipeline work, but the operator still chooses when something becomes public.
+
+## Main stages
+
+User-facing:
+
+1. Topic Discovery
+2. Article Generation
+3. Image Generation
 
 Optional:
 
-- Image Prompt Refinement
+4. Image Prompt Refinement
 
-## System stages
+System-managed:
 
 - HTML Assembly
 - Publish Queue
+- Meta Verification Support
 
-## Why
+## Why it is split this way
 
-This model keeps the operator view simple while still preserving the full backend pipeline.
+- different blogs need different prompts
+- review should happen before publishing
+- metadata verification should happen after publishing
+- the operator should not have to wade through low-level pipeline details to approve a post

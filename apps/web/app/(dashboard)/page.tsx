@@ -6,9 +6,9 @@ import {
   ImageIcon,
   Layers3,
   ShieldCheck,
-  Sparkles,
 } from "lucide-react";
 
+import { ArticleSeoMetaCard } from "@/components/dashboard/article-seo-meta-card";
 import { ArticlePreviewFrame } from "@/components/dashboard/article-preview-frame";
 import { ContentActionPanel } from "@/components/dashboard/content-action-panel";
 import { StatusBadge } from "@/components/dashboard/status-badge";
@@ -67,6 +67,10 @@ function getSeoScore(meta: ArticleSeoMeta | null) {
     meta.twitter_description_status.status,
   ];
 
+  if (statuses.every((status) => status === "idle")) {
+    return null;
+  }
+
   const total = statuses.reduce((score, status) => {
     if (status === "ok") return score + 100;
     if (status === "warning") return score + 55;
@@ -83,16 +87,45 @@ function scoreTone(score: number | null) {
   return "text-rose-600 dark:text-rose-300";
 }
 
-function formatMetaStatus(status: string) {
-  if (status === "ok") return "정상";
-  if (status === "warning") return "주의";
-  if (status === "idle") return "대기";
-  return status;
-}
+function getSeoState(meta: ArticleSeoMeta | null) {
+  if (!meta) {
+    return {
+      score: null,
+      value: "검증 전",
+      detail: "미리보기 글이 없어 메타 검증 상태를 계산할 수 없습니다.",
+    };
+  }
 
-function formatMetaLabel(label: string) {
-  if (label.toLowerCase() === "verification") return "검증";
-  return label;
+  const statuses = [
+    meta.head_meta_description_status.status,
+    meta.og_description_status.status,
+    meta.twitter_description_status.status,
+  ];
+  const score = getSeoScore(meta);
+
+  if (statuses.every((status) => status === "idle")) {
+    if (!meta.verification_target_url) {
+      return {
+        score: null,
+        value: "발행 전",
+        detail: "아직 공개 URL이 없어 라이브 메타 검증을 실행할 수 없습니다.",
+      };
+    }
+
+    return {
+      score: null,
+      value: "검증 전",
+      detail: "20%처럼 보이던 값은 실점이 아니라 공개 페이지 메타 검증을 아직 실행하지 않은 상태였습니다.",
+    };
+  }
+
+  return {
+    score,
+    value: score === null ? "검증 전" : `${score}%`,
+    detail:
+      meta.warnings[0] ??
+      "이 값은 본문 품질 점수가 아니라 description, og:description, twitter:description 3종 메타 태그 검증 결과입니다.",
+  };
 }
 
 function StatCard({
@@ -144,33 +177,6 @@ function SummaryTile({
   );
 }
 
-function MetaPill({
-  label,
-  status,
-  message,
-}: {
-  label: string;
-  status: string;
-  message: string;
-}) {
-  const statusClass =
-    status === "ok"
-      ? "border-emerald-200/80 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200"
-      : status === "warning"
-        ? "border-amber-200/80 bg-amber-500/10 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200"
-        : "border-slate-200/80 bg-slate-100 text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-zinc-400";
-
-  return (
-    <div className={`rounded-[22px] border px-4 py-4 ${statusClass}`}>
-      <div className="flex items-center justify-between gap-3">
-        <p className="truncate text-sm font-semibold">{formatMetaLabel(label)}</p>
-        <span className="shrink-0 text-[11px] uppercase tracking-[0.18em]">{formatMetaStatus(status)}</span>
-      </div>
-      <p className="mt-2 line-clamp-3 text-sm leading-6">{message}</p>
-    </div>
-  );
-}
-
 function MobileQueueCard({ job }: { job: Job }) {
   return (
     <div className="rounded-[24px] border border-slate-200/70 bg-white/85 p-4 shadow-sm dark:border-white/10 dark:bg-white/5">
@@ -210,7 +216,8 @@ export default async function DashboardPage() {
   const totalPublishedPosts = metrics.blog_summaries.reduce((sum, item) => sum + item.published_posts, 0);
   const scheduledPosts = jobs.filter((job) => !inactiveStatuses.includes(job.status)).length;
   const imagesToday = jobs.filter((job) => job.image && isToday(job.updated_at ?? job.created_at)).length;
-  const seoScore = getSeoScore(featuredSeo);
+  const seoState = getSeoState(featuredSeo);
+  const seoScore = seoState.score;
   const publishedLinks = metrics.latest_published_links.slice(0, 4);
   const queueRows = jobs.slice(0, 8);
   const leadBlog = blogs[0] ?? null;
@@ -280,9 +287,9 @@ export default async function DashboardPage() {
               hint={leadBlog?.content_category ?? "콘텐츠 분류 정보가 없습니다."}
             />
             <SummaryTile
-              label="SEO 준비도"
-              value={seoScore === null ? "대기" : `${seoScore}%`}
-              hint={featuredArticle ? `"${featuredArticle.title}" 기준` : "대표 글이 아직 없습니다."}
+              label="메타 검증 상태"
+              value={seoState.value}
+              hint={featuredArticle ? `현재 미리보기 글 기준: "${featuredArticle.title}"` : "미리보기 글이 아직 없습니다."}
             />
             <SummaryTile
               label="발굴 주제"
@@ -321,15 +328,15 @@ export default async function DashboardPage() {
           accentClass="bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200"
         />
         <StatCard
-          title="현재 SEO 점수"
-          value={seoScore === null ? "--" : `${seoScore}%`}
-          detail="대표 글의 메타 설명, OG, Twitter 상태를 기준으로 계산합니다."
+          title="현재 메타 검증 상태"
+          value={seoState.value}
+          detail={seoState.detail}
           icon={<ShieldCheck className="h-5 w-5" />}
           accentClass="bg-sky-500/10 text-sky-700 dark:bg-sky-500/15 dark:text-sky-200"
         />
       </section>
 
-      <section className="grid gap-6 2xl:grid-cols-[minmax(0,1.12fr)_minmax(340px,0.88fr)]">
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-6">
           <ContentActionPanel blogs={blogs} topics={topics} />
 
@@ -402,91 +409,44 @@ export default async function DashboardPage() {
         </div>
 
         <div className="space-y-6">
-          <Card className="overflow-hidden">
-            <CardHeader className="border-b border-slate-200/70 dark:border-white/10">
-              <div className="flex flex-col gap-3">
-                <CardDescription>미리보기</CardDescription>
-                <CardTitle className="text-2xl sm:text-[28px]">실제 포스트 프리뷰</CardTitle>
-              </div>
+          <Card>
+            <CardHeader>
+              <CardDescription>프리뷰와 SEO 안내</CardDescription>
+              <CardTitle className="text-2xl sm:text-[28px]">지금 보고 있는 기준 글</CardTitle>
             </CardHeader>
-
-            <CardContent className="space-y-5 p-5 sm:p-6">
+            <CardContent className="space-y-4">
               {featuredArticle ? (
                 <>
-                  <div className="space-y-3">
-                    <div className="flex flex-wrap gap-2">
-                      <Badge className="border-emerald-200/80 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/15 dark:text-emerald-200">
-                        대표 초안
-                      </Badge>
-                      {featuredArticle.labels.slice(0, 3).map((label) => (
-                        <Badge key={label} className="max-w-[160px] truncate">
-                          {label}
-                        </Badge>
-                      ))}
-                    </div>
-                    <h2 className="line-clamp-2 text-2xl font-semibold leading-tight text-slate-950 dark:text-zinc-50">
+                  <div className="rounded-[24px] border border-slate-200/70 bg-slate-50/80 px-4 py-4 dark:border-white/10 dark:bg-white/5">
+                    <p className="text-sm font-medium text-slate-500 dark:text-zinc-400">현재 미리보기 글</p>
+                    <p className="mt-2 line-clamp-3 text-base font-semibold text-slate-950 dark:text-zinc-100">
                       {featuredArticle.title}
-                    </h2>
-                    <p className="line-clamp-4 text-sm leading-7 text-slate-500 dark:text-zinc-400">
-                      {featuredArticle.excerpt}
+                    </p>
+                    <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-500 dark:text-zinc-400">
+                      {featuredArticle.meta_description}
                     </p>
                   </div>
 
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <div className="rounded-[22px] border border-slate-200/70 bg-slate-50/80 px-4 py-4 dark:border-white/10 dark:bg-white/5">
-                      <p className="text-sm font-medium text-slate-500 dark:text-zinc-400">읽는 시간</p>
-                      <p className="mt-2 text-lg font-semibold text-slate-950 dark:text-zinc-50">
-                        {featuredArticle.reading_time_minutes}분
-                      </p>
-                    </div>
-                    <div className="rounded-[22px] border border-slate-200/70 bg-slate-50/80 px-4 py-4 dark:border-white/10 dark:bg-white/5">
-                      <p className="text-sm font-medium text-slate-500 dark:text-zinc-400">SEO 점수</p>
-                      <p className={`mt-2 text-lg font-semibold ${scoreTone(seoScore)}`}>
-                        {seoScore === null ? "대기" : `${seoScore}%`}
-                      </p>
-                    </div>
-                    <div className="rounded-[22px] border border-slate-200/70 bg-slate-50/80 px-4 py-4 dark:border-white/10 dark:bg-white/5">
-                      <p className="text-sm font-medium text-slate-500 dark:text-zinc-400">라벨 수</p>
-                      <p className="mt-2 text-lg font-semibold text-slate-950 dark:text-zinc-50">
-                        {featuredArticle.labels.length}개
-                      </p>
-                    </div>
+                  <div className="rounded-[24px] border border-slate-200/70 bg-slate-50/80 px-4 py-4 dark:border-white/10 dark:bg-white/5">
+                    <p className="text-sm font-medium text-slate-500 dark:text-zinc-400">실제 포스트 프리뷰란?</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-zinc-400">
+                      본문 초안만 보는 게 아니라, HTML 조립 후 FAQ와 관련 글까지 붙은 최종 게시 형태를 그대로 보여주는 화면입니다.
+                    </p>
                   </div>
 
-                  <div className="overflow-hidden rounded-[28px] border border-slate-200/70 bg-slate-50/70 p-2 dark:border-white/10 dark:bg-white/5">
-                    <ArticlePreviewFrame article={featuredArticle} height={560} />
+                  <div className="rounded-[24px] border border-slate-200/70 bg-slate-50/80 px-4 py-4 dark:border-white/10 dark:bg-white/5">
+                    <p className="text-sm font-medium text-slate-500 dark:text-zinc-400">메타 검증 상태</p>
+                    <p className={`mt-2 text-2xl font-semibold ${scoreTone(seoScore)}`}>{seoState.value}</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-zinc-400">{seoState.detail}</p>
                   </div>
-
-                  {featuredSeo ? (
-                    <div className="space-y-3">
-                      <p className="text-sm font-medium text-slate-500 dark:text-zinc-400">메타 검수</p>
-                      <div className="grid gap-3">
-                        <MetaPill
-                          label={featuredSeo.head_meta_description_status.label}
-                          status={featuredSeo.head_meta_description_status.status}
-                          message={featuredSeo.head_meta_description_status.message}
-                        />
-                        <MetaPill
-                          label={featuredSeo.og_description_status.label}
-                          status={featuredSeo.og_description_status.status}
-                          message={featuredSeo.og_description_status.message}
-                        />
-                        <MetaPill
-                          label={featuredSeo.twitter_description_status.label}
-                          status={featuredSeo.twitter_description_status.status}
-                          message={featuredSeo.twitter_description_status.message}
-                        />
-                      </div>
-                    </div>
-                  ) : null}
 
                   <Button asChild variant="outline" className="w-full">
-                    <Link href={`/articles?article=${featuredArticle.id}`}>전체 글 작업 화면 열기</Link>
+                    <Link href={`/articles?article=${featuredArticle.id}`}>글 작업 화면에서 메타 검증 열기</Link>
                   </Button>
                 </>
               ) : (
-                <div className="rounded-[28px] border border-dashed border-slate-200/80 bg-slate-50/80 px-4 py-6 text-sm leading-7 text-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-zinc-400">
-                  아직 생성된 글이 없어 프리뷰를 보여줄 수 없습니다. 위에서 주제를 입력하거나 AI 발굴을 실행해 주세요.
+                <div className="rounded-[24px] border border-dashed border-slate-200/80 bg-slate-50/80 px-4 py-5 text-sm leading-7 text-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-zinc-400">
+                  아직 기준으로 잡을 글이 없습니다. 주제를 입력하거나 AI 발굴로 첫 글을 만들어 주세요.
                 </div>
               )}
             </CardContent>
@@ -525,24 +485,80 @@ export default async function DashboardPage() {
                   아직 공개된 링크가 없습니다. 첫 발행이 완료되면 여기에 표시됩니다.
                 </div>
               )}
-
-              <div className="rounded-[28px] border border-slate-200/70 bg-slate-50/80 px-4 py-5 dark:border-white/10 dark:bg-white/5">
-                <div className="flex items-center gap-3">
-                  <div className="rounded-2xl bg-indigo-500/10 p-2 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-200">
-                    <Sparkles className="h-4 w-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="font-medium text-slate-950 dark:text-zinc-100">UI만 손봤습니다</p>
-                    <p className="text-sm leading-6 text-slate-500 dark:text-zinc-400">
-                      글 생성 흐름, API, DB, 블로그 연결 정보는 그대로 두고 배치와 가독성만 정리했습니다.
-                    </p>
-                  </div>
-                </div>
-              </div>
             </CardContent>
           </Card>
         </div>
       </section>
+
+      <Card className="overflow-hidden">
+        <CardHeader className="border-b border-slate-200/70 dark:border-white/10">
+          <div className="flex flex-col gap-3">
+            <CardDescription>실제 게시물 형태</CardDescription>
+            <CardTitle className="text-2xl sm:text-[28px]">실제 포스트 프리뷰</CardTitle>
+            <p className="max-w-3xl text-sm leading-7 text-slate-500 dark:text-zinc-400">
+              내부 스크롤이 있는 작은 박스가 아니라, 최종 조립된 게시물을 페이지 안에서 그대로 펼쳐 보여줍니다.
+            </p>
+          </div>
+        </CardHeader>
+
+        <CardContent className="space-y-5 p-5 sm:p-6">
+          {featuredArticle ? (
+            <>
+              <div className="space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  <Badge className="border-emerald-200/80 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/15 dark:text-emerald-200">
+                    현재 미리보기 글
+                  </Badge>
+                  {featuredArticle.labels.slice(0, 3).map((label) => (
+                    <Badge key={label} className="max-w-[180px] truncate">
+                      {label}
+                    </Badge>
+                  ))}
+                </div>
+                <h2 className="line-clamp-2 text-2xl font-semibold leading-tight text-slate-950 dark:text-zinc-50">
+                  {featuredArticle.title}
+                </h2>
+                <p className="line-clamp-4 text-sm leading-7 text-slate-500 dark:text-zinc-400">
+                  {featuredArticle.excerpt}
+                </p>
+              </div>
+
+              <div className="grid gap-3 lg:grid-cols-[repeat(3,minmax(0,1fr))_minmax(0,1.3fr)]">
+                <div className="rounded-[22px] border border-slate-200/70 bg-slate-50/80 px-4 py-4 dark:border-white/10 dark:bg-white/5">
+                  <p className="text-sm font-medium text-slate-500 dark:text-zinc-400">읽는 시간</p>
+                  <p className="mt-2 text-lg font-semibold text-slate-950 dark:text-zinc-50">
+                    {featuredArticle.reading_time_minutes}분
+                  </p>
+                </div>
+                <div className="rounded-[22px] border border-slate-200/70 bg-slate-50/80 px-4 py-4 dark:border-white/10 dark:bg-white/5">
+                  <p className="text-sm font-medium text-slate-500 dark:text-zinc-400">메타 검증 상태</p>
+                  <p className={`mt-2 text-lg font-semibold ${scoreTone(seoScore)}`}>{seoState.value}</p>
+                </div>
+                <div className="rounded-[22px] border border-slate-200/70 bg-slate-50/80 px-4 py-4 dark:border-white/10 dark:bg-white/5">
+                  <p className="text-sm font-medium text-slate-500 dark:text-zinc-400">라벨 수</p>
+                  <p className="mt-2 text-lg font-semibold text-slate-950 dark:text-zinc-50">
+                    {featuredArticle.labels.length}개
+                  </p>
+                </div>
+                <div className="rounded-[22px] border border-slate-200/70 bg-slate-50/80 px-4 py-4 dark:border-white/10 dark:bg-white/5">
+                  <p className="text-sm font-medium text-slate-500 dark:text-zinc-400">현재 meta description</p>
+                  <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-700 dark:text-zinc-300">
+                    {featuredArticle.meta_description}
+                  </p>
+                </div>
+              </div>
+
+              <ArticlePreviewFrame article={featuredArticle} />
+
+              {featuredSeo ? <ArticleSeoMetaCard articleId={featuredArticle.id} initialMeta={featuredSeo} /> : null}
+            </>
+          ) : (
+            <div className="rounded-[28px] border border-dashed border-slate-200/80 bg-slate-50/80 px-4 py-6 text-sm leading-7 text-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-zinc-400">
+              아직 생성된 글이 없어 프리뷰를 보여줄 수 없습니다. 위에서 주제를 입력하거나 AI 발굴을 실행해 주세요.
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

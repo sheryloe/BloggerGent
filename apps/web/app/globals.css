@@ -109,3 +109,23 @@ body {
 .article-prose section {
   @apply mt-6;
 }
+
+.article-preview-content {
+  overflow-wrap: anywhere;
+}
+
+.article-preview-content article {
+  max-width: 100% !important;
+}
+
+.article-preview-content img {
+  display: block;
+  max-width: 100% !important;
+  height: auto !important;
+}
+
+.article-preview-content pre,
+.article-preview-content code {
+  white-space: pre-wrap;
+  word-break: break-word;
+}

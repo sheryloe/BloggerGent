@@ -2,54 +2,56 @@
 title: Bloggent Docs
 ---
 
-# Bloggent
+# Bloggent Docs
 
-Bloggent is a multi-blog Blogger operating workspace built for real publishing.
+Bloggent is a Blogger publishing workspace for operators who want AI assistance without losing review control.
+It supports multi-blog workflows, GEO + SEO content generation, manual publishing, and public-page metadata verification.
 
-It combines:
+## Quick Answer
 
-- blog import from Google Blogger
-- blog-specific workflow and prompt control
-- AI-assisted topic discovery, writing, image generation, and HTML assembly
-- manual-safe publishing from the generated article list
-- SEO metadata verification on the public page
+Use Bloggent if you need one place to manage Blogger content operations end to end:
 
-## Why this project exists
+- connect Google and import blogs
+- discover topics or enter them manually
+- generate articles and images
+- review assembled posts before release
+- publish manually
+- verify real public SEO metadata after publishing
 
-Most Blogger automation tools stop at content generation.
-Bloggent goes further and focuses on the operational problems that matter in production:
+## At a Glance
 
-- different blogs need different prompt styles
-- generated drafts should not be auto-published blindly
-- published posts must not be overwritten by mistake
-- Blogger metadata needs real public-page verification
+- Product routes: `/`, `/articles`, `/jobs`, `/settings`, `/google`
+- Local web: `http://localhost:3001`
+- Local API docs: `http://localhost:8000/docs`
+- Main stack: Next.js, FastAPI, Celery, PostgreSQL, Redis, Docker Compose
+- Public docs landing page: `index.html`
 
-## Main capabilities
+## Start Here
 
-### Workflow
-- optional topic discovery
-- writing package stage
-- optional image prompt refinement
-- image generation
-- HTML assembly
-- manual publish queue
+- [Getting Started](getting-started.html)
+- [Workflow Model](workflow.html)
+- [SEO Metadata Strategy](seo-metadata.html)
+- [Architecture](architecture.html)
+- [Deployment](deployment.html)
+- [Security](security.html)
+- [FAQ](faq.html)
+- [Roadmap](roadmap.html)
 
-### Safety
-- duplicate-topic detection
-- published-post overwrite protection
-- encrypted secret storage
+## Current Focus
 
-### Monitoring
-- jobs overview
-- generated article list
-- Google/Blogger/Search Console/GA4 visibility
+The product currently emphasizes three ideas:
 
-## Read next
+1. Blog-specific workflows instead of one global prompt setup
+2. Manual-safe publishing instead of blind auto-release
+3. Real public-page SEO verification instead of trusting Blogger metadata blindly
 
-- [Getting Started](getting-started.md)
-- [Workflow Model](workflow.md)
-- [SEO Metadata Strategy](seo-metadata.md)
-- [Architecture](architecture.md)
-- [Deployment](deployment.md)
-- [Security](security.md)
-- [FAQ](faq.md)
+## GEO + SEO Content Model
+
+The current writing prompts are answer-first and metadata-aware.
+They are designed so the opening answers the query fast, each section solves a real sub-question, and the metadata promise matches the body.
+
+## Read the Public Landing Page
+
+If GitHub Pages is configured to publish from `/docs`, the visual landing page for this documentation is:
+
+- [Landing Page](index.html)

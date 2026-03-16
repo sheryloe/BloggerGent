@@ -1,10 +1,18 @@
 # Getting Started
 
-## Local boot
+This page is the fastest path to a working local Bloggent loop.
 
-```bash
-docker compose up --build
-```
+## Quick Answer
+
+1. Fill `.env`
+2. Run Docker Compose
+3. Open `/settings`
+4. Connect Google OAuth
+5. Import Blogger blogs
+6. Generate content
+7. Review in `/articles`
+8. Publish manually
+9. Verify metadata
 
 ## Main addresses
 
@@ -12,18 +20,33 @@ docker compose up --build
 - API docs: `http://localhost:8000/docs`
 - API health: `http://localhost:8000/healthz`
 
-## Minimum setup
+## Minimum environment keys
 
-- OpenAI API key
-- Google OAuth client ID / secret
-- Google OAuth redirect URI
-- public image delivery target
+- `OPENAI_API_KEY`
+- `BLOGGER_CLIENT_ID`
+- `BLOGGER_CLIENT_SECRET`
+- `BLOGGER_REDIRECT_URI`
+- `SETTINGS_ENCRYPTION_SECRET`
 
-## Flow
+Optional:
 
-1. connect Google
-2. import Blogger blogs
-3. adjust blog workflow
-4. generate content
-5. review articles
-6. publish manually
+- `GEMINI_API_KEY`
+- GitHub Pages asset settings
+
+## Boot command
+
+```bash
+docker compose up --build -d
+```
+
+## First-use flow
+
+1. Open `/settings`
+2. Connect Google
+3. Import Blogger blogs
+4. Review each blog workflow
+5. Set Search Console and GA4 mappings if needed
+6. Create a topic or run topic discovery
+7. Review the post in `/articles`
+8. Publish manually
+9. Run live metadata verification

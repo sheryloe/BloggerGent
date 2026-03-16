@@ -4,11 +4,17 @@ title: Security
 
 # Security
 
-Bloggent is still a practical operator tool, but it now includes basic safety measures that matter in real use.
+Bloggent is an operator tool, so safe workflow choices and secret handling both matter.
 
-## Secret storage
+## Quick Answer
 
-Settings such as API keys and refresh tokens are encrypted before they are stored in the database.
+The product already protects secrets, blocks some unsafe publishing mistakes, and keeps review in the loop before public release.
+
+## Current protections
+
+### Secret storage
+
+Sensitive settings such as API keys and refresh tokens are encrypted before they are stored.
 
 Protected values include:
 
@@ -17,16 +23,35 @@ Protected values include:
 - GitHub token
 - Blogger refresh token
 
-## Publish safety
+### Publish safety
 
-The service blocks accidental overwrite of public posts.
-Publishing is manual from the article list so that operators can inspect the final result first.
+The service is built around manual release.
+That reduces the risk of weak drafts going public without human review.
 
-## Topic safety
+### Overwrite protection
 
-Duplicate-topic checks reduce the chance of generating the same subject repeatedly across existing content.
+The pipeline is designed to avoid blindly overwriting already public Blogger posts.
 
-## Remaining limitation
+### Topic safety
 
-Blogger metadata still has platform limitations.
-The SEO strategy therefore uses verification and theme-level fallback logic rather than promising API-perfect metadata behavior.
+Duplicate-topic checks reduce the chance of repeatedly generating the same angle across the same blog.
+
+## Operational safety notes
+
+For real deployments, keep these in mind:
+
+- set a strong `SETTINGS_ENCRYPTION_SECRET`
+- restrict who can access the running dashboard
+- treat Blogger OAuth credentials like production secrets
+- verify public metadata after publishing instead of assuming the API succeeded
+
+## Remaining limitations
+
+Some limitations are platform-level, not only code-level.
+Blogger metadata still needs verification and sometimes theme-level fallback logic.
+
+That is why Bloggent emphasizes:
+
+- manual review
+- publish separation
+- live metadata verification

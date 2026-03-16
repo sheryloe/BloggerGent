@@ -1,22 +1,36 @@
-# BloggerGent Service Roadmap
+# Bloggent Service Roadmap
 
-## 서비스 목표
+This page tracks the current direction of the product.
 
-여러 블로그 채널을 서비스처럼 운영할 수 있는 발행 스튜디오로 정리합니다.
+## Quick Answer
 
-## Priority 1
+The roadmap is centered on better operator control and clearer publishing safety, not on blind one-click automation.
 
-- 채널별 발행 승인 단계와 콘텐츠 캘린더를 둡니다.
-- 이미지 사용 이력과 라이선스 체크를 남깁니다.
-- 운영자가 빠르게 검수할 수 있는 발행 QA 체크리스트를 만듭니다.
+## Already in place
 
-## Priority 2
+- multi-blog workflow separation
+- manual-safe publish flow
+- article review screen
+- inline final post preview
+- GEO + SEO prompt structure
+- live metadata verification
 
-- 채널별 톤과 템플릿을 분리합니다.
-- 발행 실패와 수정 이력을 추적하는 로그를 강화합니다.
-- 발행 예정과 완료 콘텐츠를 나누는 대시보드 뷰를 만듭니다.
+## Now
 
-## Ops
+- improve Blogger theme patch onboarding
+- reduce dashboard refresh latency
+- finish UI consistency across the remaining views
+- make metadata states easier to understand
 
-- SEO 검수 기준과 발행 전 확인 항목을 문서화합니다.
-- 운영자가 매주 확인할 지표를 리포트로 정리합니다.
+## Next
+
+- add pre-publish QA checks
+- expand Search Console and GA4 visibility
+- add scheduled publishing with operator approval
+- improve retry and failure recovery visibility
+
+## Later
+
+- add multi-user permissions
+- support stronger production deployment profiles
+- expand prompt packs and asset providers
