@@ -1,25 +1,25 @@
 # FAQ
 
-## Is publishing automatic?
+## 발행은 자동인가요?
 
-No.
-Final public publishing is manual by design.
+아니요.
+최종 공개 발행은 의도적으로 수동으로 남겨 두었습니다.
 
-## Can different blogs use different prompts?
+## 블로그마다 다른 프롬프트를 쓸 수 있나요?
 
-Yes.
-That is a core feature.
+네.
+그게 Bloggent의 핵심 기능 중 하나입니다.
 
-## Is the dashboard SEO number a full article score?
+## 대시보드 SEO 숫자는 글 전체 점수인가요?
 
-No.
-It is a metadata verification state for the public page, not a complete evaluation of the article body.
+아니요.
+그 값은 공개 페이지 메타 검증 상태이지, 본문 전체 품질 점수는 아닙니다.
 
-## Why does Blogger SEO still need a theme patch?
+## Blogger SEO에 왜 테마 패치가 아직 필요한가요?
 
-Because Blogger API metadata alone is not a reliable public `<head>` path.
+Blogger API 메타 입력만으로는 공개 `<head>` 반영이 안정적으로 보장되지 않기 때문입니다.
 
-## Does Bloggent support GitHub Pages?
+## GitHub Pages를 지원하나요?
 
-Yes.
-It supports GitHub Pages as an asset target, and the `docs/` directory can also be published through GitHub Pages.
+네.
+GitHub Pages를 공개 에셋 경로로 사용할 수 있고, `docs/` 디렉터리도 GitHub Pages로 배포할 수 있습니다.

@@ -1,25 +1,25 @@
-# SEO Metadata
+# SEO 메타데이터
 
-Bloggent treats Blogger SEO metadata as a live verification problem, not as a solved API field.
+Bloggent는 Blogger SEO 메타를 단순 입력 문제가 아니라, 공개 후 검증 문제로 다룹니다.
 
-## Quick Answer
+## 빠른 답변
 
-The dashboard state is not a full SEO body score.
-It is a metadata verification state for:
+대시보드의 메타 상태는 “글 전체 SEO 점수”가 아닙니다.
+아래 3개 메타가 공개 페이지에 어떻게 반영되었는지 확인하는 상태입니다.
 
 - `description`
 - `og:description`
 - `twitter:description`
 
-## Why this exists
+## 왜 이 단계가 필요한가
 
-Blogger `customMetaData` does not reliably become the final public `<head>` output.
-That is why Bloggent stores the expected description, supports a theme patch fallback, and verifies the live page after publishing.
+Blogger의 `customMetaData`가 들어가더라도, 최종 공개 `<head>`가 원하는 상태로 보장되지는 않습니다.
+그래서 Bloggent는 예상 메타 설명을 저장하고, 필요하면 테마 패치를 사용하며, 공개 후 실제 페이지를 다시 검증합니다.
 
-## What to do if the result is weak
+## 결과가 약하게 보일 때 확인할 것
 
-1. check whether the article is public
-2. confirm the meta description matches the article promise
-3. run search description sync if needed
-4. install the Blogger theme patch
-5. run live verification again
+1. 글이 실제로 공개되었는지 확인합니다.
+2. 메타 설명이 글의 핵심 약속과 맞는지 봅니다.
+3. 필요하면 search description 동기화를 다시 실행합니다.
+4. Blogger 테마 메타 패치를 적용합니다.
+5. 공개 메타 검증을 다시 실행합니다.

@@ -1,33 +1,29 @@
-# Workflow
+# 워크플로
 
-Bloggent keeps the workflow blog-specific and review-first.
+Bloggent는 블로그별 워크플로와 검토 우선 발행 흐름을 기본 원칙으로 둡니다.
 
-## Quick Answer
+## 빠른 답변
 
-Generation and publishing are different steps on purpose.
-The system can automate the heavy pipeline work, but the operator still chooses when something becomes public.
+생성과 발행은 의도적으로 분리되어 있습니다.
+시스템은 무거운 파이프라인 작업을 자동화하지만, 공개 시점은 운영자가 결정합니다.
 
-## Main stages
+## 주요 단계
 
-User-facing:
+사용자 관점 단계:
 
-1. Topic Discovery
-2. Article Generation
-3. Image Generation
+1. 주제 발굴
+2. 글 생성
+3. 이미지 생성 또는 이미지 프롬프트 보정
 
-Optional:
+시스템 관리 단계:
 
-4. Image Prompt Refinement
+- HTML 조립
+- 발행 대기
+- 메타 검증 지원
 
-System-managed:
+## 왜 이렇게 나누는가
 
-- HTML Assembly
-- Publish Queue
-- Meta Verification Support
-
-## Why it is split this way
-
-- different blogs need different prompts
-- review should happen before publishing
-- metadata verification should happen after publishing
-- the operator should not have to wade through low-level pipeline details to approve a post
+- 블로그마다 다른 프롬프트와 정체성이 필요합니다.
+- 글 품질 검토는 발행 전에 일어나야 합니다.
+- 메타 검증은 공개 후 실제 페이지 기준으로 이뤄져야 합니다.
+- 운영자는 저수준 파이프라인보다 “지금 공개해도 되는가”를 빨리 판단해야 합니다.

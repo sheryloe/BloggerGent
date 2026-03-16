@@ -1,62 +1,85 @@
 # Bloggent
 
-Bloggent is a Docker-first Blogger publishing workspace for GEO + SEO operations.
-It helps you run multiple Blogger blogs from one dashboard, generate content with AI, review drafts safely, publish manually, and verify the real public SEO metadata after release.
+Bloggent는 GEO + SEO 구조를 따르는 AI 글 생성, 멀티 블로그 운영, 수동 발행 보호, 공개 메타 검증을 하나의 흐름으로 묶는 Blogger 운영 플랫폼입니다.
 
-## Quick Answer
+## 빠른 답변
 
-If you want an AI-assisted Blogger workflow without blind auto-publishing, Bloggent is built for that exact use case.
-It separates topic discovery, article generation, image generation, HTML assembly, review, publishing, and public-page verification so the operator stays in control.
+Bloggent는 “AI가 글을 써 주는 툴”보다 “운영자가 여러 블로그를 안전하게 굴리는 워크스페이스”에 더 가깝습니다.
+주제 발굴, 글 패키지 생성, 이미지 흐름, HTML 조립, 검토, 수동 발행, 공개 메타 검증까지 한 제품 안에서 이어집니다.
 
-## At a Glance
+## 누구를 위한 제품인가
 
-- Dashboard routes: `/`, `/articles`, `/jobs`, `/settings`, `/google`
-- Local addresses: `http://localhost:3001`, `http://localhost:8000/docs`, `http://localhost:8000/healthz`
-- Core services: `web`, `api`, `worker`, `scheduler`, `postgres`, `redis`, `minio`
-- Content model: blog-specific workflows plus category-specific prompt templates
-- Publish model: generate first, review second, publish manually
-- SEO model: verify the real published page instead of assuming Blogger API metadata worked
+- 여러 Blogger 블로그를 한 번에 관리하고 싶은 운영자
+- 초안 자동화는 원하지만 공개 결정은 직접 하고 싶은 사람
+- GEO + SEO 구조로 제목, 메타, 본문 약속을 맞추고 싶은 팀
+- Blogger 공개 페이지의 실제 메타 반영 상태까지 확인하고 싶은 사용자
 
-## What Bloggent Does
+## 핵심 가치
 
-### Multi-blog operations
+### 블로그별 워크플로 분리
 
-Each imported Blogger blog keeps its own workflow, prompt logic, content category, and connection state.
-That lets one workspace run very different blog identities without forcing one prompt style onto every channel.
+여행 블로그와 미스터리 블로그는 같은 프롬프트로 운영하면 품질이 쉽게 흐려집니다.
+Bloggent는 블로그별 워크플로, 프롬프트, 카테고리 정체성, Google 연결 상태를 따로 유지합니다.
 
-### Draft-safe publishing
+### 생성과 발행 분리
 
-Bloggent intentionally separates generation from publishing.
-The pipeline can create topics, articles, images, and assembled HTML, but the final public release stays manual from the article review screen.
+초안을 잘 만드는 것과, 공개해도 되는 글을 고르는 것은 다른 일입니다.
+Bloggent는 생성 이후 검토와 수동 발행 단계를 분리해 운영 리스크를 낮춥니다.
 
-### GEO + SEO content generation
+### GEO + SEO 글 패키지
 
-The current prompt system is answer-first and metadata-aware.
-The article prompts in [`prompts/article_generation.md`](prompts/article_generation.md), [`prompts/travel_article_generation.md`](prompts/travel_article_generation.md), and [`prompts/mystery_article_generation.md`](prompts/mystery_article_generation.md) now follow a GEO + SEO structure:
+현재 글 생성 프롬프트는 검색엔진과 답변엔진 모두를 고려하는 구조를 목표로 합니다.
 
-- answer the core query early
-- name the main entity and practical value in the opening
-- make each H2 answer a real sub-question
-- align `meta_description`, `excerpt`, and article promise
-- keep the article quote-friendly for search and answer engines
+- 도입부에서 핵심 답을 먼저 제시
+- 본문 H2마다 실제 하위 질문 해결
+- `meta_description`, `excerpt`, 본문 약속 정렬
+- FAQ와 이미지 문맥까지 함께 생성
 
-### Real Blogger SEO verification
+관련 프롬프트:
 
-Bloggent does not treat Blogger `customMetaData` as a reliable source of truth for public `<head>` tags.
-Instead, it stores the expected description, assembles it into the post flow, supports a Blogger theme patch fallback, and verifies:
+- [`prompts/article_generation.md`](prompts/article_generation.md)
+- [`prompts/travel_article_generation.md`](prompts/travel_article_generation.md)
+- [`prompts/mystery_article_generation.md`](prompts/mystery_article_generation.md)
+
+### 공개 메타 실검증
+
+Bloggent는 Blogger API 응답만으로 메타 반영을 끝났다고 보지 않습니다.
+발행 후 공개 페이지 기준으로 아래 메타 상태를 다시 검증합니다.
 
 - `description`
 - `og:description`
 - `twitter:description`
 
-The dashboard label is a meta verification state, not a full body-content SEO score.
+대시보드의 메타 상태는 “본문 SEO 점수”가 아니라 “공개 메타 검증 상태”입니다.
 
-## Local Setup
+## 주요 화면
 
-### 1. Prepare environment variables
+- `/` 대시보드: 글 시작 액션, 작업 상태, 대표 프리뷰, 메타 상태 요약
+- `/articles` 글 보관함: 제목, 메타, HTML, 최종 프리뷰, 수동 발행, 메타 검증
+- `/jobs` 작업 목록: 백그라운드 상태, 실패, 재시도 이력 확인
+- `/settings` 설정: Google OAuth, Blogger 가져오기, 블로그별 워크플로와 연결 값 관리
+- `/google` Google 데이터: Blogger, Search Console, GA4 기반 연결 상태와 일부 리포팅 확인
 
-Copy `.env.example` to `.env` and fill the values you need.
-The minimum keys for real use are:
+## 시스템 구성
+
+- Web: Next.js
+- API: FastAPI
+- Worker / Scheduler: Celery
+- Data: PostgreSQL, Redis
+- Asset storage: MinIO
+- Runtime: Docker Compose
+
+기본 로컬 주소:
+
+- 웹: `http://localhost:3001`
+- API 문서: `http://localhost:8000/docs`
+- 헬스체크: `http://localhost:8000/healthz`
+
+## 빠른 시작
+
+### 1. `.env` 준비
+
+`.env.example`을 복사해 `.env`를 만들고 최소 아래 값을 채웁니다.
 
 - `OPENAI_API_KEY`
 - `BLOGGER_CLIENT_ID`
@@ -64,7 +87,7 @@ The minimum keys for real use are:
 - `BLOGGER_REDIRECT_URI`
 - `SETTINGS_ENCRYPTION_SECRET`
 
-Useful optional keys:
+선택적으로 유용한 값:
 
 - `GEMINI_API_KEY`
 - `PUBLIC_IMAGE_PROVIDER`
@@ -74,62 +97,42 @@ Useful optional keys:
 - `GITHUB_PAGES_TOKEN`
 - `GITHUB_PAGES_BASE_URL`
 
-For local UI testing without live model calls, the default `.env.example` also supports:
+로컬 데모만 볼 때는 아래 설정도 가능합니다.
 
 - `PROVIDER_MODE=mock`
 - `SEED_DEMO_DATA=true`
 
-### 2. Start the stack
+### 2. 스택 실행
 
 ```bash
 docker compose up --build -d
 ```
 
-### 3. Open the product
+### 3. 첫 운영 루프
 
-- Dashboard: `http://localhost:3001`
-- API docs: `http://localhost:8000/docs`
-- API health: `http://localhost:8000/healthz`
+1. `/settings`에서 Google OAuth를 연결합니다.
+2. Blogger 블로그를 가져옵니다.
+3. 블로그별 워크플로와 프롬프트를 확인합니다.
+4. 필요하면 Search Console과 GA4 연결 값을 블로그별로 매핑합니다.
+5. 대시보드에서 직접 주제를 넣거나 AI 주제 발굴을 실행합니다.
+6. `/articles`에서 글 패키지와 최종 프리뷰를 검토합니다.
+7. 수동으로 발행합니다.
+8. 공개 메타 검증을 실행합니다.
 
-### 4. Complete the first-use loop
+## GitHub Pages
 
-1. Open `/settings`
-2. Connect Google OAuth
-3. Import Blogger blogs
-4. Review each blog workflow and prompt setup
-5. Generate a topic or type one manually from the dashboard
-6. Review the generated article in `/articles`
-7. Publish manually
-8. Run meta verification on the published page
+Bloggent는 두 가지 방식으로 GitHub Pages를 활용할 수 있습니다.
 
-## Current Product Areas
+### 문서 허브
 
-### `/`
+`docs/` 폴더는 GitHub Pages 문서 허브로 배포할 수 있습니다.
+저장소가 `/docs` 기준으로 Pages를 사용하면 아래 파일이 공개 랜딩 역할을 합니다.
 
-The dashboard is the operator home.
-It now shows the main action panel, work queue, recent links, full post preview, and meta verification state in one layout.
+- [`docs/index.html`](docs/index.html)
 
-### `/articles`
+### 공개 에셋 전달
 
-This is the review and release screen.
-Use it to inspect article metadata, view the assembled post preview inline, publish manually, and run SEO metadata verification.
-
-### `/jobs`
-
-Use the jobs view to inspect background pipeline work, failures, and completed generation runs.
-
-### `/settings`
-
-Use settings for secrets, Google OAuth, blog imports, and per-blog connections such as Search Console property mapping and GA4 property mapping.
-
-### `/google`
-
-Use the Google data screen to inspect Blogger, Search Console, and GA4-linked reporting where available.
-
-## GitHub Pages Support
-
-Bloggent can also use GitHub Pages as a public asset delivery target.
-If you want that setup, configure:
+이미지 공개 경로를 GitHub Pages로 쓰려면 아래 값을 설정합니다.
 
 - `PUBLIC_IMAGE_PROVIDER=github_pages`
 - `GITHUB_PAGES_OWNER`
@@ -139,38 +142,47 @@ If you want that setup, configure:
 - `GITHUB_PAGES_BASE_URL`
 - `GITHUB_PAGES_ASSETS_DIR`
 
-The documentation site in `docs/` is also ready to be served from GitHub Pages.
-If the repository is configured to publish from `/docs`, [`docs/index.html`](docs/index.html) becomes the public landing page.
+## 문서와 위키
 
-## Docs and Wiki
+문서 허브:
 
-- GitHub Pages docs: [`docs/index.html`](docs/index.html)
-- Docs start page: [`docs/index.md`](docs/index.md)
-- Local start guide: [`docs/getting-started.md`](docs/getting-started.md)
-- SEO guide: [`docs/seo-metadata.md`](docs/seo-metadata.md)
-- Roadmap: [`docs/roadmap.md`](docs/roadmap.md)
-- Wiki home: [`wiki/Home.md`](wiki/Home.md)
+- [`docs/index.md`](docs/index.md)
+- [`docs/getting-started.md`](docs/getting-started.md)
+- [`docs/workflow.md`](docs/workflow.md)
+- [`docs/seo-metadata.md`](docs/seo-metadata.md)
+- [`docs/roadmap.md`](docs/roadmap.md)
 
-## Roadmap
+위키:
+
+- [`wiki/Home.md`](wiki/Home.md)
+- [`wiki/Getting-Started.md`](wiki/Getting-Started.md)
+- [`wiki/Workflow.md`](wiki/Workflow.md)
+- [`wiki/SEO-Metadata.md`](wiki/SEO-Metadata.md)
+- [`wiki/Service-Roadmap.md`](wiki/Service-Roadmap.md)
+
+## 현재 TODO
 
 ### Now
 
-- Make Blogger SEO theme patch onboarding easier from the dashboard and settings flow
-- Reduce dashboard refresh latency after content actions
-- Continue unifying the remaining views around the new dashboard layout and copy system
+- Blogger 테마 메타 패치 온보딩을 더 쉽게 만들기
+- 대시보드 액션 이후 체감 속도 개선
+- 남은 화면들의 UI와 문구 톤 통일
+- 글 단위와 블로그 단위 메타 상태 설명 정리
 
 ### Next
 
-- Add stronger pre-publish QA checks for title, meta description, image readiness, and duplicate coverage
-- Expand Search Console and GA4 insight visibility per connected blog
-- Add scheduled publishing flow that still preserves manual operator control
+- 제목, 메타, 이미지, 중복 기준의 발행 전 QA 체크
+- Search Console과 GA4 가시성 확장
+- 운영자 승인 유지형 예약 발행
+- 실패 작업과 재시도 흐름 가시성 개선
 
 ### Later
 
-- Add multi-user roles and permissions
-- Add stronger production deployment profiles for the web app
-- Add more asset provider choices beyond local and GitHub Pages
+- 멀티 유저 권한 관리
+- 프로덕션 실행 프로파일 보강
+- 공개 자산 공급자와 프롬프트 팩 확장
 
-## Repository
+## 저장소
 
-- Source: `https://github.com/sheryloe/BloggerGent`
+- GitHub: `https://github.com/sheryloe/BloggerGent`
+- GitHub Pages: `https://sheryloe.github.io/BloggerGent/`

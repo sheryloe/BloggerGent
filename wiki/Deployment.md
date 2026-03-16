@@ -1,8 +1,8 @@
-# Deployment
+# 배포
 
-Bloggent is currently optimized for Docker-first local deployment.
+현재 Bloggent는 Docker 중심의 로컬 실행 환경에 가장 잘 맞도록 구성되어 있습니다.
 
-## Main services
+## 주요 서비스
 
 - `web`
 - `api`
@@ -12,19 +12,19 @@ Bloggent is currently optimized for Docker-first local deployment.
 - `redis`
 - `minio`
 
-## Start command
+## 기본 실행 명령
 
 ```bash
 docker compose up --build -d
 ```
 
-## Rebuild after app changes
+## 앱 변경 후 재빌드
 
 ```bash
 docker compose up --build -d api worker scheduler web
 ```
 
-## Verification
+## 확인 방법
 
 ```bash
 curl http://localhost:8000/healthz
@@ -35,7 +35,7 @@ cd apps/web
 npm run build
 ```
 
-## Current deployment note
+## 현재 배포 메모
 
-The current local `web` container runs the Next.js development server.
-That is fine for local work, but a production-style web profile should move toward a built runtime later.
+지금 로컬 `web` 컨테이너는 Next.js 개발 서버로 실행됩니다.
+로컬 작업에는 충분하지만, 이후 프로덕션 스타일 실행 프로파일은 별도로 정리하는 것이 좋습니다.

@@ -1,13 +1,13 @@
-# Security
+# 보안
 
-## Current protections
+## 현재 보호 장치
 
-- encrypted secret storage
-- manual publish step
-- published-post overwrite protection
-- duplicate-topic blocking
+- 암호화된 시크릿 저장
+- 수동 발행 단계 유지
+- 이미 발행된 포스트 덮어쓰기 보호
+- 중복 주제 차단
 
-## Practical note
+## 운영 관점 메모
 
-Bloggent is an operator tool, so workflow safety matters as much as code-level protection.
-Use a strong `SETTINGS_ENCRYPTION_SECRET`, protect dashboard access, and verify live metadata after publishing.
+Bloggent는 운영 도구이기 때문에, 코드 수준 보호만큼 워크플로 안전성도 중요합니다.
+강한 `SETTINGS_ENCRYPTION_SECRET`를 사용하고, 대시보드 접근을 보호하며, 발행 후에는 실제 공개 메타를 다시 검증하는 것을 권장합니다.

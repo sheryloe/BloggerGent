@@ -1,36 +1,41 @@
-# Bloggent Service Roadmap
+# Bloggent 서비스 로드맵
 
-This page tracks the current direction of the product.
+이 문서는 현재 Bloggent가 어디에 집중하고 있는지, 다음에 무엇을 만들려는지 정리합니다.
 
-## Quick Answer
+## 빠른 답변
 
-The roadmap is centered on better operator control and clearer publishing safety, not on blind one-click automation.
+로드맵의 중심은 “무조건 더 자동화하기”가 아니라 “운영자가 더 빠르고 안전하게 판단하도록 돕기”입니다.
 
-## Already in place
+## 이미 들어간 것
 
-- multi-blog workflow separation
-- manual-safe publish flow
-- article review screen
-- inline final post preview
-- GEO + SEO prompt structure
-- live metadata verification
+- 멀티 블로그 워크플로 분리
+- 수동 발행 보호 흐름
+- 글 검토 화면과 최종 포스트 프리뷰
+- GEO + SEO 프롬프트 구조
+- 공개 메타 검증 흐름
 
 ## Now
 
-- improve Blogger theme patch onboarding
-- reduce dashboard refresh latency
-- finish UI consistency across the remaining views
-- make metadata states easier to understand
+- Blogger 테마 메타 패치 온보딩 개선
+- 대시보드 액션 이후 체감 속도 개선
+- 남은 화면들의 UI와 문구 톤 통일
+- 메타 상태 표현을 더 쉽게 이해하게 만들기
 
 ## Next
 
-- add pre-publish QA checks
-- expand Search Console and GA4 visibility
-- add scheduled publishing with operator approval
-- improve retry and failure recovery visibility
+- 제목, 메타, 이미지, 중복 기준의 발행 전 QA 체크
+- Search Console과 GA4 가시성 확장
+- 운영자 승인 유지형 예약 발행
+- 실패 작업과 재시도 흐름 가시성 보강
 
 ## Later
 
-- add multi-user permissions
-- support stronger production deployment profiles
-- expand prompt packs and asset providers
+- 멀티 유저 역할과 권한 관리
+- 프로덕션 실행 프로파일 보강
+- 프롬프트 팩과 공개 자산 공급자 확장
+
+## TODO 원칙
+
+1. 검토 없는 자동 공개는 지양합니다.
+2. 실제 공개 결과 검증을 생략하지 않습니다.
+3. 운영자가 더 적은 클릭으로 더 많은 판단을 하게 만드는 기능을 우선합니다.
