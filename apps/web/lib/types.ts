@@ -64,6 +64,8 @@ export interface SyncedBloggerPost {
   author_display_name?: string | null;
   replies_total_items: number;
   content_html: string;
+  thumbnail_url?: string | null;
+  excerpt_text: string;
   synced_at?: string | null;
 }
 
@@ -258,9 +260,33 @@ export interface Article {
   assembled_html?: string | null;
   reading_time_minutes: number;
   created_at: string;
+  updated_at?: string;
   blog?: BlogCompact | null;
   image?: ImageAsset | null;
   blogger_post?: BloggerPost | null;
+}
+
+export interface BlogArchiveItem {
+  source: "generated" | "synced";
+  id: string;
+  blog_id: number;
+  title: string;
+  excerpt: string;
+  thumbnail_url?: string | null;
+  labels: string[];
+  published_url?: string | null;
+  published_at?: string | null;
+  updated_at?: string | null;
+  status: string;
+  content_html?: string | null;
+}
+
+export interface BlogArchivePage {
+  items: BlogArchiveItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  last_synced_at?: string | null;
 }
 
 export interface Job {

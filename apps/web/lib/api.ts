@@ -2,6 +2,7 @@ import "server-only";
 
 import {
   Article,
+  BlogArchivePage,
   ArticleSeoMeta,
   Blog,
   BlogImportOptions,
@@ -61,8 +62,16 @@ export async function getArticles(blogId?: number) {
   return apiFetch<Article[]>(`/articles${query}`);
 }
 
+export async function getArticle(articleId: number) {
+  return apiFetch<Article>(`/articles/${articleId}`);
+}
+
 export async function getArticleSeoMeta(articleId: number) {
   return apiFetch<ArticleSeoMeta>(`/articles/${articleId}/seo-meta`);
+}
+
+export async function getBlogArchive(blogId: number, page = 1, pageSize = 20) {
+  return apiFetch<BlogArchivePage>(`/blogs/${blogId}/archive?page=${page}&page_size=${pageSize}`);
 }
 
 export async function getSettings() {

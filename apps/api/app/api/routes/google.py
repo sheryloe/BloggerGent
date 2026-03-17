@@ -12,7 +12,11 @@ from app.schemas.api import (
 )
 from app.services.blog_service import get_blog
 from app.services.blogger_oauth_service import BloggerOAuthError, get_google_oauth_scopes, get_granted_google_scopes
-from app.services.blogger_sync_service import list_recent_synced_blogger_posts, list_synced_blogger_posts_page
+from app.services.blogger_sync_service import (
+    list_recent_synced_blogger_posts,
+    list_synced_blogger_posts_page,
+    sync_blogger_posts_for_blog,
+)
 from app.services.google_reporting_service import (
     build_google_blog_overview,
     list_analytics_properties,
@@ -36,6 +40,8 @@ def _serialize_synced_post(post) -> dict:
         "author_display_name": post.author_display_name,
         "replies_total_items": post.replies_total_items,
         "content_html": post.content_html,
+        "thumbnail_url": post.thumbnail_url,
+        "excerpt_text": post.excerpt_text,
         "synced_at": post.synced_at.isoformat() if post.synced_at else None,
     }
 
@@ -117,4 +123,27 @@ def get_google_blog_synced_posts(
         "page": payload["page"],
         "page_size": payload["page_size"],
         "last_synced_at": payload["last_synced_at"].isoformat() if payload["last_synced_at"] else None,
+    }
+
+
+@router.post("/blogs/{blog_id}/synced-posts/refresh")
+def refresh_google_blog_synced_posts(
+    blog_id: int,
+    db: Session = Depends(get_db),
+) -> dict:
+    blog = get_blog(db, blog_id)
+    if not blog:
+        raise HTTPException(status_code=404, detail="Blog not found")
+    if not blog.blogger_blog_id:
+        raise HTTPException(status_code=400, detail="Blogger blog id is not configured.")
+
+    try:
+        result = sync_blogger_posts_for_blog(db, blog)
+    except BloggerOAuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+    return {
+        "blog_id": result["blog_id"],
+        "count": result["count"],
+        "last_synced_at": result["last_synced_at"].isoformat() if result["last_synced_at"] else None,
     }

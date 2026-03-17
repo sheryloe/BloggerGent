@@ -10,6 +10,7 @@ from app.db.session import get_db
 from app.models.entities import BlogAgentConfig, JobStatus, PublishMode, WorkflowStageType
 from app.schemas.api import (
     BlogAgentConfigRead,
+    BlogArchivePageRead,
     BlogAgentConfigUpdate,
     BlogConnectionOptionsRead,
     BlogConnectionUpdate,
@@ -24,6 +25,7 @@ from app.schemas.api import (
     WorkflowStepCreate,
     WorkflowStepReorder,
 )
+from app.services.archive_service import list_blog_archive_page
 from app.services.blog_service import (
     apply_profile_preset,
     create_workflow_step,
@@ -271,6 +273,19 @@ def import_blog(payload: BlogImportRequest, db: Session = Depends(get_db)) -> di
         google_refs,
         summary_metrics=asdict(summary_map[blog.id]) if blog.id in summary_map else None,
     )
+
+
+@router.get("/{blog_id}/archive", response_model=BlogArchivePageRead)
+def get_blog_archive(
+    blog_id: int,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> dict:
+    blog = get_blog(db, blog_id)
+    if not blog:
+        raise HTTPException(status_code=404, detail="Blog not found")
+    return list_blog_archive_page(db, blog, page=page, page_size=page_size)
 
 
 @router.get("/{blog_id}", response_model=BlogRead)

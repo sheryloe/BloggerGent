@@ -256,6 +256,8 @@ class SyncedBloggerPost(TimestampMixin, Base):
     author_display_name: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
     replies_total_items: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
     content_html: Mapped[str] = mapped_column(sa.Text, nullable=False, default="")
+    thumbnail_url: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    excerpt_text: Mapped[str] = mapped_column(sa.Text, nullable=False, default="")
     synced_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now(), index=True)
 
     blog: Mapped[Blog] = relationship(back_populates="synced_blogger_posts")

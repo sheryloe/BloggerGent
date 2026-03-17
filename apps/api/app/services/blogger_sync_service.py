@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import html
 import logging
+import re
 from datetime import datetime, timezone
 
 from sqlalchemy import delete, func, select
@@ -12,6 +14,12 @@ from app.services.blogger_oauth_service import BloggerOAuthError, authorized_goo
 BLOGGER_POSTS_URL = "https://www.googleapis.com/blogger/v3/blogs/{blog_id}/posts"
 
 logger = logging.getLogger(__name__)
+IMAGE_SRC_PATTERN = re.compile(r"<img\b[^>]*\bsrc=['\"]([^'\"]+)['\"]", re.IGNORECASE)
+META_DESCRIPTION_PATTERN = re.compile(r"data-bloggent-meta-description=['\"]([^'\"]+)['\"]", re.IGNORECASE)
+PARAGRAPH_PATTERN = re.compile(r"<p\b[^>]*>(.*?)</p>", re.IGNORECASE | re.DOTALL)
+HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
+WHITESPACE_PATTERN = re.compile(r"\s+")
+MAX_EXCERPT_LENGTH = 480
 
 
 def _parse_google_datetime(value: str | None) -> datetime | None:
@@ -51,12 +59,55 @@ def _raise_sync_error(response, message: str) -> None:
     raise BloggerOAuthError(message, detail=_error_detail(response), status_code=response.status_code)
 
 
+def _extract_thumbnail_url(content_html: str) -> str | None:
+    match = IMAGE_SRC_PATTERN.search(content_html or "")
+    if not match:
+        return None
+    candidate = html.unescape(match.group(1).strip())
+    return candidate or None
+
+
+def _plain_text(value: str) -> str:
+    collapsed = HTML_TAG_PATTERN.sub(" ", value or "")
+    unescaped = html.unescape(collapsed)
+    cleaned = WHITESPACE_PATTERN.sub(" ", unescaped).strip()
+    if len(cleaned) <= MAX_EXCERPT_LENGTH:
+        return cleaned
+    shortened = cleaned[: MAX_EXCERPT_LENGTH + 1]
+    trimmed = shortened.rsplit(" ", 1)[0].strip() or shortened[:MAX_EXCERPT_LENGTH].strip()
+    return trimmed.rstrip(" ,.;:-") + "..."
+
+
+def _extract_excerpt_text(content_html: str) -> str:
+    meta_match = META_DESCRIPTION_PATTERN.search(content_html or "")
+    if meta_match:
+        excerpt = _plain_text(meta_match.group(1))
+        if excerpt:
+            return excerpt
+
+    paragraphs: list[str] = []
+    for match in PARAGRAPH_PATTERN.finditer(content_html or ""):
+        paragraph_text = _plain_text(match.group(1))
+        if not paragraph_text:
+            continue
+        if paragraph_text in paragraphs:
+            continue
+        paragraphs.append(paragraph_text)
+        if len(" ".join(paragraphs)) >= MAX_EXCERPT_LENGTH:
+            break
+    if paragraphs:
+        return _plain_text(paragraphs[0])
+
+    return _plain_text(content_html)
+
+
 def _normalize_remote_post(item: dict) -> dict:
     labels = item.get("labels", []) or []
     if not isinstance(labels, list):
         labels = []
     replies = item.get("replies", {}) if isinstance(item.get("replies"), dict) else {}
     author = item.get("author", {}) if isinstance(item.get("author"), dict) else {}
+    content_html = str(item.get("content", "") or "")
     return {
         "remote_post_id": str(item.get("id", "")).strip(),
         "title": str(item.get("title", "")).strip() or "Untitled",
@@ -67,7 +118,9 @@ def _normalize_remote_post(item: dict) -> dict:
         "labels": [str(label).strip() for label in labels if str(label).strip()],
         "author_display_name": str(author.get("displayName", "")).strip() or None,
         "replies_total_items": int(replies.get("totalItems", 0) or 0) if replies else 0,
-        "content_html": str(item.get("content", "") or ""),
+        "content_html": content_html,
+        "thumbnail_url": _extract_thumbnail_url(content_html),
+        "excerpt_text": _extract_excerpt_text(content_html),
     }
 
 
@@ -137,6 +190,8 @@ def sync_blogger_posts_for_blog(db: Session, blog: Blog) -> dict:
             post.author_display_name = payload["author_display_name"]
             post.replies_total_items = payload["replies_total_items"]
             post.content_html = payload["content_html"]
+            post.thumbnail_url = payload["thumbnail_url"]
+            post.excerpt_text = payload["excerpt_text"]
             post.synced_at = now
 
         if remote_ids:

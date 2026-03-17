@@ -425,6 +425,8 @@ class SyncedBloggerPostRead(BaseModel):
     author_display_name: str | None = None
     replies_total_items: int = 0
     content_html: str = ""
+    thumbnail_url: str | None = None
+    excerpt_text: str = ""
     synced_at: str | None = None
 
 
@@ -434,6 +436,29 @@ class SyncedBloggerPostPageRead(BaseModel):
     page: int = 1
     page_size: int = 50
     last_synced_at: str | None = None
+
+
+class BlogArchiveItemRead(BaseModel):
+    source: str
+    id: str
+    blog_id: int
+    title: str
+    excerpt: str = ""
+    thumbnail_url: str | None = None
+    labels: list[str] = Field(default_factory=list)
+    published_url: str | None = None
+    published_at: datetime | None = None
+    updated_at: datetime | None = None
+    status: str
+    content_html: str | None = None
+
+
+class BlogArchivePageRead(BaseModel):
+    items: list[BlogArchiveItemRead] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    page_size: int = 20
+    last_synced_at: datetime | None = None
 
 
 class SearchConsoleSiteRead(BaseModel):

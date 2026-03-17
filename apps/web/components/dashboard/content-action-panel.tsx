@@ -76,12 +76,12 @@ export function ContentActionPanel({ blogs, topics }: { blogs: Blog[]; topics: T
       const job = (await response.json()) as { keyword_snapshot: string };
       setFeedback({
         tone: "success",
-        message: `"${job.keyword_snapshot}" 초안 생성 작업을 큐에 넣었습니다.`,
+        message: `"${job.keyword_snapshot}" 글 작성 작업을 큐에 등록했습니다.`,
       });
       setKeyword("");
       router.refresh();
     } catch {
-      setFeedback({ tone: "error", message: "초안 생성 중 네트워크 오류가 발생했습니다." });
+      setFeedback({ tone: "error", message: "글 작성 요청 중 네트워크 오류가 발생했습니다." });
     } finally {
       setPendingAction(null);
     }
@@ -113,11 +113,11 @@ export function ContentActionPanel({ blogs, topics }: { blogs: Blog[]; topics: T
         tone: "success",
         message: payload.queued_topics
           ? `${payload.queued_topics}개의 주제를 발굴해서 초안 작업으로 등록했습니다.`
-          : payload.message || "주제 발굴 요청을 보냈습니다.",
+          : payload.message || "주제 자동 생성 요청을 보냈습니다.",
       });
       router.refresh();
     } catch {
-      setFeedback({ tone: "error", message: "주제 발굴 중 네트워크 오류가 발생했습니다." });
+      setFeedback({ tone: "error", message: "주제 자동 생성 요청 중 네트워크 오류가 발생했습니다." });
     } finally {
       setPendingAction(null);
     }
@@ -128,10 +128,10 @@ export function ContentActionPanel({ blogs, topics }: { blogs: Blog[]; topics: T
       <Card>
         <CardHeader>
           <CardDescription>글 작성</CardDescription>
-          <CardTitle>시작하려면 블로그 연결이 필요합니다</CardTitle>
+          <CardTitle>시작하려면 블로그 가져오기가 먼저 필요합니다</CardTitle>
         </CardHeader>
         <CardContent className="text-sm leading-7 text-slate-500 dark:text-zinc-400">
-          설정 화면에서 Blogger 블로그를 먼저 가져오면 초안 생성과 주제 발굴을 바로 사용할 수 있습니다.
+          설정 화면에서 Blogger 블로그를 먼저 가져오면 글 주제 자동 생성하기와 글 작성하기를 바로 사용할 수 있습니다.
         </CardContent>
       </Card>
     );
@@ -143,17 +143,17 @@ export function ContentActionPanel({ blogs, topics }: { blogs: Blog[]; topics: T
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="min-w-0">
             <CardDescription>글 작성</CardDescription>
-            <CardTitle className="text-2xl sm:text-[28px]">주제 입력 또는 AI 발굴</CardTitle>
+            <CardTitle className="text-2xl sm:text-[28px]">글 주제 자동 생성하기 / 글 작성하기</CardTitle>
             <p className="mt-2 text-sm leading-7 text-slate-500 dark:text-zinc-400">
-              직접 키워드를 넣어 초안을 만들거나, 선택한 블로그 기준으로 새 주제를 추천받을 수 있습니다.
+              직접 키워드를 넣어 글 작성을 시작하거나, 선택한 블로그 기준으로 AI가 새 주제를 발굴하도록 실행할 수 있습니다.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Badge className="border-indigo-200/80 bg-indigo-500/10 text-indigo-700 dark:border-indigo-500/20 dark:bg-indigo-500/15 dark:text-indigo-200">
-              직접 작성
+              글 작성하기
             </Badge>
             <Badge className="border-emerald-200/80 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/15 dark:text-emerald-200">
-              AI 발굴
+              글 주제 자동 생성하기
             </Badge>
           </div>
         </div>
@@ -183,7 +183,7 @@ export function ContentActionPanel({ blogs, topics }: { blogs: Blog[]; topics: T
           </div>
 
           <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
-            <div className="space-y-2 min-w-0">
+            <div className="min-w-0 space-y-2">
               <Label htmlFor="content-blog-select">대상 블로그</Label>
               <select
                 id="content-blog-select"
@@ -202,8 +202,8 @@ export function ContentActionPanel({ blogs, topics }: { blogs: Blog[]; topics: T
               </select>
             </div>
 
-            <div className="space-y-2 min-w-0">
-              <Label htmlFor="manual-keyword">주제 입력</Label>
+            <div className="min-w-0 space-y-2">
+              <Label htmlFor="manual-keyword">직접 작성할 주제</Label>
               <Input
                 id="manual-keyword"
                 value={keyword}
@@ -225,27 +225,6 @@ export function ContentActionPanel({ blogs, topics }: { blogs: Blog[]; topics: T
           <div className="grid gap-3 md:grid-cols-2">
             <button
               type="button"
-              onClick={() => void handleManualCreate()}
-              disabled={!keyword.trim() || !!pendingAction}
-              className="rounded-[28px] border border-slate-200/70 bg-slate-950 px-5 py-5 text-left text-white transition hover:-translate-y-0.5 hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white dark:text-slate-950 dark:hover:bg-zinc-100"
-            >
-              <div className="flex items-start gap-3">
-                <div className="rounded-2xl bg-white/10 p-3 text-white dark:bg-slate-950/10 dark:text-slate-950">
-                  <PencilLine className="h-5 w-5" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-base font-semibold">
-                    {pendingAction === "manual" ? "초안 생성 중..." : "이 주제로 글 생성"}
-                  </p>
-                  <p className="mt-1 line-clamp-2 text-sm leading-6 text-white/75 dark:text-slate-600">
-                    입력한 키워드를 바로 초안 작업으로 등록합니다.
-                  </p>
-                </div>
-              </div>
-            </button>
-
-            <button
-              type="button"
               onClick={() => void handleDiscover()}
               disabled={!!pendingAction}
               className="rounded-[28px] border border-emerald-200/70 bg-emerald-500/10 px-5 py-5 text-left text-slate-900 transition hover:-translate-y-0.5 hover:bg-emerald-500/15 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-zinc-100 dark:hover:bg-emerald-500/15"
@@ -256,10 +235,31 @@ export function ContentActionPanel({ blogs, topics }: { blogs: Blog[]; topics: T
                 </div>
                 <div className="min-w-0">
                   <p className="text-base font-semibold">
-                    {pendingAction === "discover" ? "주제 발굴 중..." : "AI로 주제 발굴"}
+                    {pendingAction === "discover" ? "주제 생성 중..." : "글 주제 자동 생성하기"}
                   </p>
                   <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-600 dark:text-zinc-400">
-                    선택한 블로그 기준으로 새로운 토픽을 찾고 초안 작업까지 넣습니다.
+                    선택한 블로그 성격에 맞는 주제를 AI가 찾아서 초안 작업까지 연결합니다.
+                  </p>
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void handleManualCreate()}
+              disabled={!keyword.trim() || !!pendingAction}
+              className="rounded-[28px] border border-slate-200/70 bg-slate-950 px-5 py-5 text-left text-white transition hover:-translate-y-0.5 hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white dark:text-slate-950 dark:hover:bg-zinc-100"
+            >
+              <div className="flex items-start gap-3">
+                <div className="rounded-2xl bg-white/10 p-3 text-white dark:bg-slate-950/10 dark:text-slate-950">
+                  <PencilLine className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-base font-semibold">
+                    {pendingAction === "manual" ? "글 작성 중..." : "글 작성하기"}
+                  </p>
+                  <p className="mt-1 line-clamp-2 text-sm leading-6 text-white/75 dark:text-slate-600">
+                    입력한 키워드로 바로 초안 생성 작업을 시작합니다.
                   </p>
                 </div>
               </div>
@@ -272,7 +272,7 @@ export function ContentActionPanel({ blogs, topics }: { blogs: Blog[]; topics: T
               <Badge className="bg-transparent">{selectedBlog?.primary_language ?? "n/a"}</Badge>
             </div>
             <p className="mt-3 text-sm leading-6 text-slate-500 dark:text-zinc-400">
-              여기서는 출력 모드만 초안으로 고정해서 실행합니다. 블로그 연결, API 매핑, 발행 설정은 바꾸지 않습니다.
+              여기서 실행하는 작업은 모두 초안 기준입니다. 공개 게시 여부는 글 목록에서 따로 결정할 수 있습니다.
             </p>
           </div>
 
@@ -289,7 +289,7 @@ export function ContentActionPanel({ blogs, topics }: { blogs: Blog[]; topics: T
           ) : null}
         </div>
 
-        <div className="space-y-4 min-w-0">
+        <div className="min-w-0 space-y-4">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="text-sm font-medium text-slate-500 dark:text-zinc-400">최근 발굴 주제</p>
@@ -326,7 +326,7 @@ export function ContentActionPanel({ blogs, topics }: { blogs: Blog[]; topics: T
             </div>
           ) : (
             <div className="rounded-[28px] border border-dashed border-slate-200/80 bg-slate-50/80 px-4 py-5 text-sm leading-7 text-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-zinc-400">
-              아직 저장된 최근 주제가 없습니다. AI 발굴을 먼저 실행하거나 직접 첫 주제를 입력해 주세요.
+              아직 저장된 최근 주제가 없습니다. 글 주제 자동 생성하기를 먼저 실행하거나 직접 키워드를 입력해 주세요.
             </div>
           )}
         </div>

@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { GooglePostSyncButton } from "@/components/dashboard/google-post-sync-button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getBlogs, getBloggerConfig, getGoogleBlogOverview, getSyncedBloggerPosts } from "@/lib/api";
@@ -169,6 +170,7 @@ export default async function GoogleDataPage({
                     <CardDescription>블로그별 Google 데이터</CardDescription>
                     <CardTitle>{blog.name}</CardTitle>
                     <p className="text-sm leading-6 text-slate-600">{blog.content_brief}</p>
+                    <GooglePostSyncButton blogId={blog.id} />
                     <div className="flex flex-wrap gap-2 pt-1">
                       <Badge>{blog.content_category}</Badge>
                       <Badge className="bg-transparent">{blog.primary_language}</Badge>

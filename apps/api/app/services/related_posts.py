@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import re
+from difflib import SequenceMatcher
+from typing import Any
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import settings
-from app.models.entities import Article, BloggerPost, Image, Job, JobStatus
+from app.models.entities import Article, BloggerPost, Image, Job, JobStatus, SyncedBloggerPost
 from app.utils.embeddings import cosine_similarity, text_to_embedding
 
 
@@ -19,9 +23,52 @@ def _label_similarity(left: list[str], right: list[str]) -> float:
     return len(left_set & right_set) / len(union)
 
 
+def _normalize_text(value: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip()
+
+
+def _urls_match(left: str | None, right: str | None) -> bool:
+    if not left or not right:
+        return False
+    return left.rstrip("/") == right.rstrip("/")
+
+
+def _titles_match(left: str | None, right: str | None) -> bool:
+    normalized_left = _normalize_text(left)
+    normalized_right = _normalize_text(right)
+    if not normalized_left or not normalized_right:
+        return False
+    if normalized_left == normalized_right:
+        return True
+    return SequenceMatcher(a=normalized_left, b=normalized_right).ratio() >= 0.94
+
+
+def _related_payload(
+    *,
+    score: float,
+    title: str,
+    excerpt: str,
+    thumbnail: str,
+    link: str,
+    source: str,
+    published_at,
+    slug: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "score": round(score, 4),
+        "title": title,
+        "slug": slug or "",
+        "excerpt": excerpt,
+        "thumbnail": thumbnail,
+        "link": link,
+        "source": source,
+        "published_at": published_at.isoformat() if published_at else None,
+    }
+
+
 def find_related_articles(db: Session, article: Article, limit: int | None = None) -> list[dict]:
     limit = limit or settings.related_post_count
-    query = (
+    generated_query = (
         select(Article)
         .join(Job, Job.id == Article.job_id)
         .outerjoin(Image, Image.article_id == Article.id)
@@ -30,29 +77,75 @@ def find_related_articles(db: Session, article: Article, limit: int | None = Non
         .options(selectinload(Article.image), selectinload(Article.blogger_post))
         .order_by(Article.created_at.desc())
     )
-    candidates = db.execute(query).scalars().unique().all()
+    synced_query = (
+        select(SyncedBloggerPost)
+        .where(SyncedBloggerPost.blog_id == article.blog_id)
+        .order_by(
+            SyncedBloggerPost.published_at.desc().nullslast(),
+            SyncedBloggerPost.updated_at_remote.desc().nullslast(),
+            SyncedBloggerPost.id.desc(),
+        )
+    )
+
+    generated_candidates = db.execute(generated_query).scalars().unique().all()
+    synced_candidates = db.execute(synced_query).scalars().all()
     base_embedding = text_to_embedding(f"{article.title} {article.excerpt}")
-    ranked: list[tuple[float, Article]] = []
-    for candidate in candidates:
-        embedding_score = cosine_similarity(base_embedding, text_to_embedding(f"{candidate.title} {candidate.excerpt}"))
+    current_url = article.blogger_post.published_url if article.blogger_post else None
+
+    ranked: list[tuple[float, dict[str, Any]]] = []
+
+    for candidate in generated_candidates:
+        candidate_embedding = text_to_embedding(f"{candidate.title} {candidate.excerpt}")
+        embedding_score = cosine_similarity(base_embedding, candidate_embedding)
         label_score = _label_similarity(article.labels or [], candidate.labels or [])
         score = (label_score * 0.6) + (embedding_score * 0.4)
-        ranked.append((score, candidate))
-    ranked.sort(key=lambda item: item[0], reverse=True)
-
-    related = []
-    for score, candidate in ranked[:limit]:
-        related.append(
-            {
-                "score": round(score, 4),
-                "title": candidate.title,
-                "slug": candidate.slug,
-                "excerpt": candidate.excerpt,
-                "thumbnail": candidate.image.public_url if candidate.image else "",
-                "link": candidate.blogger_post.published_url if candidate.blogger_post else "#",
-            }
+        ranked.append(
+            (
+                score,
+                _related_payload(
+                    score=score,
+                    title=candidate.title,
+                    slug=candidate.slug,
+                    excerpt=candidate.excerpt,
+                    thumbnail=candidate.image.public_url if candidate.image else "",
+                    link=candidate.blogger_post.published_url if candidate.blogger_post else "#",
+                    source="generated",
+                    published_at=candidate.blogger_post.published_at if candidate.blogger_post else None,
+                ),
+            )
         )
-    return related
+
+    for candidate in synced_candidates:
+        if _urls_match(candidate.url, current_url) or _titles_match(candidate.title, article.title):
+            continue
+        candidate_text = " ".join(
+            [
+                candidate.title,
+                candidate.excerpt_text or "",
+                " ".join(candidate.labels or []),
+            ]
+        ).strip()
+        candidate_embedding = text_to_embedding(candidate_text)
+        embedding_score = cosine_similarity(base_embedding, candidate_embedding)
+        label_score = _label_similarity(article.labels or [], candidate.labels or [])
+        score = (label_score * 0.6) + (embedding_score * 0.4)
+        ranked.append(
+            (
+                score,
+                _related_payload(
+                    score=score,
+                    title=candidate.title,
+                    excerpt=candidate.excerpt_text,
+                    thumbnail=candidate.thumbnail_url or "",
+                    link=candidate.url or "#",
+                    source="synced",
+                    published_at=candidate.published_at,
+                ),
+            )
+        )
+
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    return [payload for _, payload in ranked[:limit]]
 
 
 def render_related_cards_html(
@@ -70,7 +163,7 @@ def render_related_cards_html(
     if not related_posts:
         return (
             f"<section class='related-posts'><h2>{section_title}</h2>"
-            "<p>관련 글이 아직 충분하지 않아, 이 영역은 다음 글부터 더 풍성하게 채워집니다.</p></section>"
+            "<p>Relevant posts will appear here once this blog has more published content.</p></section>"
         )
 
     cards = []
