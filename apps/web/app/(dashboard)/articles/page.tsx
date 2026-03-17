@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArticlePreviewFrame } from "@/components/dashboard/article-preview-frame";
 import { ArchiveBlogSelector } from "@/components/dashboard/archive-blog-selector";
 import { ArticleSeoMetaCard } from "@/components/dashboard/article-seo-meta-card";
+import { FallbackImage } from "@/components/dashboard/fallback-image";
 import { PublishArticleButton } from "@/components/dashboard/publish-article-button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -102,7 +103,7 @@ function ArchiveListCard({ item, selected, href }: { item: BlogArchiveItem; sele
       <div className="flex gap-4">
         <div className="h-20 w-20 shrink-0 overflow-hidden rounded-[18px] border border-ink/10 bg-slate-100">
           {item.thumbnail_url ? (
-            <img src={item.thumbnail_url} alt={item.title} className="h-full w-full object-cover" />
+            <FallbackImage src={item.thumbnail_url} alt={item.title} className="h-full w-full object-cover" />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-[11px] font-medium text-slate-400">NO IMAGE</div>
           )}
@@ -143,7 +144,7 @@ function SyncedArchiveDetail({ item, blog }: { item: BlogArchiveItem; blog: Blog
       <CardContent className="space-y-6">
         {item.thumbnail_url ? (
           <div className="overflow-hidden rounded-[28px] border border-ink/10 bg-white">
-            <img src={item.thumbnail_url} alt={item.title} className="h-[280px] w-full object-cover" />
+            <FallbackImage src={item.thumbnail_url} alt={item.title} className="h-[280px] w-full object-cover" />
           </div>
         ) : null}
 

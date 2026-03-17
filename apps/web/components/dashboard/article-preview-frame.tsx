@@ -1,11 +1,15 @@
+"use client";
+
 import { Article } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { injectImageFallbacks } from "@/lib/public-assets";
 
 function buildPreviewHtml(article: Article) {
-  return (
+  const html =
     article.assembled_html ??
-    `<article style="max-width:860px;margin:0 auto;padding:32px 20px 48px;">${article.html_article}</article>`
-  );
+    `<article style="max-width:860px;margin:0 auto;padding:32px 20px 48px;">${article.html_article}</article>`;
+
+  return injectImageFallbacks(html);
 }
 
 export function ArticlePreviewFrame({
