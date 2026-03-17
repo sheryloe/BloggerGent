@@ -87,6 +87,11 @@ class Blog(TimestampMixin, Base):
     jobs: Mapped[list["Job"]] = relationship(back_populates="blog")
     articles: Mapped[list["Article"]] = relationship(back_populates="blog")
     blogger_posts: Mapped[list["BloggerPost"]] = relationship(back_populates="blog")
+    synced_blogger_posts: Mapped[list["SyncedBloggerPost"]] = relationship(
+        back_populates="blog",
+        cascade="all, delete-orphan",
+        order_by="SyncedBloggerPost.id.desc()",
+    )
     agent_configs: Mapped[list["BlogAgentConfig"]] = relationship(
         back_populates="blog",
         cascade="all, delete-orphan",
@@ -231,6 +236,29 @@ class BloggerPost(TimestampMixin, Base):
     job: Mapped[Job] = relationship(back_populates="blogger_post")
     blog: Mapped[Blog] = relationship(back_populates="blogger_posts")
     article: Mapped[Article | None] = relationship(back_populates="blogger_post")
+
+
+class SyncedBloggerPost(TimestampMixin, Base):
+    __tablename__ = "synced_blogger_posts"
+    __table_args__ = (
+        sa.UniqueConstraint("blog_id", "remote_post_id", name="uq_synced_blogger_posts_blog_remote_post"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    blog_id: Mapped[int] = mapped_column(sa.ForeignKey("blogs.id", ondelete="CASCADE"), nullable=False, index=True)
+    remote_post_id: Mapped[str] = mapped_column(sa.String(255), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(sa.String(500), nullable=False)
+    url: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    status: Mapped[str] = mapped_column(sa.String(50), nullable=False, default="live")
+    published_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
+    updated_at_remote: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
+    labels: Mapped[list] = mapped_column(sa.JSON, default=list, nullable=False)
+    author_display_name: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    replies_total_items: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    content_html: Mapped[str] = mapped_column(sa.Text, nullable=False, default="")
+    synced_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now(), index=True)
+
+    blog: Mapped[Blog] = relationship(back_populates="synced_blogger_posts")
 
 
 class Setting(Base):

@@ -802,7 +802,9 @@ def ensure_blog_workflow_steps(db: Session, blog: Blog) -> Blog:
         defaults = _build_step_defaults(profile_key, stage_type)
         step = steps_by_stage.get(stage_type)
         if not step:
-            db.add(BlogAgentConfig(blog_id=blog.id, **defaults))
+            step = BlogAgentConfig(blog=blog, **defaults)
+            db.add(step)
+            steps_by_stage[stage_type] = step
             changed = True
             continue
 

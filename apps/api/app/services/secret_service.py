@@ -10,8 +10,15 @@ from app.core.config import settings
 ENCRYPTION_PREFIX = "enc:v1:"
 
 
+def _require_encryption_secret() -> bytes:
+    secret = str(settings.settings_encryption_secret or "").strip()
+    if not secret:
+        raise RuntimeError("SETTINGS_ENCRYPTION_SECRET is required for Bloggent secret storage.")
+    return secret.encode("utf-8")
+
+
 def _build_fernet() -> Fernet:
-    seed = (settings.settings_encryption_secret or "bloggent-local-dev-secret").encode("utf-8")
+    seed = _require_encryption_secret()
     key = urlsafe_b64encode(sha256(seed).digest())
     return Fernet(key)
 

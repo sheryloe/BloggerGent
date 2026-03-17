@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -51,11 +52,13 @@ from app.services.blog_service import (
 )
 from app.services.blog_seo_meta_service import get_blog_seo_meta_overview, verify_blog_seo_meta
 from app.services.blogger_oauth_service import BloggerOAuthError, list_blogger_blogs
+from app.services.blogger_sync_service import sync_blogger_posts_for_blog
 from app.services.google_reporting_service import list_analytics_properties, list_search_console_sites
 from app.services.providers.base import ProviderRuntimeError
 from app.tasks.pipeline import discover_topics_and_enqueue
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _load_google_reference_data(db: Session) -> dict:
@@ -254,6 +257,12 @@ def import_blog(payload: BlogImportRequest, db: Session = Depends(get_db)) -> di
         blog = import_blog_from_remote(db, remote_blog, payload.profile_key)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    try:
+        sync_blogger_posts_for_blog(db, blog)
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        logger.warning("Imported Blogger blog '%s' but initial post sync failed: %s", blog.name, exc)
 
     refreshed = get_blog(db, blog.id)
     summary_map = get_blog_summary_map(db, [blog.id])

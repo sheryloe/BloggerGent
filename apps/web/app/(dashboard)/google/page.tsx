@@ -1,6 +1,10 @@
+import Link from "next/link";
+
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { getBlogs, getBloggerConfig, getGoogleBlogOverview } from "@/lib/api";
+import { getBlogs, getBloggerConfig, getGoogleBlogOverview, getSyncedBloggerPosts } from "@/lib/api";
+
+const POSTS_PAGE_SIZE = 20;
 
 function formatNumber(value: number | undefined | null) {
   return new Intl.NumberFormat("ko-KR").format(value ?? 0);
@@ -21,6 +25,54 @@ function formatDate(value?: string | null) {
   }).format(date);
 }
 
+function formatDateTime(value?: string | null) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("ko-KR", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function parsePage(raw: string | string[] | undefined) {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 1;
+}
+
+function pageParamKey(blogId: number) {
+  return `posts_page_${blogId}`;
+}
+
+function buildPageHref(
+  searchParams: Record<string, string | string[] | undefined> | undefined,
+  key: string,
+  page: number,
+) {
+  const params = new URLSearchParams();
+  if (searchParams) {
+    for (const [paramKey, rawValue] of Object.entries(searchParams)) {
+      if (paramKey === key) continue;
+      if (Array.isArray(rawValue)) {
+        for (const item of rawValue) {
+          params.append(paramKey, item);
+        }
+        continue;
+      }
+      if (typeof rawValue === "string" && rawValue.length > 0) {
+        params.set(paramKey, rawValue);
+      }
+    }
+  }
+  params.set(key, String(page));
+  const query = params.toString();
+  return query ? `/google?${query}` : "/google";
+}
+
 function SummaryMetric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-[24px] border border-ink/10 bg-white/70 p-4">
@@ -39,9 +91,22 @@ function MappingRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-export default async function GoogleDataPage() {
+export default async function GoogleDataPage({
+  searchParams,
+}: {
+  searchParams?: Record<string, string | string[] | undefined>;
+}) {
   const [blogs, bloggerConfig] = await Promise.all([getBlogs(), getBloggerConfig()]);
-  const overviews = await Promise.all(blogs.map((blog) => getGoogleBlogOverview(blog.id).catch(() => null)));
+  const blogPayloads = await Promise.all(
+    blogs.map(async (blog) => {
+      const currentPage = parsePage(searchParams?.[pageParamKey(blog.id)]);
+      const [overview, syncedPosts] = await Promise.all([
+        getGoogleBlogOverview(blog.id).catch(() => null),
+        getSyncedBloggerPosts(blog.id, currentPage, POSTS_PAGE_SIZE).catch(() => null),
+      ]);
+      return { blog, currentPage, overview, syncedPosts };
+    }),
+  );
 
   return (
     <div className="space-y-8">
@@ -49,10 +114,10 @@ export default async function GoogleDataPage() {
         <Card>
           <CardHeader>
             <CardDescription>Google 운영 데이터</CardDescription>
-            <CardTitle>블로그 채널 현황</CardTitle>
+            <CardTitle>연결된 채널 현황</CardTitle>
             <p className="text-sm leading-7 text-slate-600">
-              Blogger, Search Console, Google Analytics 데이터를 블로그별로 모아 봅니다. 긴 주소와 속성 ID도
-              카드 안에서 줄바꿈되도록 정리했습니다.
+              Blogger, Search Console, GA4 데이터를 블로그별로 모아서 보여줍니다. Blogger 게시글 카드는 전체 공개글 동기화
+              결과를 기준으로 페이지 단위로 탐색할 수 있습니다.
             </p>
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-4">
@@ -77,8 +142,8 @@ export default async function GoogleDataPage() {
               ))
             ) : (
               <p className="text-sm leading-7 text-slate-600">
-                아직 승인된 Google OAuth 권한이 없습니다. 설정 화면에서 Google 계정 연결을 진행하면 Blogger,
-                Search Console, GA4 권한을 함께 요청합니다.
+                아직 승인된 Google OAuth 권한이 없습니다. 설정 화면에서 Google 계정을 연결하면 Blogger, Search Console, GA4
+                권한을 함께 가져옵니다.
               </p>
             )}
           </CardContent>
@@ -86,13 +151,15 @@ export default async function GoogleDataPage() {
       </section>
 
       <section className="space-y-6">
-        {blogs.map((blog, index) => {
-          const overview = overviews[index];
+        {blogPayloads.map(({ blog, overview, syncedPosts }) => {
           const pageview7d = overview?.pageviews.find((item) => item.range === "7D")?.count ?? 0;
           const pageview30d = overview?.pageviews.find((item) => item.range === "30D")?.count ?? 0;
           const pageviewAll = overview?.pageviews.find((item) => item.range === "all")?.count ?? 0;
           const searchTotals = overview?.search_console?.totals ?? {};
           const analyticsTotals = overview?.analytics?.totals ?? {};
+          const totalSyncedPosts = syncedPosts?.total ?? 0;
+          const totalPages = Math.max(1, Math.ceil(totalSyncedPosts / (syncedPosts?.page_size ?? POSTS_PAGE_SIZE)));
+          const paginationKey = pageParamKey(blog.id);
 
           return (
             <Card key={blog.id} className="overflow-hidden">
@@ -115,7 +182,7 @@ export default async function GoogleDataPage() {
                       href={overview.remote_blog.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="break-all text-sm font-medium text-ember underline-offset-4 hover:underline"
+                      className="break-all text-sm font-medium text-amber-700 underline-offset-4 hover:underline"
                     >
                       실제 블로그 열기
                     </a>
@@ -132,10 +199,11 @@ export default async function GoogleDataPage() {
                   </div>
                 ) : null}
 
-                <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+                <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-7">
                   <SummaryMetric label="Blogger 7일" value={formatNumber(pageview7d)} />
                   <SummaryMetric label="Blogger 30일" value={formatNumber(pageview30d)} />
                   <SummaryMetric label="Blogger 전체" value={formatNumber(pageviewAll)} />
+                  <SummaryMetric label="동기화된 공개글" value={formatNumber(totalSyncedPosts)} />
                   <SummaryMetric label="SC 클릭" value={formatNumber(searchTotals.clicks)} />
                   <SummaryMetric label="SC 노출" value={formatNumber(searchTotals.impressions)} />
                   <SummaryMetric label="GA4 페이지뷰" value={formatNumber(analyticsTotals.screenPageViews)} />
@@ -144,35 +212,79 @@ export default async function GoogleDataPage() {
                 <div className="grid gap-6 xl:grid-cols-2">
                   <Card className="border border-ink/10 shadow-none">
                     <CardHeader>
-                      <CardDescription>최근 게시글</CardDescription>
-                      <CardTitle>Blogger 글 목록</CardTitle>
+                      <CardDescription>동기화된 Blogger 게시글</CardDescription>
+                      <CardTitle>공개글 아카이브</CardTitle>
                     </CardHeader>
-                    <CardContent className="space-y-3">
-                      {overview?.recent_posts?.length ? (
-                        overview.recent_posts.map((post) => (
-                          <div key={post.id} className="rounded-[20px] border border-ink/10 px-4 py-3">
-                            {post.url ? (
-                              <a
-                                href={post.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="break-words font-medium text-ember underline-offset-4 hover:underline"
-                              >
-                                {post.title}
-                              </a>
-                            ) : (
-                              <p className="break-words font-medium text-ink">{post.title}</p>
-                            )}
-                            <p className="mt-1 text-xs text-slate-500">
-                              {post.status || "-"} / {formatDate(post.updated || post.published)}
-                            </p>
-                            {post.labels.length ? (
-                              <p className="mt-1 break-all text-xs text-slate-500">{post.labels.join(", ")}</p>
-                            ) : null}
+                    <CardContent className="space-y-4">
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <SummaryMetric label="총 공개글 수" value={formatNumber(totalSyncedPosts)} />
+                        <SummaryMetric label="마지막 동기화" value={formatDateTime(syncedPosts?.last_synced_at)} />
+                      </div>
+
+                      {syncedPosts?.items?.length ? (
+                        <>
+                          <div className="space-y-3">
+                            {syncedPosts.items.map((post) => (
+                              <div key={post.id} className="rounded-[20px] border border-ink/10 px-4 py-3">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="font-medium text-ink">{post.title}</p>
+                                  {post.status ? (
+                                    <Badge className="border border-ink/15 bg-white text-ink">{post.status}</Badge>
+                                  ) : null}
+                                </div>
+                                <p className="mt-1 text-xs text-slate-500">
+                                  발행 {formatDate(post.published)} / 수정 {formatDate(post.updated)}
+                                </p>
+                                {post.labels.length ? (
+                                  <p className="mt-1 break-all text-xs text-slate-500">{post.labels.join(", ")}</p>
+                                ) : null}
+                                {post.url ? (
+                                  <a
+                                    href={post.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="mt-2 inline-flex text-sm font-medium text-amber-700 underline-offset-4 hover:underline"
+                                  >
+                                    원문 열기
+                                  </a>
+                                ) : null}
+                              </div>
+                            ))}
                           </div>
-                        ))
+
+                          <div className="flex flex-wrap items-center justify-between gap-3 rounded-[20px] border border-ink/10 px-4 py-3 text-sm text-slate-600">
+                            <p>
+                              페이지 {syncedPosts.page} / {totalPages}
+                            </p>
+                            <div className="flex items-center gap-2">
+                              {syncedPosts.page > 1 ? (
+                                <Link
+                                  href={buildPageHref(searchParams, paginationKey, syncedPosts.page - 1)}
+                                  className="rounded-full border border-ink/10 px-4 py-2 font-medium text-ink"
+                                >
+                                  이전
+                                </Link>
+                              ) : (
+                                <span className="rounded-full border border-ink/10 px-4 py-2 text-slate-400">이전</span>
+                              )}
+                              {syncedPosts.page < totalPages ? (
+                                <Link
+                                  href={buildPageHref(searchParams, paginationKey, syncedPosts.page + 1)}
+                                  className="rounded-full border border-ink/10 px-4 py-2 font-medium text-ink"
+                                >
+                                  다음
+                                </Link>
+                              ) : (
+                                <span className="rounded-full border border-ink/10 px-4 py-2 text-slate-400">다음</span>
+                              )}
+                            </div>
+                          </div>
+                        </>
                       ) : (
-                        <p className="text-sm leading-7 text-slate-600">표시할 Blogger 게시글 데이터가 아직 없습니다.</p>
+                        <p className="text-sm leading-7 text-slate-600">
+                          아직 동기화된 Blogger 공개글이 없습니다. Google OAuth 연결이나 블로그 import가 끝나면 첫 전체 동기화가
+                          실행되어 이 목록이 채워집니다.
+                        </p>
                       )}
                     </CardContent>
                   </Card>
@@ -188,7 +300,7 @@ export default async function GoogleDataPage() {
                       <MappingRow label="GA4 속성 ID" value={blog.ga4_property_id || "-"} />
                       <MappingRow label="원격 포스트 수" value={formatNumber(overview?.remote_blog?.posts_total_items)} />
                       <MappingRow label="원격 페이지 수" value={formatNumber(overview?.remote_blog?.pages_total_items)} />
-                      <MappingRow label="마지막 업데이트" value={formatDate(overview?.remote_blog?.updated)} />
+                      <MappingRow label="원격 갱신 시각" value={formatDate(overview?.remote_blog?.updated)} />
                     </CardContent>
                   </Card>
                 </div>
@@ -215,7 +327,8 @@ export default async function GoogleDataPage() {
                                 <div key={row.keys[0]} className="rounded-[20px] border border-ink/10 px-4 py-3">
                                   <p className="break-words font-medium text-ink">{row.keys[0]}</p>
                                   <p className="mt-1 text-xs text-slate-500">
-                                    클릭 {formatNumber(row.clicks)} / 노출 {formatNumber(row.impressions)} / CTR {formatPercent(row.ctr)}
+                                    클릭 {formatNumber(row.clicks)} / 노출 {formatNumber(row.impressions)} / CTR{" "}
+                                    {formatPercent(row.ctr)}
                                   </p>
                                 </div>
                               ))}
@@ -226,7 +339,8 @@ export default async function GoogleDataPage() {
                                 <div key={row.keys[0]} className="rounded-[20px] border border-ink/10 px-4 py-3">
                                   <p className="break-all font-medium text-ink">{row.keys[0]}</p>
                                   <p className="mt-1 text-xs text-slate-500">
-                                    클릭 {formatNumber(row.clicks)} / 노출 {formatNumber(row.impressions)} / 순위 {row.position.toFixed(1)}
+                                    클릭 {formatNumber(row.clicks)} / 노출 {formatNumber(row.impressions)} / 순위{" "}
+                                    {row.position.toFixed(1)}
                                   </p>
                                 </div>
                               ))}

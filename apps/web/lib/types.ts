@@ -53,6 +53,28 @@ export interface BloggerRemotePost {
   replies_total_items: number;
 }
 
+export interface SyncedBloggerPost {
+  id: string;
+  title: string;
+  url?: string | null;
+  status?: string | null;
+  published?: string | null;
+  updated?: string | null;
+  labels: string[];
+  author_display_name?: string | null;
+  replies_total_items: number;
+  content_html: string;
+  synced_at?: string | null;
+}
+
+export interface SyncedBloggerPostPage {
+  items: SyncedBloggerPost[];
+  total: number;
+  page: number;
+  page_size: number;
+  last_synced_at?: string | null;
+}
+
 export interface SearchConsoleSite {
   site_url: string;
   permission_level?: string | null;

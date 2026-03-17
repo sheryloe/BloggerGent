@@ -13,6 +13,7 @@ import {
   Job,
   PromptTemplate,
   SettingItem,
+  SyncedBloggerPostPage,
   Topic
 } from "@/lib/types";
 
@@ -87,6 +88,12 @@ export async function getGoogleIntegrations() {
 
 export async function getGoogleBlogOverview(blogId: number, days = 28) {
   return apiFetch<GoogleBlogOverview>(`/google/blogs/${blogId}/overview?days=${days}`);
+}
+
+export async function getSyncedBloggerPosts(blogId: number, page = 1, pageSize = 20) {
+  return apiFetch<SyncedBloggerPostPage>(
+    `/google/blogs/${blogId}/synced-posts?page=${page}&page_size=${pageSize}`,
+  );
 }
 
 export async function getBlogSeoMeta(blogId: number) {

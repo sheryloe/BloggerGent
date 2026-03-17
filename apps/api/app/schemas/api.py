@@ -414,6 +414,28 @@ class BloggerRemotePostRead(BaseModel):
     replies_total_items: int = 0
 
 
+class SyncedBloggerPostRead(BaseModel):
+    id: str
+    title: str
+    url: str | None = None
+    status: str | None = None
+    published: str | None = None
+    updated: str | None = None
+    labels: list[str] = Field(default_factory=list)
+    author_display_name: str | None = None
+    replies_total_items: int = 0
+    content_html: str = ""
+    synced_at: str | None = None
+
+
+class SyncedBloggerPostPageRead(BaseModel):
+    items: list[SyncedBloggerPostRead] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    page_size: int = 50
+    last_synced_at: str | None = None
+
+
 class SearchConsoleSiteRead(BaseModel):
     site_url: str
     permission_level: str | None = None

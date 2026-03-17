@@ -186,3 +186,23 @@ Bloggent는 두 가지 방식으로 GitHub Pages를 활용할 수 있습니다.
 
 - GitHub: `https://github.com/sheryloe/BloggerGent`
 - GitHub Pages: `https://sheryloe.github.io/BloggerGent/`
+## Clone And Run
+
+1. Copy `.env.example` to `.env`.
+2. Set `SETTINGS_ENCRYPTION_SECRET` before starting the API.
+3. Keep `PROVIDER_MODE=mock` for a first local boot, then add Blogger/OpenAI credentials when moving to live integrations.
+4. Start the stack with `docker compose up --build -d`.
+
+## Required Env
+
+- `SETTINGS_ENCRYPTION_SECRET`
+- `OPENAI_API_KEY`
+- `BLOGGER_CLIENT_ID`
+- `BLOGGER_CLIENT_SECRET`
+- `BLOGGER_REDIRECT_URI`
+
+## Security Notes
+
+- `SETTINGS_ENCRYPTION_SECRET` no longer falls back to a known default value.
+- If the secret is missing, Bloggent now fails fast when secret storage is initialized.
+- `GITHUB_PAGES_TOKEN` is only needed when `PUBLIC_IMAGE_PROVIDER=github_pages`.

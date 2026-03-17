@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -19,12 +20,14 @@ from app.services.blogger_oauth_service import (
     get_blogger_web_return_url,
     list_blogger_blogs,
 )
+from app.services.blogger_sync_service import sync_connected_blogger_posts
 from app.services.google_reporting_service import list_analytics_properties, list_search_console_sites
 from app.services.settings_service import get_blogger_config, get_settings_map, list_settings, upsert_settings
 from app.services.storage_service import is_private_asset_url
 
 router = APIRouter()
 blogger_router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("", response_model=list[SettingItem])
@@ -166,6 +169,10 @@ def complete_blogger_oauth(
             url=f"{base_url}?{urlencode({'blogger_oauth': 'error', 'message': exc.detail})}",
             status_code=307,
         )
+
+    sync_warnings = sync_connected_blogger_posts(db)
+    if sync_warnings:
+        logger.warning("Blogger OAuth succeeded but synced post refresh had warnings: %s", " | ".join(sync_warnings))
 
     return RedirectResponse(url=f"{base_url}?blogger_oauth=success", status_code=307)
 
