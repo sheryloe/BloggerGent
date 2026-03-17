@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from PIL import Image, ImageDraw
 from slugify import slugify
 
-from app.models.entities import PublishMode
+from app.models.entities import PostStatus, PublishMode
 from app.schemas.ai import ArticleGenerationOutput, FAQItem, TopicDiscoveryItem, TopicDiscoveryPayload
 
 
@@ -254,6 +254,8 @@ class MockBloggerProvider:
             "url": f"https://mock-blogger.local/{slug}",
             "published": datetime.now(timezone.utc).isoformat(),
             "isDraft": publish_mode == PublishMode.DRAFT,
+            "postStatus": PostStatus.DRAFT.value if publish_mode == PublishMode.DRAFT else PostStatus.PUBLISHED.value,
+            "scheduledFor": None,
             "labels": labels,
             "meta_description": meta_description,
             "content_length": len(content),
@@ -275,6 +277,8 @@ class MockBloggerProvider:
             "url": f"https://mock-blogger.local/{post_id}",
             "published": datetime.now(timezone.utc).isoformat(),
             "isDraft": False,
+            "postStatus": PostStatus.PUBLISHED.value,
+            "scheduledFor": None,
             "labels": labels,
             "meta_description": meta_description,
             "content_length": len(content),
@@ -282,12 +286,16 @@ class MockBloggerProvider:
         }
         return summary, summary
 
-    def publish_draft(self, post_id: str) -> tuple[dict, dict]:
+    def publish_draft(self, post_id: str, publish_date: str | None = None) -> tuple[dict, dict]:
+        post_status = PostStatus.SCHEDULED.value if publish_date else PostStatus.PUBLISHED.value
+        published_at = publish_date or datetime.now(timezone.utc).isoformat()
         summary = {
             "id": post_id,
             "url": f"https://mock-blogger.local/{post_id}",
-            "published": datetime.now(timezone.utc).isoformat(),
+            "published": published_at,
             "isDraft": False,
+            "postStatus": post_status,
+            "scheduledFor": publish_date,
         }
         return summary, summary
 

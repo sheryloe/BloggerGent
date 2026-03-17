@@ -7,8 +7,9 @@ from slugify import slugify
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.entities import Article, Job, Topic
+from app.models.entities import Article, Job, JobStatus, Topic
 from app.schemas.ai import TopicDiscoveryItem
+from app.services.topic_guard_service import build_topic_memory_exclusion_prompt
 
 
 class DuplicateContentError(ValueError):
@@ -26,10 +27,6 @@ class DuplicateMatch:
 def _normalize(value: str | None) -> str:
     normalized = slugify(value or "", separator=" ")
     return " ".join(normalized.split()).strip()
-
-
-def _no_space(value: str | None) -> str:
-    return _normalize(value).replace(" ", "")
 
 
 def _is_similar(candidate: str, existing: str) -> bool:
@@ -51,20 +48,32 @@ def _is_similar(candidate: str, existing: str) -> bool:
     return ratio >= 0.9
 
 
+def _iter_existing_job_candidates(db: Session, blog_id: int):
+    rows = db.execute(
+        select(Job, Article.id)
+        .outerjoin(Article, Article.job_id == Job.id)
+        .where(Job.blog_id == blog_id)
+    ).all()
+    for job, article_id in rows:
+        if article_id is not None:
+            continue
+        if job.status in {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.STOPPED}:
+            continue
+        yield DuplicateMatch("job", job.id, job.keyword_snapshot, "이미 진행 중인 작업 키워드와 겹칩니다.")
+
+
 def _iter_existing_candidates(db: Session, blog_id: int, *, include_topics: bool = True):
     if include_topics:
         topics = db.execute(select(Topic).where(Topic.blog_id == blog_id)).scalars().all()
         for topic in topics:
-            yield DuplicateMatch("topic", topic.id, topic.keyword, "이미 저장된 주제 후보와 겹칩니다.")
-
-    jobs = db.execute(select(Job).where(Job.blog_id == blog_id)).scalars().all()
-    for job in jobs:
-        yield DuplicateMatch("job", job.id, job.keyword_snapshot, "이미 생성된 작업 키워드와 겹칩니다.")
+            yield DuplicateMatch("topic", topic.id, topic.keyword, "이미 저장한 주제 후보와 겹칩니다.")
 
     articles = db.execute(select(Article).where(Article.blog_id == blog_id)).scalars().all()
     for article in articles:
         yield DuplicateMatch("article_title", article.id, article.title, "이미 생성된 글 제목과 겹칩니다.")
         yield DuplicateMatch("article_slug", article.id, article.slug, "이미 생성된 글 슬러그와 겹칩니다.")
+
+    yield from _iter_existing_job_candidates(db, blog_id)
 
 
 def _iter_existing_article_candidates(db: Session, blog_id: int):
@@ -112,7 +121,7 @@ def filter_duplicate_topic_items(
             skipped.append(
                 {
                     "keyword": item.keyword,
-                    "reason": f"같은 배치 안에 이미 선택된 '{intra_match}'와 너무 비슷합니다.",
+                    "reason": f"같은 배치 안에서 이미 선택된 '{intra_match}'와 너무 비슷합니다.",
                 }
             )
             continue
@@ -144,14 +153,21 @@ def build_duplicate_exclusion_prompt(db: Session, *, blog_id: int, limit: int = 
         seen.append(value)
         if len(seen) >= limit:
             break
-    if not seen:
-        return ""
-    bullet_list = "\n".join(f"- {value}" for value in seen)
-    return (
-        "\n\nAvoid duplicating or lightly rephrasing topics already covered in this blog.\n"
-        "Do not return topics that substantially overlap with the following existing coverage:\n"
-        f"{bullet_list}"
-    )
+
+    sections: list[str] = []
+    if seen:
+        bullet_list = "\n".join(f"- {value}" for value in seen)
+        sections.append(
+            "\n\nAvoid duplicating or lightly rephrasing topics already covered in this blog.\n"
+            "Do not return topics that substantially overlap with the following existing coverage:\n"
+            f"{bullet_list}"
+        )
+
+    memory_prompt = build_topic_memory_exclusion_prompt(db, blog_id=blog_id, limit=limit)
+    if memory_prompt:
+        sections.append(memory_prompt)
+
+    return "".join(sections)
 
 
 def assert_article_not_duplicate(

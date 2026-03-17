@@ -9,6 +9,7 @@ from app.models.entities import Topic
 from app.schemas.api import DiscoveryRunRequest, DiscoveryRunResponse, TopicRead
 from app.services.blog_service import get_blog, list_visible_blog_ids
 from app.services.providers.base import ProviderRuntimeError
+from app.services.topic_guard_service import TopicGuardConflictError
 from app.tasks.pipeline import discover_topics_and_enqueue
 
 router = APIRouter()
@@ -60,5 +61,7 @@ def trigger_topic_discovery(payload: DiscoveryRunRequest, db: Session = Depends(
                 "detail": exc.detail,
             },
         ) from exc
+    except TopicGuardConflictError as exc:
+        raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

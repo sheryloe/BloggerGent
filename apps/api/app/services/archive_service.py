@@ -20,7 +20,9 @@ def _generated_archive_item(article: Article) -> dict:
     blogger_post = article.blogger_post
     status = "generated"
     if blogger_post and blogger_post.published_url:
-        status = "draft" if blogger_post.is_draft else "published"
+        status = getattr(blogger_post.post_status, "value", blogger_post.post_status) or (
+            "draft" if blogger_post.is_draft else "published"
+        )
 
     return {
         "source": "generated",
@@ -35,6 +37,7 @@ def _generated_archive_item(article: Article) -> dict:
         "updated_at": article.updated_at,
         "status": status,
         "content_html": article.assembled_html or article.html_article,
+        "scheduled_for": blogger_post.scheduled_for if blogger_post else None,
     }
 
 
@@ -52,6 +55,7 @@ def _synced_archive_item(post: SyncedBloggerPost) -> dict:
         "updated_at": post.updated_at_remote or post.updated_at,
         "status": post.status or "live",
         "content_html": post.content_html,
+        "scheduled_for": None,
     }
 
 

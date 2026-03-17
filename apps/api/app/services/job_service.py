@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.models.entities import Article, Blog, Job, JobStatus, LogLevel, PublishMode, Topic
 from app.services.audit_service import add_log
 from app.services.content_guard_service import DuplicateContentError, find_duplicate_match
+from app.services.topic_guard_service import validate_candidate_topic
 
 
 def create_job(
@@ -28,6 +29,8 @@ def create_job(
         ).scalar_one_or_none()
         if existing_topic:
             resolved_topic_id = existing_topic.id
+
+    validate_candidate_topic(db, blog_id=blog_id, title=keyword)
 
     duplicate = find_duplicate_match(
         db,

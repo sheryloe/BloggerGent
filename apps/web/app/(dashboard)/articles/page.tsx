@@ -18,19 +18,14 @@ function parsePositiveInt(value: string | string[] | undefined, fallback: number
 }
 
 function readString(value: string | string[] | undefined) {
-  if (Array.isArray(value)) return value[0] ?? "";
-  return value ?? "";
+  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
 }
 
 function formatDate(value?: string | null) {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("ko-KR", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  }).format(date);
+  return new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "short", day: "numeric" }).format(date);
 }
 
 function formatDateTime(value?: string | null) {
@@ -62,6 +57,7 @@ function sourceBadge(source: BlogArchiveItem["source"]) {
 function statusBadge(item: BlogArchiveItem) {
   if (item.source === "synced") return "공개";
   if (item.status === "published") return "공개";
+  if (item.status === "scheduled") return "예약됨";
   if (item.status === "draft") return "초안";
   return "생성됨";
 }
@@ -76,12 +72,8 @@ function buildArchiveHref(
     for (const [key, rawValue] of Object.entries(searchParams)) {
       if (updates[key] === null) continue;
       if (Array.isArray(rawValue)) {
-        for (const value of rawValue) {
-          params.append(key, value);
-        }
-        continue;
-      }
-      if (typeof rawValue === "string" && rawValue.length > 0) {
+        for (const value of rawValue) params.append(key, value);
+      } else if (typeof rawValue === "string" && rawValue.length > 0) {
         params.set(key, rawValue);
       }
     }
@@ -90,24 +82,16 @@ function buildArchiveHref(
   for (const [key, value] of Object.entries(updates)) {
     if (value === null || value === "") {
       params.delete(key);
-      continue;
+    } else {
+      params.set(key, value);
     }
-    params.set(key, value);
   }
 
   const query = params.toString();
   return query ? `/articles?${query}` : "/articles";
 }
 
-function ArchiveListCard({
-  item,
-  selected,
-  href,
-}: {
-  item: BlogArchiveItem;
-  selected: boolean;
-  href: string;
-}) {
+function ArchiveListCard({ item, selected, href }: { item: BlogArchiveItem; selected: boolean; href: string }) {
   return (
     <Link
       href={href}
@@ -134,7 +118,7 @@ function ArchiveListCard({
           <p className="mt-2 line-clamp-2 font-semibold text-ink">{item.title}</p>
           <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-600">{item.excerpt || "요약이 아직 없습니다."}</p>
           <p className="mt-2 text-xs text-slate-500">
-            발행 {formatDate(item.published_at)} / 수정 {formatDate(item.updated_at)}
+            발행 {formatDate(item.published_at ?? item.scheduled_for)} / 수정 {formatDate(item.updated_at)}
           </p>
         </div>
       </div>
@@ -153,7 +137,7 @@ function SyncedArchiveDetail({ item, blog }: { item: BlogArchiveItem; blog: Blog
             <Badge key={label}>{label}</Badge>
           ))}
         </div>
-        <CardDescription>읽기 전용 보관함 항목</CardDescription>
+        <CardDescription>읽기 전용 보관함</CardDescription>
         <CardTitle className="text-2xl leading-tight">{item.title}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -171,8 +155,10 @@ function SyncedArchiveDetail({ item, blog }: { item: BlogArchiveItem; blog: Blog
             </div>
 
             <div className="rounded-[24px] border border-ink/10 bg-white/70 p-5">
-              <p className="text-xs uppercase tracking-[0.16em] text-slate-500">본문 일부</p>
-              <p className="mt-3 text-sm leading-7 text-slate-700">{item.excerpt || "본문 요약을 불러오지 못했습니다."}</p>
+              <p className="text-xs uppercase tracking-[0.16em] text-slate-500">본문 미리보기</p>
+              <p className="mt-3 text-sm leading-7 text-slate-700">
+                {item.excerpt || "본문 요약을 불러오지 못했습니다."}
+              </p>
             </div>
           </div>
 
@@ -199,7 +185,7 @@ function SyncedArchiveDetail({ item, blog }: { item: BlogArchiveItem; blog: Blog
                 <p className="text-sm leading-7 text-slate-600">원문 링크가 없는 게시글입니다.</p>
               )}
               <p className="text-sm leading-7 text-slate-600">
-                기존 Blogger 글은 읽기 전용으로 보관되며, 여기에서는 게시나 SEO 편집 버튼이 노출되지 않습니다.
+                기존 Blogger 글은 비교와 참고용으로만 보여주고, 여기에서는 게시나 SEO 편집 버튼을 표시하지 않습니다.
               </p>
             </div>
           </div>
@@ -217,10 +203,21 @@ function GeneratedArchiveDetail({
   seoMeta: Awaited<ReturnType<typeof getArticleSeoMeta>> | null;
 }) {
   const publishState = article.blogger_post?.published_url
-    ? article.blogger_post.is_draft
-      ? "draft"
-      : "published"
+    ? article.blogger_post.post_status === "scheduled"
+      ? "scheduled"
+      : article.blogger_post.is_draft
+        ? "draft"
+        : "published"
     : "unpublished";
+
+  const publishStatusLabel =
+    publishState === "published"
+      ? "Blogger 공개 게시"
+      : publishState === "scheduled"
+        ? "Blogger 예약 발행"
+        : publishState === "draft"
+          ? "Blogger 초안"
+          : "게시 전";
 
   return (
     <Card>
@@ -239,7 +236,7 @@ function GeneratedArchiveDetail({
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-4">
             <div className="rounded-[24px] border border-ink/10 bg-white/70 p-5">
-              <p className="text-xs uppercase tracking-[0.16em] text-slate-500">검색 설명</p>
+              <p className="text-xs uppercase tracking-[0.16em] text-slate-500">메타 설명</p>
               <p className="mt-3 text-sm leading-7 text-slate-700">{article.meta_description}</p>
             </div>
             <div className="rounded-[24px] border border-ink/10 bg-white/70 p-5">
@@ -255,16 +252,10 @@ function GeneratedArchiveDetail({
               <DetailsRow label="생성일" value={formatDate(article.created_at)} />
               <DetailsRow label="수정일" value={formatDate(article.updated_at)} />
               <DetailsRow label="읽기 시간" value={`${article.reading_time_minutes}분`} />
-              <DetailsRow
-                label="게시 상태"
-                value={
-                  publishState === "published"
-                    ? "Blogger 공개 게시"
-                    : publishState === "draft"
-                      ? "Blogger 초안"
-                      : "게시 전"
-                }
-              />
+              <DetailsRow label="게시 상태" value={publishStatusLabel} />
+              {article.blogger_post?.scheduled_for ? (
+                <DetailsRow label="예약일" value={formatDateTime(article.blogger_post.scheduled_for)} />
+              ) : null}
             </div>
 
             <div className="mt-5 space-y-3">
@@ -275,11 +266,15 @@ function GeneratedArchiveDetail({
                   rel="noreferrer"
                   className="block break-all text-sm font-medium text-amber-700 underline-offset-4 hover:underline"
                 >
-                  {article.blogger_post.is_draft ? "Blogger 초안 보기" : "공개 글 보기"}
+                  {article.blogger_post.post_status === "scheduled"
+                    ? "Blogger 예약 글 보기"
+                    : article.blogger_post.is_draft
+                      ? "Blogger 초안 보기"
+                      : "공개 글 보기"}
                 </a>
               ) : (
                 <p className="text-sm leading-7 text-slate-600">
-                  아직 Blogger에 게시되지 않았습니다. 아래 버튼으로 최종 게시를 진행할 수 있습니다.
+                  아직 Blogger에 게시하지 않았습니다. 아래 버튼으로 즉시 발행하거나 예약 발행할 수 있습니다.
                 </p>
               )}
               <PublishArticleButton articleId={article.id} publishState={publishState} />
@@ -291,9 +286,7 @@ function GeneratedArchiveDetail({
 
         <div className="rounded-[24px] border border-ink/10 bg-white/70 p-5">
           <p className="text-xs uppercase tracking-[0.16em] text-slate-500">미리보기</p>
-          <p className="mt-2 text-sm leading-7 text-slate-600">
-            실제 게시 형태에 가깝게 조립된 HTML 미리보기를 확인할 수 있습니다.
-          </p>
+          <p className="mt-2 text-sm leading-7 text-slate-600">실제 게시 형태에 가깝게 조립된 HTML 미리보기를 확인할 수 있습니다.</p>
           <div className="mt-4">
             <ArticlePreviewFrame article={article} />
           </div>
@@ -330,7 +323,7 @@ export default async function ArticlesPage({
         <div>
           <h1 className="font-display text-4xl font-semibold text-ink">글보관함</h1>
           <p className="mt-2 text-base leading-7 text-slate-600">
-            블로그를 먼저 import한 뒤 생성 글과 기존 Blogger 글을 함께 보관함에서 볼 수 있습니다.
+            블로그를 먼저 import하면 생성 글과 기존 Blogger 글을 한 화면에서 볼 수 있습니다.
           </p>
         </div>
         <Card>
@@ -373,8 +366,7 @@ export default async function ArticlesPage({
         <div>
           <h1 className="font-display text-4xl font-semibold text-ink">글보관함</h1>
           <p className="mt-2 max-w-3xl text-base leading-7 text-slate-600">
-            선택한 블로그 기준으로 생성 글과 기존 Blogger 공개 글을 한 곳에서 확인합니다. 기존 글 이미지와 요약도 함께 저장되어,
-            관련글 연결과 비교 검토에 바로 활용할 수 있습니다.
+            선택한 블로그 기준으로 생성 글과 기존 Blogger 공개 글을 함께 확인합니다. 기존 글 이미지와 요약도 같이 보여서 관련 글 작성과 중복 확인에 바로 사용할 수 있습니다.
           </p>
         </div>
         <div className="w-full max-w-sm">
@@ -397,7 +389,7 @@ export default async function ArticlesPage({
         </Card>
         <Card>
           <CardContent className="px-5 py-5">
-            <p className="text-xs uppercase tracking-[0.16em] text-slate-500">전체 보관함 수</p>
+            <p className="text-xs uppercase tracking-[0.16em] text-slate-500">전체 보관함</p>
             <p className="mt-2 text-lg font-semibold text-ink">{archive.total}개</p>
           </CardContent>
         </Card>
@@ -414,8 +406,11 @@ export default async function ArticlesPage({
           <CardContent className="space-y-3 px-6 py-10 text-sm leading-7 text-slate-600">
             <p>이 블로그에는 아직 생성 글도, 가져온 Blogger 공개 글도 없습니다.</p>
             <p>
-              Google 페이지에서 <Link href="/google" className="font-medium text-amber-700 underline-offset-4 hover:underline">현재 게시글 가져오기</Link>를 실행하거나,
-              대시보드에서 새 글을 생성하면 이 보관함에 바로 반영됩니다.
+              Google 페이지에서{" "}
+              <Link href="/google" className="font-medium text-amber-700 underline-offset-4 hover:underline">
+                현재 게시글 가져오기
+              </Link>
+              를 실행하거나, 대시보드에서 새 글을 생성하면 이 보관함에 바로 반영됩니다.
             </p>
           </CardContent>
         </Card>
@@ -426,7 +421,7 @@ export default async function ArticlesPage({
               <CardDescription>선택 블로그 통합 목록</CardDescription>
               <CardTitle>생성 글 + 기존 Blogger 글</CardTitle>
               <p className="text-sm leading-7 text-slate-600">
-                이 페이지에서 생성 글 {currentBlogGeneratedCount}개, 기존 Blogger 글 {currentBlogSyncedCount}개를 보고 있습니다.
+                이 페이지에서는 생성 글 {currentBlogGeneratedCount}개, 기존 Blogger 글 {currentBlogSyncedCount}개를 보고 있습니다.
               </p>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -474,7 +469,7 @@ export default async function ArticlesPage({
                       })}
                       className="rounded-full border border-ink/10 px-4 py-2 font-medium text-ink"
                     >
-                      다음
+                     다음
                     </Link>
                   ) : (
                     <span className="rounded-full border border-ink/10 px-4 py-2 text-slate-400">다음</span>
@@ -486,7 +481,7 @@ export default async function ArticlesPage({
 
           {!selectedItem ? (
             <Card>
-              <CardContent className="px-6 py-10 text-sm leading-7 text-slate-600">선택된 글이 없습니다.</CardContent>
+              <CardContent className="px-6 py-10 text-sm leading-7 text-slate-600">선택한 글이 없습니다.</CardContent>
             </Card>
           ) : selectedItem.source === "generated" && selectedArticle ? (
             <GeneratedArchiveDetail article={selectedArticle} seoMeta={selectedSeoMeta} />

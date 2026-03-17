@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.entities import Blog, BloggerPost, Job, JobStatus, Topic
+from app.models.entities import Blog, BloggerPost, Job, JobStatus, PostStatus, Topic
 from app.services.blog_service import get_blog, get_blog_summary_map, list_blogs
 
 
@@ -44,7 +44,7 @@ def build_dashboard_metrics(db: Session, blog_id: int | None = None) -> dict:
 
     latest_post_query = (
         select(BloggerPost)
-        .where(BloggerPost.blog_id.in_(blog_ids), BloggerPost.is_draft.is_(False))
+        .where(BloggerPost.blog_id.in_(blog_ids), BloggerPost.post_status == PostStatus.PUBLISHED)
         .order_by(BloggerPost.published_at.desc().nullslast(), BloggerPost.created_at.desc())
         .limit(5)
     )

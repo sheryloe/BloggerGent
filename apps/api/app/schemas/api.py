@@ -4,7 +4,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.models.entities import JobStatus, LogLevel, PublishMode, WorkflowStageType
+from app.models.entities import JobStatus, LogLevel, PostStatus, PublishMode, WorkflowStageType
 
 
 class BlogAgentConfigRead(BaseModel):
@@ -204,6 +204,9 @@ class TopicRead(BaseModel):
     trend_score: float | None = None
     source: str
     locale: str
+    topic_cluster_label: str | None = None
+    topic_angle_label: str | None = None
+    distinct_reason: str | None = None
     created_at: datetime
     blog: BlogCompactRead | None = None
 
@@ -241,6 +244,8 @@ class BloggerPostRead(BaseModel):
     published_url: str
     published_at: datetime | None = None
     is_draft: bool
+    post_status: PostStatus = PostStatus.DRAFT
+    scheduled_for: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -390,6 +395,11 @@ class PromptTemplateUpdate(BaseModel):
     content: str = Field(min_length=20)
 
 
+class ArticlePublishRequest(BaseModel):
+    mode: str = Field(default="publish", pattern="^(publish|schedule)$")
+    scheduled_for: datetime | None = None
+
+
 class BloggerRemoteBlogRead(BaseModel):
     id: str
     name: str
@@ -448,6 +458,7 @@ class BlogArchiveItemRead(BaseModel):
     labels: list[str] = Field(default_factory=list)
     published_url: str | None = None
     published_at: datetime | None = None
+    scheduled_for: datetime | None = None
     updated_at: datetime | None = None
     status: str
     content_html: str | None = None

@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from app.core.celery_app import celery_app
 from app.db.session import SessionLocal
-from app.models.entities import BloggerPost, Image, JobStatus, LogLevel, PublishMode, WorkflowStageType
+from app.models.entities import BloggerPost, Image, JobStatus, LogLevel, PostStatus, PublishMode, WorkflowStageType
 from app.services.article_service import build_collage_prompt, save_article
 from app.services.audit_service import add_log, count_logs_since
 from app.services.blog_service import get_blog, get_workflow_step, render_agent_prompt, stage_label
@@ -37,6 +37,12 @@ from app.services.related_posts import find_related_articles
 from app.services.settings_service import get_settings_map
 from app.services.storage_service import save_html, save_public_binary
 from app.services.topic_service import upsert_topics
+from app.services.topic_guard_service import (
+    TopicGuardConflictError,
+    annotate_topic_items,
+    assert_topic_guard,
+    current_publish_target_datetime,
+)
 
 GEMINI_TOPIC_REQUEST_STAGE = "GEMINI_TOPIC_REQUEST"
 GEMINI_TOPIC_LIMIT_BLOCKED_STAGE = "GEMINI_TOPIC_LIMIT_BLOCKED"
@@ -127,13 +133,23 @@ def _upsert_blogger_post(
     published_at = summary.get("published")
     if isinstance(published_at, str):
         published_at = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+    scheduled_for = summary.get("scheduledFor")
+    if isinstance(scheduled_for, str):
+        scheduled_for = datetime.fromisoformat(scheduled_for.replace("Z", "+00:00"))
+    post_status_value = summary.get("postStatus")
+    if post_status_value:
+        post_status = PostStatus(post_status_value)
+    else:
+        post_status = PostStatus.DRAFT if bool(summary.get("isDraft", True)) else PostStatus.PUBLISHED
     payload = {
         "blog_id": blog_id,
         "article_id": article_id,
         "blogger_post_id": summary.get("id", f"job-{job_id}"),
         "published_url": summary.get("url", ""),
         "published_at": published_at,
-        "is_draft": bool(summary.get("isDraft", True)),
+        "is_draft": post_status == PostStatus.DRAFT,
+        "post_status": post_status,
+        "scheduled_for": scheduled_for,
         "response_payload": raw_payload,
     }
     if post:
@@ -276,8 +292,41 @@ def discover_topics_and_enqueue(
     prompt = render_agent_prompt(blog, topic_step) + build_duplicate_exclusion_prompt(db, blog_id=blog.id)
     _enforce_gemini_topic_limits(db, blog=blog)
     payload, raw_response = provider.discover_topics(prompt)
-    filtered_topics, skipped_duplicates = filter_duplicate_topic_items(db, blog_id=blog.id, items=payload.topics)
-    topics = upsert_topics(db, blog, filtered_topics)
+    descriptor_by_keyword = annotate_topic_items(db, blog=blog, items=payload.topics)
+    metadata_by_keyword = {
+        keyword: {
+            "topic_cluster_label": descriptor.topic_cluster_label,
+            "topic_angle_label": descriptor.topic_angle_label,
+            "distinct_reason": descriptor.distinct_reason,
+            "topic_cluster_key": descriptor.topic_cluster_key,
+        }
+        for keyword, descriptor in descriptor_by_keyword.items()
+    }
+
+    guarded_topics = []
+    skipped_duplicates: list[dict[str, str]] = []
+    target_publish_datetime = current_publish_target_datetime(db)
+    for item in payload.topics:
+        descriptor = descriptor_by_keyword[item.keyword]
+        try:
+            assert_topic_guard(
+                db,
+                blog_id=blog.id,
+                descriptor=descriptor,
+                target_datetime=target_publish_datetime,
+            )
+            guarded_topics.append(item)
+        except TopicGuardConflictError as exc:
+            skipped_duplicates.append(
+                {
+                    "keyword": item.keyword,
+                    "reason": exc.violation.message,
+                }
+            )
+
+    filtered_topics, duplicate_skips = filter_duplicate_topic_items(db, blog_id=blog.id, items=guarded_topics)
+    skipped_duplicates.extend(duplicate_skips)
+    topics = upsert_topics(db, blog, filtered_topics, metadata_by_keyword=metadata_by_keyword)
 
     settings_map = get_settings_map(db)
     mode_value = publish_mode or "draft"
@@ -285,7 +334,17 @@ def discover_topics_and_enqueue(
     stop_after_status = _resolve_stop_after(settings_map, override=stop_after)
 
     job_ids: list[int] = []
+    queued_cluster_keys: set[str] = set()
     for topic in topics:
+        topic_cluster_key = (metadata_by_keyword.get(topic.keyword, {}).get("topic_cluster_key") or "").strip().lower()
+        if topic_cluster_key and topic_cluster_key in queued_cluster_keys:
+            skipped_duplicates.append(
+                {
+                    "keyword": topic.keyword,
+                    "reason": "같은 메인 주제의 다른 각도는 이번 배치에서 Topic으로만 저장하고 자동 작업 큐에는 한 건만 넣습니다.",
+                }
+            )
+            continue
         try:
             job = create_job(
                 db,
@@ -306,6 +365,8 @@ def discover_topics_and_enqueue(
         except DuplicateContentError as exc:
             skipped_duplicates.append({"keyword": topic.keyword, "reason": str(exc)})
             continue
+        if topic_cluster_key:
+            queued_cluster_keys.add(topic_cluster_key)
         set_status(
             db,
             job,

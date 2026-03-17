@@ -5,7 +5,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
-from app.models.entities import Article, AuditLog, Blog, BloggerPost, Image, Job, PublishMode, Topic
+from app.models.entities import Article, AuditLog, Blog, BloggerPost, Image, Job, PostStatus, PublishMode, Topic
 from app.schemas.api import GeneratedDataResetResponse, JobCreate, JobRead, JobRetryResponse
 from app.services.blog_service import get_blog, list_visible_blog_ids
 from app.services.content_guard_service import DuplicateContentError
@@ -13,6 +13,7 @@ from app.services.job_service import create_job, load_job
 from app.services.providers.factory import get_blogger_provider
 from app.services.settings_service import get_settings_map
 from app.services.storage_service import clear_generated_storage
+from app.services.topic_guard_service import TopicGuardConflictError
 from app.tasks.pipeline import PIPELINE_CONTROL_KEY, _resolve_stop_after, _serialize_pipeline_control, run_job
 
 router = APIRouter()
@@ -87,6 +88,8 @@ def create_job_endpoint(payload: JobCreate, db: Session = Depends(get_db)) -> Jo
             publish_mode=publish_mode,
             raw_prompts={PIPELINE_CONTROL_KEY: _serialize_pipeline_control(stop_after_status)},
         )
+    except TopicGuardConflictError as exc:
+        raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
     except DuplicateContentError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     run_job.delay(job.id)
@@ -112,7 +115,7 @@ def reset_generated_data(db: Session = Depends(get_db)) -> GeneratedDataResetRes
     draft_posts = db.execute(
         select(BloggerPost, Blog)
         .join(Blog, BloggerPost.blog_id == Blog.id)
-        .where(BloggerPost.is_draft.is_(True))
+        .where(BloggerPost.post_status != PostStatus.PUBLISHED)
     ).all()
 
     for blogger_post, blog in draft_posts:

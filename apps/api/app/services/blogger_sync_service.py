@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.models.entities import Blog, SyncedBloggerPost
 from app.services.blogger_oauth_service import BloggerOAuthError, authorized_google_request
+from app.services.topic_guard_service import rebuild_topic_memories_for_blog
 
 BLOGGER_POSTS_URL = "https://www.googleapis.com/blogger/v3/blogs/{blog_id}/posts"
 
@@ -205,6 +206,7 @@ def sync_blogger_posts_for_blog(db: Session, blog: Blog) -> dict:
             db.execute(delete(SyncedBloggerPost).where(SyncedBloggerPost.blog_id == blog.id))
 
         db.commit()
+        rebuild_topic_memories_for_blog(db, blog)
         return {
             "blog_id": blog.id,
             "count": len(remote_posts),

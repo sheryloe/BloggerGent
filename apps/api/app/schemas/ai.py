@@ -13,6 +13,15 @@ class TopicDiscoveryPayload(BaseModel):
     topics: list[TopicDiscoveryItem]
 
 
+class TopicClassificationOutput(BaseModel):
+    topic_cluster_label: str = Field(min_length=2, max_length=255)
+    topic_cluster_key: str = Field(min_length=2, max_length=255)
+    topic_angle_label: str = Field(min_length=2, max_length=255)
+    topic_angle_key: str = Field(min_length=2, max_length=255)
+    entity_names: list[str] = Field(default_factory=list, max_length=10)
+    distinct_reason: str = Field(default="")
+
+
 class FAQItem(BaseModel):
     question: str = Field(min_length=5, max_length=255)
     answer: str = Field(min_length=10)

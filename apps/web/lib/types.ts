@@ -12,6 +12,7 @@ export type JobStatus =
   | "FAILED";
 
 export type PublishMode = "draft" | "publish";
+export type PostStatus = "draft" | "scheduled" | "published";
 
 export type WorkflowStageType =
   | "topic_discovery"
@@ -211,6 +212,9 @@ export interface Topic {
   trend_score?: number | null;
   source: string;
   locale: string;
+  topic_cluster_label?: string | null;
+  topic_angle_label?: string | null;
+  distinct_reason?: string | null;
   created_at: string;
   blog?: BlogCompact | null;
 }
@@ -242,6 +246,8 @@ export interface BloggerPost {
   published_url: string;
   published_at?: string | null;
   is_draft: boolean;
+  post_status: PostStatus;
+  scheduled_for?: string | null;
 }
 
 export interface Article {
@@ -276,6 +282,7 @@ export interface BlogArchiveItem {
   labels: string[];
   published_url?: string | null;
   published_at?: string | null;
+  scheduled_for?: string | null;
   updated_at?: string | null;
   status: string;
   content_html?: string | null;

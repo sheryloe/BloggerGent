@@ -8,7 +8,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.entities import Article, Blog, BloggerPost
+from app.models.entities import Article, Blog, BloggerPost, PostStatus
 from app.schemas.api import SeoMetaStatusRead
 from app.services.blog_service import clear_blog_seo_meta_verified, mark_blog_seo_meta_verified
 
@@ -254,7 +254,7 @@ def _latest_published_pair(db: Session, blog_id: int) -> tuple[Article | None, B
     row = db.execute(
         select(Article, BloggerPost)
         .join(BloggerPost, BloggerPost.article_id == Article.id)
-        .where(Article.blog_id == blog_id, BloggerPost.is_draft.is_(False))
+        .where(Article.blog_id == blog_id, BloggerPost.post_status == PostStatus.PUBLISHED)
         .order_by(BloggerPost.published_at.desc().nullslast(), BloggerPost.created_at.desc())
         .limit(1)
     ).first()
@@ -322,7 +322,7 @@ def get_article_seo_meta_overview(article: Article) -> dict:
     post = article.blogger_post
     warnings: list[str] = []
     target_url = None
-    if not post or post.is_draft:
+    if not post or post.post_status != PostStatus.PUBLISHED:
         warnings.append("This article is not publicly published yet, so live meta verification is not available.")
     else:
         target_url = post.published_url

@@ -4,7 +4,7 @@ from urllib.parse import urlencode
 
 import httpx
 
-from app.models.entities import PublishMode
+from app.models.entities import PostStatus, PublishMode
 
 
 class BloggerPublishingProvider:
@@ -46,6 +46,8 @@ class BloggerPublishingProvider:
             "url": data.get("url", ""),
             "published": data.get("published"),
             "isDraft": bool(data.get("status") == "DRAFT" or params["isDraft"] == "true"),
+            "postStatus": PostStatus.DRAFT.value if params["isDraft"] == "true" else PostStatus.PUBLISHED.value,
+            "scheduledFor": None,
         }, data
 
     def update_post(
@@ -73,15 +75,26 @@ class BloggerPublishingProvider:
         )
         response.raise_for_status()
         data = response.json()
+        raw_status = str(data.get("status", "")).upper()
+        if raw_status == "DRAFT":
+            post_status = PostStatus.DRAFT.value
+        elif raw_status == "SCHEDULED":
+            post_status = PostStatus.SCHEDULED.value
+        else:
+            post_status = PostStatus.PUBLISHED.value
         return {
             "id": data.get("id", post_id),
             "url": data.get("url", ""),
             "published": data.get("published"),
-            "isDraft": bool(data.get("status") == "DRAFT"),
+            "isDraft": raw_status == "DRAFT",
+            "postStatus": post_status,
+            "scheduledFor": data.get("published") if raw_status == "SCHEDULED" else None,
         }, data
 
-    def publish_draft(self, post_id: str) -> tuple[dict, dict]:
-        url = f"https://www.googleapis.com/blogger/v3/blogs/{self.blog_id}/posts/{post_id}/publish"
+    def publish_draft(self, post_id: str, publish_date: str | None = None) -> tuple[dict, dict]:
+        params = {"publishDate": publish_date} if publish_date else None
+        query = f"?{urlencode(params)}" if params else ""
+        url = f"https://www.googleapis.com/blogger/v3/blogs/{self.blog_id}/posts/{post_id}/publish{query}"
         response = httpx.post(
             url,
             headers=self._auth_headers(),
@@ -89,11 +102,15 @@ class BloggerPublishingProvider:
         )
         response.raise_for_status()
         data = response.json()
+        raw_status = str(data.get("status", "")).upper()
+        post_status = PostStatus.SCHEDULED.value if publish_date or raw_status == "SCHEDULED" else PostStatus.PUBLISHED.value
         return {
             "id": data.get("id", post_id),
             "url": data.get("url", ""),
             "published": data.get("published"),
             "isDraft": False,
+            "postStatus": post_status,
+            "scheduledFor": data.get("published") if post_status == PostStatus.SCHEDULED.value else None,
         }, data
 
     def delete_post(self, post_id: str) -> None:

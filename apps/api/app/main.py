@@ -10,6 +10,7 @@ from app.db.session import SessionLocal
 from app.services.blog_service import disable_legacy_demo_blogs_for_live, ensure_all_blog_workflows, ensure_default_blogs
 from app.services.settings_service import ensure_default_settings, get_settings_map
 from app.services.storage_service import ensure_storage_dirs
+from app.services.topic_guard_service import backfill_missing_topic_memories
 
 app = FastAPI(title=settings.project_name, version="0.1.0")
 
@@ -37,6 +38,7 @@ def on_startup() -> None:
         if not enable_demo:
             disable_legacy_demo_blogs_for_live(db)
         ensure_all_blog_workflows(db)
+        backfill_missing_topic_memories(db)
     finally:
         db.close()
 

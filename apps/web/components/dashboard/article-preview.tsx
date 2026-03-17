@@ -4,7 +4,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Article } from "@/lib/types";
 
 export function ArticlePreview({ article }: { article: Article }) {
-  const published = Boolean(article.blogger_post?.published_url) && !article.blogger_post?.is_draft;
+  const postStatus = article.blogger_post?.post_status;
+  const statusLabel = postStatus === "published" ? "공개됨" : postStatus === "scheduled" ? "예약됨" : "게시 대기";
+  const statusClass =
+    postStatus === "published"
+      ? "bg-emerald-700 text-white"
+      : postStatus === "scheduled"
+        ? "bg-sky-100 text-sky-900"
+        : "bg-amber-100 text-amber-900";
 
   return (
     <Card>
@@ -21,9 +28,7 @@ export function ArticlePreview({ article }: { article: Article }) {
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
           <span>예상 읽기 시간 {article.reading_time_minutes}분</span>
-          <Badge className={published ? "bg-emerald-700 text-white" : "bg-amber-100 text-amber-900"}>
-            {published ? "공개됨" : "게시 대기"}
-          </Badge>
+          <Badge className={statusClass}>{statusLabel}</Badge>
           {article.blogger_post?.published_url ? (
             <a
               href={article.blogger_post.published_url}

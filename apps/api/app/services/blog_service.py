@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import settings
-from app.models.entities import Blog, BlogAgentConfig, BloggerPost, Job, JobStatus, PublishMode, Topic, WorkflowStageType
+from app.models.entities import Blog, BlogAgentConfig, BloggerPost, Job, JobStatus, PostStatus, PublishMode, Topic, WorkflowStageType
 from app.services.prompt_service import render_prompt_template
 from app.services.settings_service import get_settings_map
 
@@ -935,7 +935,7 @@ def get_blog_summary_map(db: Session, blog_ids: list[int]) -> dict[int, BlogSumm
 
     post_count_rows = db.execute(
         select(BloggerPost.blog_id, func.count(BloggerPost.id))
-        .where(BloggerPost.blog_id.in_(unique_ids), BloggerPost.is_draft.is_(False))
+        .where(BloggerPost.blog_id.in_(unique_ids), BloggerPost.post_status == PostStatus.PUBLISHED)
         .group_by(BloggerPost.blog_id)
     ).all()
     for blog_id, count in post_count_rows:
@@ -969,7 +969,7 @@ def get_blog_summary_map(db: Session, blog_ids: list[int]) -> dict[int, BlogSumm
             BloggerPost.published_url.label("published_url"),
             post_rank,
         )
-        .where(BloggerPost.blog_id.in_(unique_ids), BloggerPost.is_draft.is_(False))
+        .where(BloggerPost.blog_id.in_(unique_ids), BloggerPost.post_status == PostStatus.PUBLISHED)
         .subquery()
     )
     latest_post_rows = db.execute(

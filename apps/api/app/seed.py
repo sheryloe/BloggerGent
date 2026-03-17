@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.db.session import SessionLocal
-from app.models.entities import Article, BloggerPost, Image, Job, JobStatus, PublishMode, Topic
+from app.models.entities import Article, BloggerPost, Image, Job, JobStatus, PostStatus, PublishMode, Topic
 from app.services.article_service import save_article
 from app.services.blog_service import disable_legacy_demo_blogs_for_live, ensure_all_blog_workflows, ensure_default_blogs, get_blog_by_slug
 from app.services.html_assembler import assemble_article_html
@@ -99,6 +99,8 @@ def _seed_completed_post(db, *, blog_slug: str, keyword: str, publish_mode: Publ
         published_url=summary["url"],
         published_at=datetime.now(timezone.utc) - timedelta(days=offset_days),
         is_draft=summary["isDraft"],
+        post_status=PostStatus.DRAFT if summary["isDraft"] else PostStatus.PUBLISHED,
+        scheduled_for=None,
         response_payload=raw,
     )
     db.add(post)

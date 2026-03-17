@@ -42,6 +42,12 @@ class PublishMode(str, enum.Enum):
     PUBLISH = "publish"
 
 
+class PostStatus(str, enum.Enum):
+    DRAFT = "draft"
+    SCHEDULED = "scheduled"
+    PUBLISHED = "published"
+
+
 class WorkflowStageType(str, enum.Enum):
     TOPIC_DISCOVERY = "topic_discovery"
     ARTICLE_GENERATION = "article_generation"
@@ -138,6 +144,9 @@ class Topic(TimestampMixin, Base):
     trend_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
     source: Mapped[str] = mapped_column(sa.String(50), default="gemini", nullable=False)
     locale: Mapped[str] = mapped_column(sa.String(20), default="global", nullable=False)
+    topic_cluster_label: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    topic_angle_label: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    distinct_reason: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
 
     blog: Mapped[Blog] = relationship(back_populates="topics")
     jobs: Mapped[list["Job"]] = relationship(back_populates="topic")
@@ -231,6 +240,12 @@ class BloggerPost(TimestampMixin, Base):
     published_url: Mapped[str] = mapped_column(sa.String(500), nullable=False)
     published_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     is_draft: Mapped[bool] = mapped_column(sa.Boolean, default=True, nullable=False)
+    post_status: Mapped[PostStatus] = mapped_column(
+        sa.Enum(PostStatus, name="post_status", values_callable=_enum_values),
+        default=PostStatus.DRAFT,
+        nullable=False,
+    )
+    scheduled_for: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     response_payload: Mapped[dict] = mapped_column(sa.JSON, default=dict, nullable=False)
 
     job: Mapped[Job] = relationship(back_populates="blogger_post")
@@ -261,6 +276,29 @@ class SyncedBloggerPost(TimestampMixin, Base):
     synced_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now(), index=True)
 
     blog: Mapped[Blog] = relationship(back_populates="synced_blogger_posts")
+
+
+class TopicMemory(TimestampMixin, Base):
+    __tablename__ = "topic_memories"
+    __table_args__ = (
+        sa.UniqueConstraint("blog_id", "source_type", "source_id", name="uq_topic_memories_blog_source"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    blog_id: Mapped[int] = mapped_column(sa.ForeignKey("blogs.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_type: Mapped[str] = mapped_column(sa.String(20), nullable=False, index=True)
+    source_id: Mapped[str] = mapped_column(sa.String(255), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(sa.String(500), nullable=False, default="")
+    canonical_url: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True, index=True)
+    published_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
+    topic_cluster_key: Mapped[str] = mapped_column(sa.String(255), nullable=False, index=True)
+    topic_cluster_label: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    topic_angle_key: Mapped[str] = mapped_column(sa.String(255), nullable=False, index=True)
+    topic_angle_label: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    entity_names: Mapped[list] = mapped_column(sa.JSON, default=list, nullable=False)
+    evidence_excerpt: Mapped[str] = mapped_column(sa.Text, default="", nullable=False)
+
+    blog: Mapped[Blog] = relationship()
 
 
 class Setting(Base):

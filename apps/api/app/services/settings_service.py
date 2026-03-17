@@ -98,6 +98,10 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     "schedule_time": DefaultSetting(settings.schedule_time, "자동 실행 시각. HH:MM 형식"),
     "schedule_timezone": DefaultSetting(settings.schedule_timezone, "자동 실행 기준 시간대"),
     "last_schedule_run_on": DefaultSetting("", "마지막 자동 실행 성공 날짜"),
+    "publish_daily_limit_per_blog": DefaultSetting("3", "블로그당 하루 최대 공개/예약 발행 수"),
+    "same_cluster_cooldown_hours": DefaultSetting("24", "같은 메인 주제 재발행 차단 시간"),
+    "same_angle_cooldown_days": DefaultSetting("7", "같은 메인 주제와 같은 각도 재사용 차단 일수"),
+    "topic_guard_enabled": DefaultSetting("true", "주제군 메모리 기반 발행 가드 사용 여부"),
 }
 
 
