@@ -44,6 +44,7 @@ from app.services.topic_guard_service import (
     current_publish_target_datetime,
 )
 
+OPENAI_TOPIC_REQUEST_STAGE = "OPENAI_TOPIC_REQUEST"
 GEMINI_TOPIC_REQUEST_STAGE = "GEMINI_TOPIC_REQUEST"
 GEMINI_TOPIC_LIMIT_BLOCKED_STAGE = "GEMINI_TOPIC_LIMIT_BLOCKED"
 PIPELINE_CONTROL_KEY = "pipeline_control"
@@ -171,10 +172,42 @@ def _coerce_non_negative_int(raw_value: str | None, fallback: int) -> int:
     return max(parsed, 0)
 
 
-def _enforce_gemini_topic_limits(db, *, blog) -> None:
+def _resolve_topic_provider(runtime, provider_hint: str | None = None) -> str:
+    provider = (provider_hint or runtime.topic_discovery_provider or "openai").strip().lower()
+    if provider == "openai_text":
+        return "openai"
+    return provider
+
+
+def _enforce_topic_provider_limits(
+    db,
+    *,
+    blog,
+    provider_hint: str | None = None,
+    model_override: str | None = None,
+) -> str:
     runtime = get_runtime_config(db)
-    if runtime.provider_mode != "live" or not runtime.gemini_api_key:
-        return
+    provider = _resolve_topic_provider(runtime, provider_hint)
+    if runtime.provider_mode != "live":
+        return provider
+
+    if provider == "openai":
+        add_log(
+            db,
+            job=None,
+            stage=OPENAI_TOPIC_REQUEST_STAGE,
+            message=f"{blog.name} 블로그 주제 발굴을 위해 OpenAI를 호출했습니다.",
+            payload={
+                "blog_id": blog.id,
+                "blog_slug": blog.slug,
+                "provider": "openai",
+                "model": model_override or runtime.topic_discovery_model or runtime.openai_text_model,
+            },
+        )
+        return provider
+
+    if not runtime.gemini_api_key:
+        return provider
 
     settings_map = get_settings_map(db)
     minute_limit = _coerce_non_negative_int(settings_map.get("gemini_requests_per_minute_limit"), 2)
@@ -192,7 +225,7 @@ def _enforce_gemini_topic_limits(db, *, blog) -> None:
                 stage=GEMINI_TOPIC_LIMIT_BLOCKED_STAGE,
                 message=message,
                 level=LogLevel.WARNING,
-                payload={"blog_id": blog.id, "window": "1m", "count": recent_count, "limit": minute_limit},
+                payload={"blog_id": blog.id, "window": "1m", "count": recent_count, "limit": minute_limit, "provider": "gemini"},
             )
             raise ProviderRuntimeError(provider="gemini", status_code=429, message=message, detail=detail)
 
@@ -208,7 +241,7 @@ def _enforce_gemini_topic_limits(db, *, blog) -> None:
                 stage=GEMINI_TOPIC_LIMIT_BLOCKED_STAGE,
                 message=message,
                 level=LogLevel.WARNING,
-                payload={"blog_id": blog.id, "window": "1d", "count": daily_count, "limit": daily_limit},
+                payload={"blog_id": blog.id, "window": "1d", "count": daily_count, "limit": daily_limit, "provider": "gemini"},
             )
             raise ProviderRuntimeError(provider="gemini", status_code=429, message=message, detail=detail)
 
@@ -217,8 +250,14 @@ def _enforce_gemini_topic_limits(db, *, blog) -> None:
         job=None,
         stage=GEMINI_TOPIC_REQUEST_STAGE,
         message=f"{blog.name} 블로그 주제 발굴을 위해 Gemini를 호출했습니다.",
-        payload={"blog_id": blog.id, "blog_slug": blog.slug, "model": runtime.gemini_model},
+        payload={
+            "blog_id": blog.id,
+            "blog_slug": blog.slug,
+            "provider": "gemini",
+            "model": model_override or runtime.gemini_model,
+        },
     )
+    return provider
 
 
 def _normalize_stop_after(raw_value: str | JobStatus | None) -> JobStatus | None:
@@ -288,9 +327,18 @@ def discover_topics_and_enqueue(
         raise ValueError(f"Blog {blog_id} not found")
 
     topic_step = _require_enabled_step(blog, WorkflowStageType.TOPIC_DISCOVERY)
-    provider = get_topic_provider(db, model_override=topic_step.provider_model)
+    topic_provider_name = _enforce_topic_provider_limits(
+        db,
+        blog=blog,
+        provider_hint=topic_step.provider_hint,
+        model_override=topic_step.provider_model,
+    )
+    provider = get_topic_provider(
+        db,
+        provider_hint=topic_step.provider_hint,
+        model_override=topic_step.provider_model,
+    )
     prompt = render_agent_prompt(blog, topic_step) + build_duplicate_exclusion_prompt(db, blog_id=blog.id)
-    _enforce_gemini_topic_limits(db, blog=blog)
     payload, raw_response = provider.discover_topics(prompt)
     descriptor_by_keyword = annotate_topic_items(db, blog=blog, items=payload.topics)
     metadata_by_keyword = {
@@ -326,7 +374,13 @@ def discover_topics_and_enqueue(
 
     filtered_topics, duplicate_skips = filter_duplicate_topic_items(db, blog_id=blog.id, items=guarded_topics)
     skipped_duplicates.extend(duplicate_skips)
-    topics = upsert_topics(db, blog, filtered_topics, metadata_by_keyword=metadata_by_keyword)
+    topics = upsert_topics(
+        db,
+        blog,
+        filtered_topics,
+        source=topic_provider_name,
+        metadata_by_keyword=metadata_by_keyword,
+    )
 
     settings_map = get_settings_map(db)
     mode_value = publish_mode or "draft"

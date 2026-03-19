@@ -357,6 +357,26 @@ export interface SettingItem {
   is_secret: boolean;
 }
 
+export interface OpenAIFreeUsageBucket {
+  label: string;
+  limit_tokens: number;
+  used_tokens: number;
+  remaining_tokens: number;
+  usage_percent: number;
+  matched_models: string[];
+}
+
+export interface OpenAIFreeUsage {
+  date_label: string;
+  window_start_utc: string;
+  window_end_utc: string;
+  key_mode: string;
+  admin_key_configured: boolean;
+  large: OpenAIFreeUsageBucket;
+  small: OpenAIFreeUsageBucket;
+  warning?: string | null;
+}
+
 export interface PromptTemplate {
   key: string;
   title: string;

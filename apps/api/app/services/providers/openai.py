@@ -4,8 +4,61 @@ import base64
 
 import httpx
 
-from app.schemas.ai import ArticleGenerationOutput
+from app.schemas.ai import ArticleGenerationOutput, TopicDiscoveryPayload
 from app.services.providers.base import ProviderRuntimeError
+
+
+class OpenAITopicDiscoveryProvider:
+    def __init__(self, *, api_key: str, model: str) -> None:
+        self.api_key = api_key
+        self.model = model
+
+    def discover_topics(self, prompt: str) -> tuple[TopicDiscoveryPayload, dict]:
+        response = httpx.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            json={
+                "model": self.model,
+                "temperature": 0.4,
+                "response_format": {"type": "json_object"},
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You generate precise JSON for topic discovery. Never return markdown fences.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+            },
+            timeout=120.0,
+        )
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            detail = response.text
+            try:
+                error_payload = response.json().get("error", {})
+                detail = error_payload.get("message", detail)
+            except ValueError:
+                pass
+            raise ProviderRuntimeError(
+                provider="openai_text",
+                status_code=response.status_code,
+                message=f"OpenAI topic discovery failed with HTTP {response.status_code}.",
+                detail=detail,
+            ) from exc
+
+        data = response.json()
+        try:
+            content = data["choices"][0]["message"]["content"]
+            payload = TopicDiscoveryPayload.model_validate_json(content)
+        except (KeyError, IndexError, ValueError) as exc:
+            raise ProviderRuntimeError(
+                provider="openai_text",
+                status_code=502,
+                message="OpenAI returned an unexpected topic discovery payload.",
+                detail=str(exc),
+            ) from exc
+        return payload, data
 
 
 class OpenAIArticleProvider:
@@ -65,16 +118,29 @@ class OpenAIImageProvider:
         self.api_key = api_key
         self.model = model
 
+    def _default_quality(self) -> str | None:
+        if self.model == "dall-e-3":
+            return "hd"
+        if self.model.startswith("gpt-image-"):
+            return "high"
+        return None
+
+    def _default_size(self, *, is_collage: bool) -> str:
+        if self.model == "dall-e-3":
+            return "1024x1792" if is_collage else "1792x1024"
+        if self.model.startswith("gpt-image-"):
+            return "1024x1536" if is_collage else "1536x1024"
+        return "1024x1024"
+
     def _prepare_prompt(self, prompt: str) -> tuple[str, str]:
         normalized_prompt = prompt.strip()
         lowered = normalized_prompt.lower()
         is_collage = "collage" in lowered or "panel" in lowered or "grid layout" in lowered
-        size = "1792x1024" if self.model == "dall-e-3" else "1024x1024"
+        size = self._default_size(is_collage=is_collage)
 
         if not is_collage:
             return normalized_prompt, size
 
-        size = "1024x1792" if self.model == "dall-e-3" else "1024x1024"
         collage_prefix = (
             "Create exactly one composite editorial collage image, not one single continuous scene. "
             "The final image must visibly contain 8 distinct rectangular photo panels arranged in a clean grid. "
@@ -90,16 +156,19 @@ class OpenAIImageProvider:
 
     def generate_image(self, prompt: str, slug: str) -> tuple[bytes, dict]:
         prepared_prompt, size = self._prepare_prompt(prompt)
+        quality = self._default_quality()
+        payload = {
+            "model": self.model,
+            "prompt": prepared_prompt,
+            "size": size,
+            "response_format": "b64_json",
+        }
+        if quality:
+            payload["quality"] = quality
         response = httpx.post(
             "https://api.openai.com/v1/images/generations",
             headers={"Authorization": f"Bearer {self.api_key}"},
-            json={
-                "model": self.model,
-                "prompt": prepared_prompt,
-                "size": size,
-                "quality": "hd",
-                "response_format": "b64_json",
-            },
+            json=payload,
             timeout=120.0,
         )
         if not response.is_success:
@@ -120,5 +189,7 @@ class OpenAIImageProvider:
         width, height = [int(part) for part in size.split("x", maxsplit=1)]
         data["width"] = width
         data["height"] = height
+        if quality:
+            data["quality"] = quality
         data["normalized_prompt"] = prepared_prompt
         return base64.b64decode(image_b64), data

@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { BlogSettingsManager } from "@/components/dashboard/blog-settings-manager";
 import { BloggerConnectionCard } from "@/components/dashboard/blogger-connection-card";
+import { OpenAIFreeUsageWidget } from "@/components/dashboard/openai-free-usage-widget";
 import { PromptTemplatesForm } from "@/components/dashboard/prompt-templates-form";
 import { SettingsForm } from "@/components/dashboard/settings-form";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,8 @@ export default async function SettingsPage({
 
   return (
     <div className="space-y-6">
+      <OpenAIFreeUsageWidget />
+
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <h1 className="font-display text-4xl font-semibold text-ink">설정</h1>

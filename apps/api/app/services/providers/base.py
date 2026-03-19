@@ -9,6 +9,8 @@ class RuntimeProviderConfig:
     openai_api_key: str
     openai_text_model: str
     openai_image_model: str
+    topic_discovery_provider: str
+    topic_discovery_model: str
     gemini_api_key: str
     gemini_model: str
     blogger_access_token: str

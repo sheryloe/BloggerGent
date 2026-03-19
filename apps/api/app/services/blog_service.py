@@ -114,8 +114,8 @@ STAGE_DEFINITIONS: dict[WorkflowStageType, WorkflowStageDefinition] = {
         prompt_enabled=True,
         is_required=False,
         removable=True,
-        provider_hint="gemini",
-        provider_model="gemini-2.5-flash",
+        provider_hint="openai_text",
+        provider_model="gpt-4.1-mini",
         default_name="주제 발굴 에이전트",
         default_role_name="Trend Discovery Agent",
         default_objective="국가와 독자층에 맞는 검색 수요 주제를 찾아 작업 대기열을 채웁니다.",
@@ -225,8 +225,8 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 role_name="Korea Travel Trend Scout",
                 objective="외국인에게 인기 있는 한국 여행 검색 수요 주제를 찾습니다.",
                 prompt_file="travel_topic_discovery.md",
-                provider_hint="gemini",
-                provider_model="gemini-2.5-flash",
+                provider_hint="openai_text",
+                provider_model="gpt-4.1-mini",
                 is_enabled=True,
                 sort_order=10,
             ),
@@ -317,8 +317,8 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 role_name="Global Mystery Research Scout",
                 objective="글로벌 검색 수요가 높은 세계 미스터리 주제를 찾습니다.",
                 prompt_file="mystery_topic_discovery.md",
-                provider_hint="gemini",
-                provider_model="gemini-2.5-flash",
+                provider_hint="openai_text",
+                provider_model="gpt-4.1-mini",
                 is_enabled=True,
                 sort_order=10,
             ),
@@ -406,8 +406,8 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 role_name="General Topic Discovery Agent",
                 objective="블로그 주제에 맞는 검색 수요 키워드를 발굴합니다.",
                 prompt_file="topic_discovery.md",
-                provider_hint="gemini",
-                provider_model="gemini-2.5-flash",
+                provider_hint="openai_text",
+                provider_model="gpt-4.1-mini",
                 is_enabled=True,
                 sort_order=10,
             ),
@@ -828,6 +828,17 @@ def ensure_blog_workflow_steps(db: Session, blog: Blog) -> Blog:
             changed = True
         if not (step.provider_hint or "").strip() and defaults["provider_hint"]:
             step.provider_hint = defaults["provider_hint"]
+            changed = True
+        if (
+            stage_type == WorkflowStageType.TOPIC_DISCOVERY
+            and (step.provider_hint or "").strip().lower() == "gemini"
+            and (step.provider_model or "").strip().lower() == "gemini-2.5-flash"
+        ):
+            step.provider_hint = defaults["provider_hint"]
+            step.provider_model = defaults["provider_model"]
+            changed = True
+        if not (step.provider_model or "").strip() and defaults["provider_model"]:
+            step.provider_model = defaults["provider_model"]
             changed = True
         if step.sort_order == 0:
             step.sort_order = defaults["sort_order"]

@@ -12,6 +12,7 @@ import {
   GoogleBlogOverview,
   GoogleIntegrationConfig,
   Job,
+  OpenAIFreeUsage,
   PromptTemplate,
   SettingItem,
   SyncedBloggerPostPage,
@@ -76,6 +77,10 @@ export async function getBlogArchive(blogId: number, page = 1, pageSize = 20) {
 
 export async function getSettings() {
   return apiFetch<SettingItem[]>("/settings");
+}
+
+export async function getOpenAIFreeUsage() {
+  return apiFetch<OpenAIFreeUsage>("/settings/openai-free-usage");
 }
 
 export async function getTopics(blogId?: number) {

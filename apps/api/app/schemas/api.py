@@ -382,6 +382,26 @@ class SettingUpdate(BaseModel):
     values: dict[str, str] = Field(default_factory=dict)
 
 
+class OpenAIFreeUsageBucketRead(BaseModel):
+    label: str
+    limit_tokens: int
+    used_tokens: int
+    remaining_tokens: int
+    usage_percent: float
+    matched_models: list[str] = Field(default_factory=list)
+
+
+class OpenAIFreeUsageRead(BaseModel):
+    date_label: str
+    window_start_utc: str
+    window_end_utc: str
+    key_mode: str
+    admin_key_configured: bool
+    large: OpenAIFreeUsageBucketRead
+    small: OpenAIFreeUsageBucketRead
+    warning: str | None = None
+
+
 class PromptTemplateRead(BaseModel):
     key: str
     title: str

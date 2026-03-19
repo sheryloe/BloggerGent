@@ -32,9 +32,12 @@ class Settings(BaseSettings):
     default_publish_mode: str = "draft"
     provider_mode: str = "mock"
     openai_api_key: str = ""
+    openai_admin_api_key: str = ""
     openai_text_model: str = "gpt-4.1-mini"
     openai_image_model: str = "dall-e-3"
     openai_request_saver_mode: bool = True
+    topic_discovery_provider: str = "openai"
+    topic_discovery_model: str = "gpt-4.1-mini"
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
     gemini_daily_request_limit: int = 6

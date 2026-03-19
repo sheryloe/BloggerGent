@@ -7,7 +7,7 @@ from app.services.providers.base import RuntimeProviderConfig
 from app.services.providers.blogger import BloggerPublishingProvider
 from app.services.providers.gemini import GeminiTopicDiscoveryProvider
 from app.services.providers.mock import MockArticleProvider, MockBloggerProvider, MockImageProvider, MockTopicDiscoveryProvider
-from app.services.providers.openai import OpenAIArticleProvider, OpenAIImageProvider
+from app.services.providers.openai import OpenAIArticleProvider, OpenAIImageProvider, OpenAITopicDiscoveryProvider
 from app.services.blogger_oauth_service import BloggerOAuthError, get_valid_blogger_access_token
 from app.services.settings_service import get_settings_map
 
@@ -19,6 +19,8 @@ def get_runtime_config(db: Session) -> RuntimeProviderConfig:
         openai_api_key=values.get("openai_api_key", ""),
         openai_text_model=values.get("openai_text_model", "gpt-4.1-mini"),
         openai_image_model=values.get("openai_image_model", "dall-e-3"),
+        topic_discovery_provider=values.get("topic_discovery_provider", "openai"),
+        topic_discovery_model=values.get("topic_discovery_model", values.get("openai_text_model", "gpt-4.1-mini")),
         gemini_api_key=values.get("gemini_api_key", ""),
         gemini_model=values.get("gemini_model", "gemini-2.5-flash"),
         blogger_access_token=values.get("blogger_access_token", ""),
@@ -26,10 +28,26 @@ def get_runtime_config(db: Session) -> RuntimeProviderConfig:
     )
 
 
-def get_topic_provider(db: Session, model_override: str | None = None):
+def get_topic_provider(db: Session, provider_hint: str | None = None, model_override: str | None = None):
     runtime = get_runtime_config(db)
-    if runtime.provider_mode == "live" and runtime.gemini_api_key:
-        return GeminiTopicDiscoveryProvider(api_key=runtime.gemini_api_key, model=model_override or runtime.gemini_model)
+    if runtime.provider_mode != "live":
+        return MockTopicDiscoveryProvider()
+
+    resolved_provider = (provider_hint or runtime.topic_discovery_provider or "openai").strip().lower()
+    if resolved_provider == "gemini":
+        resolved_model = model_override or runtime.gemini_model
+    else:
+        resolved_model = model_override or runtime.topic_discovery_model or runtime.openai_text_model
+
+    if resolved_provider == "gemini" and runtime.gemini_api_key:
+        return GeminiTopicDiscoveryProvider(api_key=runtime.gemini_api_key, model=resolved_model or runtime.gemini_model)
+
+    if resolved_provider in {"openai", "openai_text"} and runtime.openai_api_key:
+        return OpenAITopicDiscoveryProvider(
+            api_key=runtime.openai_api_key,
+            model=resolved_model or runtime.openai_text_model,
+        )
+
     return MockTopicDiscoveryProvider()
 
 

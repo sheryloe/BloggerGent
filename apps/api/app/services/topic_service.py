@@ -12,6 +12,7 @@ def upsert_topics(
     blog: Blog,
     items: list[TopicDiscoveryItem],
     *,
+    source: str = "gemini",
     metadata_by_keyword: dict[str, dict[str, str]] | None = None,
 ) -> list[Topic]:
     if not items:
@@ -33,6 +34,7 @@ def upsert_topics(
         if topic:
             topic.reason = item.reason
             topic.trend_score = item.trend_score
+            topic.source = source
             topic.topic_cluster_label = metadata.get("topic_cluster_label")
             topic.topic_angle_label = metadata.get("topic_angle_label")
             topic.distinct_reason = metadata.get("distinct_reason")
@@ -42,7 +44,7 @@ def upsert_topics(
                 keyword=item.keyword,
                 reason=item.reason,
                 trend_score=item.trend_score,
-                source="gemini",
+                source=source,
                 locale=blog.primary_language or "global",
                 topic_cluster_label=metadata.get("topic_cluster_label"),
                 topic_angle_label=metadata.get("topic_angle_label"),

@@ -44,11 +44,24 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     "cloudinary_api_secret": DefaultSetting(settings.cloudinary_api_secret, "Cloudinary API Secret", True),
     "cloudinary_folder": DefaultSetting(settings.cloudinary_folder, "Cloudinary 업로드 폴더명"),
     "openai_api_key": DefaultSetting(settings.openai_api_key, "OpenAI API 키", True),
+    "openai_admin_api_key": DefaultSetting(
+        settings.openai_admin_api_key,
+        "OpenAI 조직 사용량 조회용 Admin API 키",
+        True,
+    ),
     "openai_text_model": DefaultSetting(settings.openai_text_model, "본문 생성에 사용할 OpenAI 텍스트 모델"),
     "openai_image_model": DefaultSetting(settings.openai_image_model, "대표 이미지 생성에 사용할 OpenAI 이미지 모델"),
     "openai_request_saver_mode": DefaultSetting(
         str(settings.openai_request_saver_mode).lower(),
         "켜면 이미지 프롬프트 전용 OpenAI 호출을 생략하고 본문 생성 결과의 최종 프롬프트를 바로 사용합니다.",
+    ),
+    "topic_discovery_provider": DefaultSetting(
+        settings.topic_discovery_provider,
+        "주제 발굴에 사용할 공급자. openai 또는 gemini",
+    ),
+    "topic_discovery_model": DefaultSetting(
+        settings.topic_discovery_model,
+        "주제 발굴에 사용할 기본 모델명. 단계별 설정이 있으면 그 값을 우선 사용",
     ),
     "gemini_api_key": DefaultSetting(settings.gemini_api_key, "Gemini API 키", True),
     "gemini_model": DefaultSetting(settings.gemini_model, "주제 발굴에 사용할 Gemini 모델"),

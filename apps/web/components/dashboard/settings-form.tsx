@@ -8,6 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  OPENAI_DATA_SHARING_COMPATIBILITY_NOTE,
+  GEMINI_MODEL_SUGGESTIONS,
+  OPENAI_DATA_SHARING_FREE_TIERS,
+  OPENAI_DATA_SHARING_NOTICE,
+  OPENAI_IMAGE_MODEL_SUGGESTIONS,
+  OPENAI_TEXT_MODEL_SUGGESTIONS,
+} from "@/lib/ai-model-catalog";
 import { SettingItem } from "@/lib/types";
 
 type FieldConfig = {
@@ -17,6 +25,7 @@ type FieldConfig = {
   required?: boolean;
   type?: "text" | "password" | "number";
   options?: Array<{ value: string; label: string }>;
+  suggestions?: string[];
   showWhen?: (values: Record<string, string>) => boolean;
 };
 
@@ -49,14 +58,22 @@ const sections: SectionConfig[] = [
         type: "password",
       },
       {
+        key: "openai_admin_api_key",
+        label: "OpenAI Admin API Key",
+        help: "오른쪽 무료 토큰 위젯이 조직 사용량을 읽을 때 우선 사용하는 선택 항목입니다.",
+        type: "password",
+      },
+      {
         key: "openai_text_model",
         label: "OpenAI 텍스트 모델",
-        help: "글 생성에 사용할 모델입니다.",
+        help: "글 생성에 사용할 모델입니다. 아래 무료 대상 리스트를 참고해 입력할 수 있습니다.",
+        suggestions: OPENAI_TEXT_MODEL_SUGGESTIONS,
       },
       {
         key: "openai_image_model",
         label: "OpenAI 이미지 모델",
         help: "콜라주 이미지 생성에 사용할 모델입니다.",
+        suggestions: OPENAI_IMAGE_MODEL_SUGGESTIONS,
       },
       {
         key: "openai_request_saver_mode",
@@ -68,15 +85,34 @@ const sections: SectionConfig[] = [
         ],
       },
       {
+        key: "topic_discovery_provider",
+        label: "주제 발굴 공급자",
+        help: "Gemini 무료 제한이 부담되면 OpenAI로 주제 발굴을 돌리는 편이 운영에 유리합니다.",
+        options: [
+          { value: "openai", label: "OpenAI" },
+          { value: "gemini", label: "Gemini" },
+        ],
+      },
+      {
+        key: "topic_discovery_model",
+        label: "주제 발굴 기본 모델",
+        help: "OpenAI 주제 발굴 기본값입니다. 블로그 단계별 모델이 있으면 그 값이 우선합니다.",
+        suggestions: OPENAI_TEXT_MODEL_SUGGESTIONS,
+        showWhen: (values) => (values.topic_discovery_provider || "openai") === "openai",
+      },
+      {
         key: "gemini_api_key",
         label: "Gemini API Key",
         help: "자동 주제 발굴에만 사용합니다. 수동 키워드만 쓸 거면 비워도 됩니다.",
         type: "password",
+        showWhen: (values) => values.topic_discovery_provider === "gemini",
       },
       {
         key: "gemini_model",
         label: "Gemini 모델",
         help: "주제 발굴용 Gemini 모델명입니다.",
+        suggestions: GEMINI_MODEL_SUGGESTIONS,
+        showWhen: (values) => values.topic_discovery_provider === "gemini",
       },
     ],
   },
@@ -230,12 +266,14 @@ const sections: SectionConfig[] = [
         label: "Gemini 일일 최대 요청 수",
         help: "무료 티어 보호용입니다. 0이면 제한 없음입니다.",
         type: "number",
+        showWhen: (values) => values.topic_discovery_provider === "gemini",
       },
       {
         key: "gemini_requests_per_minute_limit",
         label: "Gemini 분당 최대 요청 수",
         help: "무료 티어 보호용입니다. 0이면 제한 없음입니다.",
         type: "number",
+        showWhen: (values) => values.topic_discovery_provider === "gemini",
       },
       {
         key: "pipeline_stop_after",
@@ -341,11 +379,41 @@ export function SettingsForm({ settings }: { settings: SettingItem[] }) {
           </div>
           <div className="rounded-[24px] border border-ink/10 bg-white/70 px-4 py-4">
             <p className="font-semibold text-ink">선택</p>
-            <p className="mt-1">Gemini API Key는 자동 주제 발굴까지 쓸 때만 필요합니다.</p>
+            <p className="mt-1">Gemini API Key는 주제 발굴 공급자를 Gemini로 둘 때만 필요합니다.</p>
           </div>
           <div className="rounded-[24px] border border-ink/10 bg-white/70 px-4 py-4">
             <p className="font-semibold text-ink">게시 방식</p>
             <p className="mt-1">글은 생성 후 초안으로 두고, 공개 게시 버튼을 눌러 직접 올리는 흐름을 권장합니다.</p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardDescription>OpenAI Data Sharing</CardDescription>
+          <CardTitle>무료 토큰 대상 모델</CardTitle>
+          <p className="text-sm leading-6 text-slate-600">
+            {OPENAI_DATA_SHARING_NOTICE}
+          </p>
+        </CardHeader>
+        <CardContent className="grid gap-4 lg:grid-cols-2">
+          {OPENAI_DATA_SHARING_FREE_TIERS.map((group) => (
+            <div key={group.id} className="rounded-[24px] border border-ink/10 bg-white/70 px-4 py-4">
+              <div className="space-y-1">
+                <p className="font-semibold text-ink">{group.title}</p>
+                <p className="text-xs leading-5 text-slate-500">{group.description}</p>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {group.models.map((model) => (
+                  <Badge key={model} className="rounded-full px-3 py-1 text-[11px]">
+                    {model}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          ))}
+          <div className="lg:col-span-2">
+            <p className="text-xs leading-5 text-slate-500">{OPENAI_DATA_SHARING_COMPATIBILITY_NOTE}</p>
           </div>
         </CardContent>
       </Card>
@@ -391,19 +459,29 @@ export function SettingsForm({ settings }: { settings: SettingItem[] }) {
                         ))}
                       </select>
                     ) : (
-                      <Input
-                        id={field.key}
-                        type={getInputType(field)}
-                        min={field.type === "number" ? 0 : undefined}
-                        value={values[field.key] ?? ""}
-                        placeholder={placeholder}
-                        onChange={(event) =>
-                          setValues((current) => ({
-                            ...current,
-                            [field.key]: event.target.value,
-                          }))
-                        }
-                      />
+                      <>
+                        <Input
+                          id={field.key}
+                          type={getInputType(field)}
+                          list={field.suggestions?.length ? `${field.key}-suggestions` : undefined}
+                          min={field.type === "number" ? 0 : undefined}
+                          value={values[field.key] ?? ""}
+                          placeholder={placeholder}
+                          onChange={(event) =>
+                            setValues((current) => ({
+                              ...current,
+                              [field.key]: event.target.value,
+                            }))
+                          }
+                        />
+                        {field.suggestions?.length ? (
+                          <datalist id={`${field.key}-suggestions`}>
+                            {field.suggestions.map((suggestion) => (
+                              <option key={suggestion} value={suggestion} />
+                            ))}
+                          </datalist>
+                        ) : null}
+                      </>
                     )}
                     <p className="text-xs leading-5 text-slate-500">{field.help}</p>
                   </div>

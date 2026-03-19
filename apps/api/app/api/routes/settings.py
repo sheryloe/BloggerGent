@@ -8,7 +8,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.api import SettingItem, SettingUpdate
+from app.schemas.api import OpenAIFreeUsageRead, SettingItem, SettingUpdate
 from app.services.blog_service import list_blog_profiles
 from app.services.blogger_oauth_service import (
     BloggerOAuthError,
@@ -22,6 +22,8 @@ from app.services.blogger_oauth_service import (
 )
 from app.services.blogger_sync_service import sync_connected_blogger_posts
 from app.services.google_reporting_service import list_analytics_properties, list_search_console_sites
+from app.services.openai_usage_service import get_openai_free_usage
+from app.services.providers.base import ProviderRuntimeError
 from app.services.settings_service import get_blogger_config, get_settings_map, list_settings, upsert_settings
 from app.services.storage_service import is_private_asset_url
 
@@ -54,6 +56,22 @@ def update_settings(payload: SettingUpdate, db: Session = Depends(get_db)):
         )
         for item in upsert_settings(db, payload.values)
     ]
+
+
+@router.get("/openai-free-usage", response_model=OpenAIFreeUsageRead)
+def get_openai_free_usage_route(db: Session = Depends(get_db)):
+    try:
+        return get_openai_free_usage(db)
+    except ProviderRuntimeError as exc:
+        status_code = exc.status_code if exc.status_code in {400, 401, 403, 404, 409, 422, 429} else 502
+        raise HTTPException(
+            status_code=status_code,
+            detail={
+                "provider": exc.provider,
+                "message": exc.message,
+                "detail": exc.detail,
+            },
+        ) from exc
 
 
 @blogger_router.get("/config")
