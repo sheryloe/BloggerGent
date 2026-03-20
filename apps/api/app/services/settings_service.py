@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models.entities import Blog, Setting
+from app.models.entities import Setting
 from app.services.secret_service import decrypt_secret_value, encrypt_secret_value, is_encrypted_secret
 
 
@@ -18,77 +18,98 @@ class DefaultSetting:
 
 
 DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
-    "provider_mode": DefaultSetting(settings.provider_mode, "mock 또는 live 중 실제 공급자 사용 모드"),
+    "provider_mode": DefaultSetting(settings.provider_mode, "mock or live provider mode"),
     "public_image_provider": DefaultSetting(
         settings.public_image_provider,
-        "대표 이미지를 공개 URL로 노출하는 방식. local 또는 cloudinary",
+        "Public image delivery provider. Recommended default is cloudflare_r2.",
     ),
     "public_asset_base_url": DefaultSetting(
         settings.public_asset_base_url,
-        "local 저장 파일을 외부에서 볼 수 있는 공개 베이스 URL. 예: https://your-domain.com",
+        "Public base URL used only when provider is local. Example: https://your-domain.com",
     ),
-    "github_pages_owner": DefaultSetting(settings.github_pages_owner, "GitHub Pages owner 또는 조직명"),
-    "github_pages_repo": DefaultSetting(settings.github_pages_repo, "GitHub Pages 저장소 이름"),
-    "github_pages_branch": DefaultSetting(settings.github_pages_branch, "GitHub Pages 업로드 대상 브랜치"),
-    "github_pages_token": DefaultSetting(settings.github_pages_token, "GitHub Personal Access Token", True),
+    "cloudflare_account_id": DefaultSetting(settings.cloudflare_account_id, "Cloudflare account ID"),
+    "cloudflare_r2_bucket": DefaultSetting(settings.cloudflare_r2_bucket, "Cloudflare R2 bucket name"),
+    "cloudflare_r2_access_key_id": DefaultSetting(
+        settings.cloudflare_r2_access_key_id,
+        "Cloudflare R2 access key ID",
+        True,
+    ),
+    "cloudflare_r2_secret_access_key": DefaultSetting(
+        settings.cloudflare_r2_secret_access_key,
+        "Cloudflare R2 secret access key",
+        True,
+    ),
+    "cloudflare_r2_public_base_url": DefaultSetting(
+        settings.cloudflare_r2_public_base_url,
+        "Cloudflare custom image domain base URL. Example: https://img.example.com",
+    ),
+    "cloudflare_r2_prefix": DefaultSetting(
+        settings.cloudflare_r2_prefix,
+        "Object key prefix inside the R2 bucket. Files are stored as <prefix>/<slug>.png",
+    ),
+    "github_pages_owner": DefaultSetting(settings.github_pages_owner, "GitHub Pages owner or organization"),
+    "github_pages_repo": DefaultSetting(settings.github_pages_repo, "GitHub Pages repository name"),
+    "github_pages_branch": DefaultSetting(settings.github_pages_branch, "GitHub Pages upload branch"),
+    "github_pages_token": DefaultSetting(settings.github_pages_token, "GitHub personal access token", True),
     "github_pages_base_url": DefaultSetting(
         settings.github_pages_base_url,
-        "GitHub Pages 공개 베이스 URL. 비우면 owner/repo로 자동 계산",
+        "GitHub Pages base URL. If empty, it is derived from owner/repo.",
     ),
     "github_pages_assets_dir": DefaultSetting(
         settings.github_pages_assets_dir,
-        "GitHub Pages 저장소 안에서 이미지를 쌓을 폴더. 날짜별 하위 폴더가 자동으로 붙습니다.",
+        "Directory inside the GitHub Pages repository where public images are uploaded.",
     ),
-    "cloudinary_cloud_name": DefaultSetting(settings.cloudinary_cloud_name, "Cloudinary Cloud Name"),
-    "cloudinary_api_key": DefaultSetting(settings.cloudinary_api_key, "Cloudinary API Key", True),
-    "cloudinary_api_secret": DefaultSetting(settings.cloudinary_api_secret, "Cloudinary API Secret", True),
-    "cloudinary_folder": DefaultSetting(settings.cloudinary_folder, "Cloudinary 업로드 폴더명"),
-    "openai_api_key": DefaultSetting(settings.openai_api_key, "OpenAI API 키", True),
+    "cloudinary_cloud_name": DefaultSetting(settings.cloudinary_cloud_name, "Cloudinary cloud name"),
+    "cloudinary_api_key": DefaultSetting(settings.cloudinary_api_key, "Cloudinary API key", True),
+    "cloudinary_api_secret": DefaultSetting(settings.cloudinary_api_secret, "Cloudinary API secret", True),
+    "cloudinary_folder": DefaultSetting(settings.cloudinary_folder, "Cloudinary upload folder"),
+    "openai_api_key": DefaultSetting(settings.openai_api_key, "OpenAI API key", True),
     "openai_admin_api_key": DefaultSetting(
         settings.openai_admin_api_key,
-        "OpenAI 조직 사용량 조회용 Admin API 키",
+        "OpenAI Admin API key used for free-tier usage reporting",
         True,
     ),
-    "openai_text_model": DefaultSetting(settings.openai_text_model, "본문 생성에 사용할 OpenAI 텍스트 모델"),
-    "openai_image_model": DefaultSetting(settings.openai_image_model, "대표 이미지 생성에 사용할 OpenAI 이미지 모델"),
+    "openai_text_model": DefaultSetting(settings.openai_text_model, "Default OpenAI text model"),
+    "openai_image_model": DefaultSetting(settings.openai_image_model, "Default OpenAI image model"),
     "openai_request_saver_mode": DefaultSetting(
         str(settings.openai_request_saver_mode).lower(),
-        "켜면 이미지 프롬프트 전용 OpenAI 호출을 생략하고 본문 생성 결과의 최종 프롬프트를 바로 사용합니다.",
+        "Skip the extra image prompt refinement request when possible",
     ),
     "topic_discovery_provider": DefaultSetting(
         settings.topic_discovery_provider,
-        "주제 발굴에 사용할 공급자. openai 또는 gemini",
+        "Topic discovery provider: openai or gemini",
     ),
     "topic_discovery_model": DefaultSetting(
         settings.topic_discovery_model,
-        "주제 발굴에 사용할 기본 모델명. 단계별 설정이 있으면 그 값을 우선 사용",
+        "Default topic discovery model when provider is OpenAI",
     ),
-    "gemini_api_key": DefaultSetting(settings.gemini_api_key, "Gemini API 키", True),
-    "gemini_model": DefaultSetting(settings.gemini_model, "주제 발굴에 사용할 Gemini 모델"),
+    "topic_discovery_max_topics_per_run": DefaultSetting(
+        str(settings.topic_discovery_max_topics_per_run),
+        "Maximum number of topics queued per discovery run. 0 means unlimited.",
+    ),
+    "gemini_api_key": DefaultSetting(settings.gemini_api_key, "Gemini API key", True),
+    "gemini_model": DefaultSetting(settings.gemini_model, "Gemini model for topic discovery"),
     "gemini_daily_request_limit": DefaultSetting(
         str(settings.gemini_daily_request_limit),
-        "Gemini 일일 최대 요청 수. 0이면 제한 없음",
+        "Gemini daily request limit. 0 means unlimited.",
     ),
     "gemini_requests_per_minute_limit": DefaultSetting(
         str(settings.gemini_requests_per_minute_limit),
-        "Gemini 분당 최대 요청 수. 0이면 제한 없음",
+        "Gemini per-minute request limit. 0 means unlimited.",
     ),
-    "pipeline_stop_after": DefaultSetting(
-        settings.pipeline_stop_after,
-        "파이프라인을 중간 종료할 단계. none이면 전체 실행",
-    ),
-    "blogger_client_name": DefaultSetting(settings.blogger_client_name, "Google OAuth 클라이언트 표시 이름"),
-    "blogger_client_id": DefaultSetting(settings.blogger_client_id, "Google OAuth Client ID"),
-    "blogger_client_secret": DefaultSetting(settings.blogger_client_secret, "Google OAuth Client Secret", True),
-    "blogger_redirect_uri": DefaultSetting(settings.blogger_redirect_uri, "Google OAuth Redirect URI"),
-    "blogger_refresh_token": DefaultSetting(settings.blogger_refresh_token, "Google OAuth Refresh Token", True),
-    "blogger_oauth_state": DefaultSetting(settings.blogger_oauth_state, "Google OAuth state 값", True),
-    "blogger_access_token": DefaultSetting(settings.blogger_access_token, "Google OAuth Access Token", True),
+    "pipeline_stop_after": DefaultSetting(settings.pipeline_stop_after, "Stop the pipeline after a given stage"),
+    "blogger_client_name": DefaultSetting(settings.blogger_client_name, "Google OAuth client display name"),
+    "blogger_client_id": DefaultSetting(settings.blogger_client_id, "Google OAuth client ID"),
+    "blogger_client_secret": DefaultSetting(settings.blogger_client_secret, "Google OAuth client secret", True),
+    "blogger_redirect_uri": DefaultSetting(settings.blogger_redirect_uri, "Google OAuth redirect URI"),
+    "blogger_refresh_token": DefaultSetting(settings.blogger_refresh_token, "Google OAuth refresh token", True),
+    "blogger_oauth_state": DefaultSetting(settings.blogger_oauth_state, "Google OAuth state", True),
+    "blogger_access_token": DefaultSetting(settings.blogger_access_token, "Google OAuth access token", True),
     "blogger_access_token_expires_at": DefaultSetting(
         settings.blogger_access_token_expires_at,
-        "Google OAuth Access Token 만료 시각",
+        "Google OAuth access token expiry timestamp",
     ),
-    "blogger_token_scope": DefaultSetting(settings.blogger_token_scope, "Google OAuth 승인 scope"),
+    "blogger_token_scope": DefaultSetting(settings.blogger_token_scope, "Granted Google OAuth scope"),
     "blogger_token_type": DefaultSetting(settings.blogger_token_type, "Google OAuth token type"),
     "blogger_playwright_enabled": DefaultSetting(
         str(settings.blogger_playwright_enabled).lower(),
@@ -100,21 +121,25 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     ),
     "blogger_playwright_cdp_url": DefaultSetting(
         settings.blogger_playwright_cdp_url,
-        "Chrome or Edge remote debugging URL used by Playwright",
+        "Remote debugging URL used by Playwright",
     ),
     "blogger_playwright_account_index": DefaultSetting(
         str(settings.blogger_playwright_account_index),
-        "Blogger account index in the editor URL. Usually 0",
+        "Account index used in the Blogger editor URL. Usually 0.",
     ),
-    "default_publish_mode": DefaultSetting(settings.default_publish_mode, "새 작업의 기본 발행 모드"),
-    "schedule_enabled": DefaultSetting(str(settings.schedule_enabled).lower(), "매일 자동 스케줄 실행 여부"),
-    "schedule_time": DefaultSetting(settings.schedule_time, "자동 실행 시각. HH:MM 형식"),
-    "schedule_timezone": DefaultSetting(settings.schedule_timezone, "자동 실행 기준 시간대"),
-    "last_schedule_run_on": DefaultSetting("", "마지막 자동 실행 성공 날짜"),
-    "publish_daily_limit_per_blog": DefaultSetting("3", "블로그당 하루 최대 공개/예약 발행 수"),
-    "same_cluster_cooldown_hours": DefaultSetting("24", "같은 메인 주제 재발행 차단 시간"),
-    "same_angle_cooldown_days": DefaultSetting("7", "같은 메인 주제와 같은 각도 재사용 차단 일수"),
-    "topic_guard_enabled": DefaultSetting("true", "주제군 메모리 기반 발행 가드 사용 여부"),
+    "default_publish_mode": DefaultSetting(settings.default_publish_mode, "Default publish mode"),
+    "schedule_enabled": DefaultSetting(str(settings.schedule_enabled).lower(), "Enable the automatic scheduler"),
+    "schedule_time": DefaultSetting(settings.schedule_time, "Scheduler run time in HH:MM format"),
+    "schedule_timezone": DefaultSetting(settings.schedule_timezone, "Scheduler timezone"),
+    "last_schedule_run_on": DefaultSetting("", "Last successful scheduler run date"),
+    "publish_daily_limit_per_blog": DefaultSetting("3", "Daily publish limit per blog"),
+    "publish_min_interval_seconds": DefaultSetting(
+        str(settings.publish_min_interval_seconds),
+        "Minimum interval between Blogger publish requests for the same blog",
+    ),
+    "same_cluster_cooldown_hours": DefaultSetting("24", "Cooldown for repeating the same topic cluster"),
+    "same_angle_cooldown_days": DefaultSetting("7", "Cooldown for repeating the same topic angle"),
+    "topic_guard_enabled": DefaultSetting("true", "Enable topic memory based publish guard"),
 }
 
 
@@ -167,7 +192,7 @@ def upsert_settings(db: Session, values: dict[str, str]) -> list[Setting]:
                 continue
             existing[key].value = encrypt_secret_value(value) if existing[key].is_secret else value
             continue
-        meta = DEFAULT_SETTINGS.get(key, DefaultSetting("", "사용자 정의 설정"))
+        meta = DEFAULT_SETTINGS.get(key, DefaultSetting("", "User-defined setting"))
         db.add(
             Setting(
                 key=key,

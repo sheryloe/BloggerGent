@@ -43,6 +43,12 @@ from app.services.topic_guard_service import (
     assert_topic_guard,
     current_publish_target_datetime,
 )
+from app.services.usage_service import (
+    link_usage_events_to_article,
+    record_image_generation_usage,
+    record_mock_usage,
+    record_text_generation_usage,
+)
 
 OPENAI_TOPIC_REQUEST_STAGE = "OPENAI_TOPIC_REQUEST"
 GEMINI_TOPIC_REQUEST_STAGE = "GEMINI_TOPIC_REQUEST"
@@ -340,6 +346,37 @@ def discover_topics_and_enqueue(
     )
     prompt = render_agent_prompt(blog, topic_step) + build_duplicate_exclusion_prompt(db, blog_id=blog.id)
     payload, raw_response = provider.discover_topics(prompt)
+    settings_map = get_settings_map(db)
+    max_topics = _coerce_non_negative_int(settings_map.get("topic_discovery_max_topics_per_run"), 3)
+    if max_topics > 20:
+        max_topics = 20
+    discovered_topics = payload.topics[:max_topics] if max_topics > 0 else payload.topics
+    payload.topics = discovered_topics
+    if type(provider).__name__.startswith("Mock"):
+        record_mock_usage(
+            db,
+            blog_id=blog.id,
+            job_id=None,
+            article_id=None,
+            stage_type=topic_step.stage_type.value,
+            provider_name="mock_topic_discovery",
+            provider_model="mock-template",
+            endpoint="mock:template",
+            raw_usage=raw_response if isinstance(raw_response, dict) else {},
+        )
+    else:
+        record_text_generation_usage(
+            db,
+            blog_id=blog.id,
+            job_id=None,
+            article_id=None,
+            stage_type=topic_step.stage_type.value,
+            provider_name=topic_provider_name,
+            provider_model=topic_step.provider_model,
+            endpoint="/v1/chat/completions",
+            raw_response=raw_response,
+        )
+
     descriptor_by_keyword = annotate_topic_items(db, blog=blog, items=payload.topics)
     metadata_by_keyword = {
         keyword: {
@@ -382,7 +419,6 @@ def discover_topics_and_enqueue(
         metadata_by_keyword=metadata_by_keyword,
     )
 
-    settings_map = get_settings_map(db)
     mode_value = publish_mode or "draft"
     mode = PublishMode(mode_value)
     stop_after_status = _resolve_stop_after(settings_map, override=stop_after)
@@ -468,6 +504,43 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
     article_output, article_raw = article_provider.generate_article(job.keyword_snapshot, rendered_article_prompt)
     merge_response(db, job, article_step.stage_type.value, article_raw)
     article = save_article(db, job=job, topic=topic, output=article_output)
+    if type(article_provider).__name__.startswith("Mock"):
+        record_mock_usage(
+            db,
+            blog_id=blog.id,
+            job_id=job.id,
+            article_id=article.id,
+            stage_type=article_step.stage_type.value,
+            provider_name="mock_article_generation",
+            provider_model="mock-template",
+            endpoint="mock:template",
+            raw_usage=article_raw if isinstance(article_raw, dict) else {},
+        )
+    else:
+        record_text_generation_usage(
+            db,
+            blog_id=blog.id,
+            job_id=job.id,
+            article_id=article.id,
+            stage_type=article_step.stage_type.value,
+            provider_name=article_step.provider_hint or "openai_text",
+            provider_model=article_step.provider_model,
+            endpoint="/v1/chat/completions",
+            raw_response=article_raw,
+        )
+    link_usage_events_to_article(db, job=job, article=article)
+    if article.reading_time_minutes < blog.target_reading_time_min_minutes or article.reading_time_minutes > blog.target_reading_time_max_minutes:
+        add_log(
+            db,
+            job=job,
+            stage=article_step.stage_type.value,
+            level=LogLevel.WARNING,
+            message=(
+                f"읽기 시간이 목표 범위를 벗어났습니다. actual={article.reading_time_minutes}m, "
+                f"target={blog.target_reading_time_min_minutes}-{blog.target_reading_time_max_minutes}m"
+            ),
+            payload={"article_id": article.id},
+        )
     if _complete_early_if_needed(db, job, completed_stage=JobStatus.GENERATING_ARTICLE, blog=blog):
         return
 
@@ -498,6 +571,30 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
         rendered_visual_prompt, visual_prompt_raw = prompt_refinement_provider.generate_visual_prompt(
             rendered_visual_prompt_request
         )
+        if type(prompt_refinement_provider).__name__.startswith("Mock"):
+            record_mock_usage(
+                db,
+                blog_id=blog.id,
+                job_id=job.id,
+                article_id=article.id,
+                stage_type=image_prompt_step.stage_type.value,
+                provider_name="mock_visual_prompt",
+                provider_model="mock-template",
+                endpoint="mock:template",
+                raw_usage=visual_prompt_raw if isinstance(visual_prompt_raw, dict) else {},
+            )
+        else:
+            record_text_generation_usage(
+                db,
+                blog_id=blog.id,
+                job_id=job.id,
+                article_id=article.id,
+                stage_type=image_prompt_step.stage_type.value,
+                provider_name=image_prompt_step.provider_hint or "openai_text",
+                provider_model=image_prompt_step.provider_model,
+                endpoint="/v1/chat/completions",
+                raw_response=visual_prompt_raw,
+            )
         merge_response(
             db,
             job,
@@ -523,6 +620,17 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
                 "source": source,
                 "request_saved": request_saver_mode,
             },
+        )
+        record_mock_usage(
+            db,
+            blog_id=blog.id,
+            job_id=job.id,
+            article_id=article.id,
+            stage_type=WorkflowStageType.IMAGE_PROMPT_GENERATION.value,
+            provider_name="system_image_prompt_reuse",
+            provider_model="request-saver",
+            endpoint="system:request_saver_reuse",
+            raw_usage={"source": source, "request_saved": request_saver_mode},
         )
 
     article.image_collage_prompt = rendered_visual_prompt
@@ -561,6 +669,33 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
         image_generation_step.stage_type.value,
         {"public_url": public_url, "provider": image.provider, "delivery": delivery_meta},
     )
+    if type(image_provider).__name__.startswith("Mock"):
+        record_mock_usage(
+            db,
+            blog_id=blog.id,
+            job_id=job.id,
+            article_id=article.id,
+            stage_type=image_generation_step.stage_type.value,
+            provider_name="mock_image_generation",
+            provider_model="mock-pillow",
+            endpoint="mock:pillow",
+            raw_usage=image_raw if isinstance(image_raw, dict) else {},
+            image_width=int(image_raw.get("width", 1536)) if isinstance(image_raw, dict) else 1536,
+            image_height=int(image_raw.get("height", 1024)) if isinstance(image_raw, dict) else 1024,
+            image_count=1,
+        )
+    else:
+        record_image_generation_usage(
+            db,
+            blog_id=blog.id,
+            job_id=job.id,
+            article_id=article.id,
+            stage_type=image_generation_step.stage_type.value,
+            provider_name=image_generation_step.provider_hint or "openai_image",
+            provider_model=image_generation_step.provider_model,
+            endpoint="/v1/images/generations",
+            raw_response=image_raw,
+        )
     if _complete_early_if_needed(db, job, completed_stage=JobStatus.GENERATING_IMAGE, blog=blog):
         return
 
@@ -588,7 +723,7 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
         JobStatus.ASSEMBLING_HTML,
         f"{blog.name} 블로그용 최종 HTML을 조립하고 있습니다.",
     )
-    db.refresh(article, attribute_names=["blog"])
+    db.refresh(article, attribute_names=["blog", "image"])
     assembled_html = assemble_article_html(article, public_url, related_posts)
     article.assembled_html = assembled_html
     db.add(article)

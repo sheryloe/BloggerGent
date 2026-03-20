@@ -14,8 +14,14 @@ class Settings(BaseSettings):
     public_api_base_url: str = "http://localhost:8000"
     public_web_base_url: str = "http://localhost:3000"
     storage_root: str = "/app/storage"
-    public_image_provider: str = "local"
+    public_image_provider: str = "cloudflare_r2"
     public_asset_base_url: str = ""
+    cloudflare_account_id: str = ""
+    cloudflare_r2_bucket: str = ""
+    cloudflare_r2_access_key_id: str = ""
+    cloudflare_r2_secret_access_key: str = ""
+    cloudflare_r2_public_base_url: str = ""
+    cloudflare_r2_prefix: str = "assets/images"
     github_pages_owner: str = ""
     github_pages_repo: str = ""
     github_pages_branch: str = "main"
@@ -31,6 +37,8 @@ class Settings(BaseSettings):
     schedule_enabled: bool = True
     default_publish_mode: str = "draft"
     provider_mode: str = "mock"
+    topic_discovery_max_topics_per_run: int = 3
+    publish_min_interval_seconds: int = 60
     openai_api_key: str = ""
     openai_admin_api_key: str = ""
     openai_text_model: str = "gpt-4.1-mini"

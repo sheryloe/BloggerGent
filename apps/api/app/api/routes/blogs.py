@@ -189,6 +189,8 @@ def _serialize_blog(blog, google_refs: dict | None = None, summary_metrics=None)
         "ga4_property_id": blog.ga4_property_id,
         "seo_theme_patch_installed": blog.seo_theme_patch_installed,
         "seo_theme_patch_verified_at": blog.seo_theme_patch_verified_at,
+        "target_reading_time_min_minutes": blog.target_reading_time_min_minutes,
+        "target_reading_time_max_minutes": blog.target_reading_time_max_minutes,
         "publish_mode": blog.publish_mode,
         "is_active": blog.is_active,
         "created_at": blog.created_at,

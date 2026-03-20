@@ -12,6 +12,8 @@ import type { Article, Blog, BlogArchiveItem } from "@/lib/types";
 
 const ARCHIVE_PAGE_SIZE = 20;
 
+type PublishState = "unpublished" | "draft" | "scheduled" | "published" | "queued";
+
 function parsePositiveInt(value: string | string[] | undefined, fallback: number) {
   const raw = Array.isArray(value) ? value[0] : value;
   const parsed = Number(raw);
@@ -44,7 +46,7 @@ function formatDateTime(value?: string | null) {
 
 function DetailsRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="grid gap-1 sm:grid-cols-[120px_minmax(0,1fr)]">
+    <div className="grid gap-1 sm:grid-cols-[140px_minmax(0,1fr)]">
       <p className="text-sm font-medium text-slate-500">{label}</p>
       <p className={`min-w-0 text-sm text-slate-700 ${mono ? "break-all font-mono text-xs" : "break-words"}`}>{value}</p>
     </div>
@@ -52,15 +54,15 @@ function DetailsRow({ label, value, mono = false }: { label: string; value: stri
 }
 
 function sourceBadge(source: BlogArchiveItem["source"]) {
-  return source === "generated" ? "생성 글" : "기존 Blogger 글";
+  return source === "generated" ? "Generated" : "Synced";
 }
 
 function statusBadge(item: BlogArchiveItem) {
-  if (item.source === "synced") return "공개";
-  if (item.status === "published") return "공개";
-  if (item.status === "scheduled") return "예약됨";
-  if (item.status === "draft") return "초안";
-  return "생성됨";
+  if (item.source === "synced") return item.status || "live";
+  if (item.status === "published") return "published";
+  if (item.status === "scheduled") return "scheduled";
+  if (item.status === "draft") return "draft";
+  return "generated";
 }
 
 function buildArchiveHref(
@@ -108,7 +110,6 @@ function ArchiveListCard({ item, selected, href }: { item: BlogArchiveItem; sele
             <div className="flex h-full w-full items-center justify-center text-[11px] font-medium text-slate-400">NO IMAGE</div>
           )}
         </div>
-
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <Badge className={item.source === "generated" ? "bg-ink text-white" : "bg-slate-200 text-slate-800"}>
@@ -117,9 +118,9 @@ function ArchiveListCard({ item, selected, href }: { item: BlogArchiveItem; sele
             <Badge className="border border-ink/10 bg-white text-ink">{statusBadge(item)}</Badge>
           </div>
           <p className="mt-2 line-clamp-2 font-semibold text-ink">{item.title}</p>
-          <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-600">{item.excerpt || "요약이 아직 없습니다."}</p>
+          <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-600">{item.excerpt || "No excerpt available."}</p>
           <p className="mt-2 text-xs text-slate-500">
-            발행 {formatDate(item.published_at ?? item.scheduled_for)} / 수정 {formatDate(item.updated_at)}
+            Published {formatDate(item.published_at ?? item.scheduled_for)} / Updated {formatDate(item.updated_at)}
           </p>
         </div>
       </div>
@@ -132,13 +133,13 @@ function SyncedArchiveDetail({ item, blog }: { item: BlogArchiveItem; blog: Blog
     <Card>
       <CardHeader>
         <div className="flex flex-wrap gap-2">
-          <Badge className="bg-slate-900 text-white">기존 Blogger 글</Badge>
+          <Badge className="bg-slate-900 text-white">Existing Blogger post</Badge>
           <Badge className="bg-transparent">{blog.name}</Badge>
           {item.labels.map((label) => (
             <Badge key={label}>{label}</Badge>
           ))}
         </div>
-        <CardDescription>읽기 전용 보관함</CardDescription>
+        <CardDescription>Reference post</CardDescription>
         <CardTitle className="text-2xl leading-tight">{item.title}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -147,31 +148,21 @@ function SyncedArchiveDetail({ item, blog }: { item: BlogArchiveItem; blog: Blog
             <FallbackImage src={item.thumbnail_url} alt={item.title} className="h-[280px] w-full object-cover" />
           </div>
         ) : null}
-
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-4">
             <div className="rounded-[24px] border border-ink/10 bg-white/70 p-5">
-              <p className="text-xs uppercase tracking-[0.16em] text-slate-500">요약</p>
-              <p className="mt-3 text-sm leading-7 text-slate-700">{item.excerpt || "요약이 아직 없습니다."}</p>
-            </div>
-
-            <div className="rounded-[24px] border border-ink/10 bg-white/70 p-5">
-              <p className="text-xs uppercase tracking-[0.16em] text-slate-500">본문 미리보기</p>
-              <p className="mt-3 text-sm leading-7 text-slate-700">
-                {item.excerpt || "본문 요약을 불러오지 못했습니다."}
-              </p>
+              <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Excerpt</p>
+              <p className="mt-3 text-sm leading-7 text-slate-700">{item.excerpt || "No excerpt available."}</p>
             </div>
           </div>
-
           <div className="rounded-[24px] border border-ink/10 bg-white/70 p-5">
-            <p className="text-xs uppercase tracking-[0.16em] text-slate-500">메타 정보</p>
+            <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Metadata</p>
             <div className="mt-4 space-y-3">
-              <DetailsRow label="Source" value="Synced Blogger Post" mono />
-              <DetailsRow label="상태" value={item.status || "live"} />
-              <DetailsRow label="발행일" value={formatDate(item.published_at)} />
-              <DetailsRow label="수정일" value={formatDate(item.updated_at)} />
+              <DetailsRow label="Source" value="Synced Blogger post" mono />
+              <DetailsRow label="Status" value={item.status || "live"} />
+              <DetailsRow label="Published" value={formatDate(item.published_at)} />
+              <DetailsRow label="Updated" value={formatDate(item.updated_at)} />
             </div>
-
             <div className="mt-5 space-y-3">
               {item.published_url ? (
                 <a
@@ -180,14 +171,11 @@ function SyncedArchiveDetail({ item, blog }: { item: BlogArchiveItem; blog: Blog
                   rel="noreferrer"
                   className="block break-all text-sm font-medium text-amber-700 underline-offset-4 hover:underline"
                 >
-                  원문 보기
+                  Open live post
                 </a>
               ) : (
-                <p className="text-sm leading-7 text-slate-600">원문 링크가 없는 게시글입니다.</p>
+                <p className="text-sm leading-7 text-slate-600">This synced record does not include a live URL.</p>
               )}
-              <p className="text-sm leading-7 text-slate-600">
-                기존 Blogger 글은 비교와 참고용으로만 보여주고, 여기에서는 게시나 SEO 편집 버튼을 표시하지 않습니다.
-              </p>
             </div>
           </div>
         </div>
@@ -203,62 +191,64 @@ function GeneratedArchiveDetail({
   article: Article;
   seoMeta: Awaited<ReturnType<typeof getArticleSeoMeta>> | null;
 }) {
-  const publishState = article.blogger_post?.published_url
-    ? article.blogger_post.post_status === "scheduled"
-      ? "scheduled"
-      : article.blogger_post.is_draft
-        ? "draft"
-        : "published"
-    : "unpublished";
+  const publishState: PublishState =
+    article.publish_queue && ["queued", "scheduled", "processing"].includes(article.publish_queue.status)
+      ? "queued"
+      : article.blogger_post?.published_url
+        ? article.blogger_post.post_status === "scheduled"
+          ? "scheduled"
+          : article.blogger_post.is_draft
+            ? "draft"
+            : "published"
+        : "unpublished";
 
   const publishStatusLabel =
-    publishState === "published"
-      ? "Blogger 공개 게시"
-      : publishState === "scheduled"
-        ? "Blogger 예약 발행"
-        : publishState === "draft"
-          ? "Blogger 초안"
-          : "게시 전";
+    publishState === "queued"
+      ? "Queued"
+      : publishState === "published"
+        ? "Published"
+        : publishState === "scheduled"
+          ? "Scheduled"
+          : publishState === "draft"
+            ? "Draft"
+            : "Not published";
 
   return (
     <Card>
       <CardHeader>
         <div className="flex flex-wrap gap-2">
           {article.blog?.name ? <Badge className="bg-ink text-white">{article.blog.name}</Badge> : null}
-          <Badge className="bg-slate-200 text-slate-800">생성 글</Badge>
+          <Badge className="bg-slate-200 text-slate-800">Generated article</Badge>
           {article.labels.map((label) => (
             <Badge key={label}>{label}</Badge>
           ))}
         </div>
-        <CardDescription>생성 글 상세</CardDescription>
+        <CardDescription>Generated article detail</CardDescription>
         <CardTitle className="text-2xl leading-tight">{article.title}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-4">
             <div className="rounded-[24px] border border-ink/10 bg-white/70 p-5">
-              <p className="text-xs uppercase tracking-[0.16em] text-slate-500">메타 설명</p>
-              <p className="mt-3 text-sm leading-7 text-slate-700">{article.meta_description}</p>
+              <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Meta description</p>
+              <p className="mt-3 text-sm leading-7 text-slate-700">{article.meta_description || "-"}</p>
             </div>
             <div className="rounded-[24px] border border-ink/10 bg-white/70 p-5">
-              <p className="text-xs uppercase tracking-[0.16em] text-slate-500">요약</p>
-              <p className="mt-3 text-sm leading-7 text-slate-700">{article.excerpt}</p>
+              <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Excerpt</p>
+              <p className="mt-3 text-sm leading-7 text-slate-700">{article.excerpt || "-"}</p>
             </div>
           </div>
-
           <div className="rounded-[24px] border border-ink/10 bg-white/70 p-5">
-            <p className="text-xs uppercase tracking-[0.16em] text-slate-500">메타 정보</p>
+            <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Metadata</p>
             <div className="mt-4 space-y-3">
               <DetailsRow label="Slug" value={article.slug} mono />
-              <DetailsRow label="생성일" value={formatDate(article.created_at)} />
-              <DetailsRow label="수정일" value={formatDate(article.updated_at)} />
-              <DetailsRow label="읽기 시간" value={`${article.reading_time_minutes}분`} />
-              <DetailsRow label="게시 상태" value={publishStatusLabel} />
-              {article.blogger_post?.scheduled_for ? (
-                <DetailsRow label="예약일" value={formatDateTime(article.blogger_post.scheduled_for)} />
-              ) : null}
+              <DetailsRow label="Created" value={formatDate(article.created_at)} />
+              <DetailsRow label="Updated" value={formatDate(article.updated_at)} />
+              <DetailsRow label="Reading time" value={`${article.reading_time_minutes} minutes`} />
+              <DetailsRow label="Publish state" value={publishStatusLabel} />
+              {article.publish_queue ? <DetailsRow label="Queue execution" value={formatDateTime(article.publish_queue.not_before)} /> : null}
+              {article.blogger_post?.scheduled_for ? <DetailsRow label="Blogger scheduled for" value={formatDateTime(article.blogger_post.scheduled_for)} /> : null}
             </div>
-
             <div className="mt-5 space-y-3">
               {article.blogger_post?.published_url ? (
                 <a
@@ -267,45 +257,76 @@ function GeneratedArchiveDetail({
                   rel="noreferrer"
                   className="block break-all text-sm font-medium text-amber-700 underline-offset-4 hover:underline"
                 >
-                  {article.blogger_post.post_status === "scheduled"
-                    ? "Blogger 예약 글 보기"
-                    : article.blogger_post.is_draft
-                      ? "Blogger 초안 보기"
-                      : "공개 글 보기"}
+                  Open Blogger post
                 </a>
               ) : (
-                <p className="text-sm leading-7 text-slate-600">
-                  아직 Blogger에 게시하지 않았습니다. 아래 버튼으로 즉시 발행하거나 예약 발행할 수 있습니다.
-                </p>
+                <p className="text-sm leading-7 text-slate-600">This article has not been pushed to Blogger yet.</p>
               )}
-              <PublishArticleButton articleId={article.id} publishState={publishState} />
+              <PublishArticleButton articleId={article.id} publishState={publishState} publishQueue={article.publish_queue} />
             </div>
           </div>
         </div>
 
+        {article.usage_summary ? (
+          <div className="grid gap-4 md:grid-cols-4">
+            <div className="rounded-[24px] border border-ink/10 bg-white/70 p-5">
+              <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Usage events</p>
+              <p className="mt-2 text-3xl font-semibold text-ink">{article.usage_summary.event_count}</p>
+            </div>
+            <div className="rounded-[24px] border border-ink/10 bg-white/70 p-5">
+              <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Requests</p>
+              <p className="mt-2 text-3xl font-semibold text-ink">{article.usage_summary.total_requests}</p>
+            </div>
+            <div className="rounded-[24px] border border-ink/10 bg-white/70 p-5">
+              <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Total tokens</p>
+              <p className="mt-2 text-3xl font-semibold text-ink">{article.usage_summary.total_tokens}</p>
+            </div>
+            <div className="rounded-[24px] border border-ink/10 bg-white/70 p-5">
+              <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Estimated cost</p>
+              <p className="mt-2 text-3xl font-semibold text-ink">
+                {article.usage_summary.estimated_cost_usd == null ? "-" : `$${article.usage_summary.estimated_cost_usd.toFixed(4)}`}
+              </p>
+            </div>
+          </div>
+        ) : null}
+
+        {article.usage_events.length > 0 ? (
+          <div className="rounded-[24px] border border-ink/10 bg-white/70 p-5">
+            <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Usage events</p>
+            <div className="mt-4 space-y-3">
+              {article.usage_events.map((event) => (
+                <div key={event.id} className="rounded-[18px] border border-ink/10 bg-white px-4 py-3">
+                  <div className="flex flex-wrap gap-2">
+                    <Badge className="border border-ink/10 bg-white text-ink">{event.stage_type}</Badge>
+                    <Badge className="border border-ink/10 bg-white text-ink">{event.provider_name}</Badge>
+                    {event.provider_model ? <Badge className="border border-ink/10 bg-white text-ink">{event.provider_model}</Badge> : null}
+                  </div>
+                  <div className="mt-3 grid gap-2 md:grid-cols-3">
+                    <DetailsRow label="Endpoint" value={event.endpoint} mono />
+                    <DetailsRow label="Tokens" value={String(event.total_tokens)} />
+                    <DetailsRow label="Images" value={String(event.image_count)} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         {seoMeta ? <ArticleSeoMetaCard articleId={article.id} initialMeta={seoMeta} /> : null}
 
         <div className="rounded-[24px] border border-ink/10 bg-white/70 p-5">
-          <p className="text-xs uppercase tracking-[0.16em] text-slate-500">미리보기</p>
-          <p className="mt-2 text-sm leading-7 text-slate-600">실제 게시 형태에 가깝게 조립된 HTML 미리보기를 확인할 수 있습니다.</p>
+          <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Preview</p>
           <div className="mt-4">
             <ArticlePreviewFrame article={article} />
           </div>
         </div>
 
-        <div className="space-y-4">
-          <details className="rounded-[24px] border border-ink/10 bg-white/70 p-5">
-            <summary className="cursor-pointer text-sm font-semibold text-ink">이미지 프롬프트 보기</summary>
-            <p className="mt-4 break-words text-sm leading-7 text-slate-700">{article.image_collage_prompt}</p>
-          </details>
-
-          <details className="rounded-[24px] border border-ink/10 bg-white/70 p-5">
-            <summary className="cursor-pointer text-sm font-semibold text-ink">조립 HTML 보기</summary>
-            <pre className="mt-4 overflow-auto rounded-[20px] bg-slate-950 p-4 text-xs leading-6 text-slate-100">
-              <code>{article.assembled_html ?? article.html_article}</code>
-            </pre>
-          </details>
-        </div>
+        <details className="rounded-[24px] border border-ink/10 bg-white/70 p-5">
+          <summary className="cursor-pointer text-sm font-semibold text-ink">Assembled HTML</summary>
+          <pre className="mt-4 overflow-auto rounded-[20px] bg-slate-950 p-4 text-xs leading-6 text-slate-100">
+            <code>{article.assembled_html ?? article.html_article}</code>
+          </pre>
+        </details>
       </CardContent>
     </Card>
   );
@@ -322,14 +343,12 @@ export default async function ArticlesPage({
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="font-display text-4xl font-semibold text-ink">글보관함</h1>
-          <p className="mt-2 text-base leading-7 text-slate-600">
-            블로그를 먼저 import하면 생성 글과 기존 Blogger 글을 한 화면에서 볼 수 있습니다.
-          </p>
+          <h1 className="font-display text-4xl font-semibold text-ink">Articles</h1>
+          <p className="mt-2 text-base leading-7 text-slate-600">Import at least one Blogger blog before using the archive.</p>
         </div>
         <Card>
           <CardContent className="px-6 py-10 text-sm leading-7 text-slate-600">
-            아직 가져온 블로그가 없습니다. Google 연결 후 Blogger 블로그를 import해 주세요.
+            No imported blog is available yet. Connect Google and import a Blogger blog first.
           </CardContent>
         </Card>
       </div>
@@ -343,10 +362,7 @@ export default async function ArticlesPage({
 
   const requestedSource = readString(searchParams?.source) as BlogArchiveItem["source"] | "";
   const requestedItemId = readString(searchParams?.item);
-  const selectedItem =
-    archive.items.find((item) => item.source === requestedSource && item.id === requestedItemId) ??
-    archive.items[0] ??
-    null;
+  const selectedItem = archive.items.find((item) => item.source === requestedSource && item.id === requestedItemId) ?? archive.items[0] ?? null;
 
   let selectedArticle: Article | null = null;
   let selectedSeoMeta: Awaited<ReturnType<typeof getArticleSeoMeta>> | null = null;
@@ -365,9 +381,9 @@ export default async function ArticlesPage({
     <div className="space-y-6">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
-          <h1 className="font-display text-4xl font-semibold text-ink">글보관함</h1>
+          <h1 className="font-display text-4xl font-semibold text-ink">Articles</h1>
           <p className="mt-2 max-w-3xl text-base leading-7 text-slate-600">
-            선택한 블로그 기준으로 생성 글과 기존 Blogger 공개 글을 함께 확인합니다. 기존 글 이미지와 요약도 같이 보여서 관련 글 작성과 중복 확인에 바로 사용할 수 있습니다.
+            Review generated drafts and synced Blogger posts in one place. This screen is built for quality checks, usage tracking, and safe publish queueing.
           </p>
         </div>
         <div className="w-full max-w-sm">
@@ -376,42 +392,22 @@ export default async function ArticlesPage({
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
-        <Card>
-          <CardContent className="px-5 py-5">
-            <p className="text-xs uppercase tracking-[0.16em] text-slate-500">선택 블로그</p>
-            <p className="mt-2 text-lg font-semibold text-ink">{selectedBlog.name}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="px-5 py-5">
-            <p className="text-xs uppercase tracking-[0.16em] text-slate-500">현재 페이지 항목</p>
-            <p className="mt-2 text-lg font-semibold text-ink">{archive.items.length}개</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="px-5 py-5">
-            <p className="text-xs uppercase tracking-[0.16em] text-slate-500">전체 보관함</p>
-            <p className="mt-2 text-lg font-semibold text-ink">{archive.total}개</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="px-5 py-5">
-            <p className="text-xs uppercase tracking-[0.16em] text-slate-500">마지막 동기화</p>
-            <p className="mt-2 text-lg font-semibold text-ink">{formatDateTime(archive.last_synced_at)}</p>
-          </CardContent>
-        </Card>
+        <Card><CardContent className="px-5 py-5"><p className="text-xs uppercase tracking-[0.16em] text-slate-500">Selected blog</p><p className="mt-2 text-lg font-semibold text-ink">{selectedBlog.name}</p></CardContent></Card>
+        <Card><CardContent className="px-5 py-5"><p className="text-xs uppercase tracking-[0.16em] text-slate-500">Items on this page</p><p className="mt-2 text-lg font-semibold text-ink">{archive.items.length}</p></CardContent></Card>
+        <Card><CardContent className="px-5 py-5"><p className="text-xs uppercase tracking-[0.16em] text-slate-500">Total archive items</p><p className="mt-2 text-lg font-semibold text-ink">{archive.total}</p></CardContent></Card>
+        <Card><CardContent className="px-5 py-5"><p className="text-xs uppercase tracking-[0.16em] text-slate-500">Last sync</p><p className="mt-2 text-lg font-semibold text-ink">{formatDateTime(archive.last_synced_at)}</p></CardContent></Card>
       </div>
 
       {archive.total === 0 ? (
         <Card>
           <CardContent className="space-y-3 px-6 py-10 text-sm leading-7 text-slate-600">
-            <p>이 블로그에는 아직 생성 글도, 가져온 Blogger 공개 글도 없습니다.</p>
+            <p>No generated article or synced Blogger post exists for this blog yet.</p>
             <p>
-              Google 페이지에서{" "}
+              Sync existing Blogger posts from the{" "}
               <Link href="/google" className="font-medium text-amber-700 underline-offset-4 hover:underline">
-                현재 게시글 가져오기
-              </Link>
-              를 실행하거나, 대시보드에서 새 글을 생성하면 이 보관함에 바로 반영됩니다.
+                Google page
+              </Link>{" "}
+              or generate a new article from the dashboard.
             </p>
           </CardContent>
         </Card>
@@ -419,10 +415,10 @@ export default async function ArticlesPage({
         <div className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
           <Card className="h-fit xl:sticky xl:top-6">
             <CardHeader>
-              <CardDescription>선택 블로그 통합 목록</CardDescription>
-              <CardTitle>생성 글 + 기존 Blogger 글</CardTitle>
+              <CardDescription>Combined archive</CardDescription>
+              <CardTitle>Generated + synced posts</CardTitle>
               <p className="text-sm leading-7 text-slate-600">
-                이 페이지에서는 생성 글 {currentBlogGeneratedCount}개, 기존 Blogger 글 {currentBlogSyncedCount}개를 보고 있습니다.
+                This page currently shows {currentBlogGeneratedCount} generated items and {currentBlogSyncedCount} synced Blogger posts.
               </p>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -439,11 +435,8 @@ export default async function ArticlesPage({
                   })}
                 />
               ))}
-
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-[24px] border border-ink/10 px-4 py-4 text-sm text-slate-600">
-                <p>
-                  페이지 {archive.page} / {totalPages}
-                </p>
+                <p>Page {archive.page} / {totalPages}</p>
                 <div className="flex items-center gap-2">
                   {archive.page > 1 ? (
                     <Link
@@ -455,10 +448,10 @@ export default async function ArticlesPage({
                       })}
                       className="rounded-full border border-ink/10 px-4 py-2 font-medium text-ink"
                     >
-                      이전
+                      Previous
                     </Link>
                   ) : (
-                    <span className="rounded-full border border-ink/10 px-4 py-2 text-slate-400">이전</span>
+                    <span className="rounded-full border border-ink/10 px-4 py-2 text-slate-400">Previous</span>
                   )}
                   {archive.page < totalPages ? (
                     <Link
@@ -470,10 +463,10 @@ export default async function ArticlesPage({
                       })}
                       className="rounded-full border border-ink/10 px-4 py-2 font-medium text-ink"
                     >
-                     다음
+                      Next
                     </Link>
                   ) : (
-                    <span className="rounded-full border border-ink/10 px-4 py-2 text-slate-400">다음</span>
+                    <span className="rounded-full border border-ink/10 px-4 py-2 text-slate-400">Next</span>
                   )}
                 </div>
               </div>
@@ -481,17 +474,11 @@ export default async function ArticlesPage({
           </Card>
 
           {!selectedItem ? (
-            <Card>
-              <CardContent className="px-6 py-10 text-sm leading-7 text-slate-600">선택한 글이 없습니다.</CardContent>
-            </Card>
+            <Card><CardContent className="px-6 py-10 text-sm leading-7 text-slate-600">No article is selected.</CardContent></Card>
           ) : selectedItem.source === "generated" && selectedArticle ? (
             <GeneratedArchiveDetail article={selectedArticle} seoMeta={selectedSeoMeta} />
           ) : selectedItem.source === "generated" ? (
-            <Card>
-              <CardContent className="px-6 py-10 text-sm leading-7 text-slate-600">
-                생성 글 상세를 불러오지 못했습니다. 목록에서 다시 선택하거나 페이지를 새로고침해 주세요.
-              </CardContent>
-            </Card>
+            <Card><CardContent className="px-6 py-10 text-sm leading-7 text-slate-600">The generated article detail could not be loaded.</CardContent></Card>
           ) : (
             <SyncedArchiveDetail item={selectedItem} blog={selectedBlog} />
           )}

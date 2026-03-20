@@ -16,6 +16,10 @@ celery_app.conf.update(
         "run-scheduler-tick": {
             "task": "app.tasks.scheduler.run_scheduler_tick",
             "schedule": 60.0,
-        }
+        },
+        "process-publish-queue": {
+            "task": "app.tasks.scheduler.process_publish_queue",
+            "schedule": 30.0,
+        },
     },
 )

@@ -1,45 +1,42 @@
-# Bloggent 위키
+# Bloggent Wiki
 
-Bloggent는 AI가 글을 써 주는 기능에서 끝나지 않고, 멀티 블로그 운영, 수동 발행 보호, 공개 메타 검증까지 이어지는 Blogger 운영 워크스페이스입니다.
+이 위키는 BloggerGent 운영자가 실제 서비스 설정과 운영 절차를 따라갈 수 있게 정리한 문서 모음입니다.
 
-## 빠른 답변
+현재 기본 이미지 전략은 `Cloudflare R2 + img.<domain> custom hostname + /cdn-cgi/image` 입니다. 원본을 R2에 저장하고, Blogger 본문과 커스텀 블로그 허브/카드에서 같은 이미지를 다른 크기로 재사용하는 구조를 전제로 설명합니다.
 
-위키는 “지금 이 제품이 어떻게 움직이는지”를 가장 짧게 이해하기 위한 운영 문서 허브입니다.
-처음 보는 경우에는 아래 순서로 읽으면 됩니다.
+## 먼저 읽을 문서
 
-1. 로컬 스택을 띄웁니다.
-2. Google OAuth를 연결합니다.
-3. Blogger 블로그를 가져옵니다.
-4. 주제를 발굴하거나 직접 넣습니다.
-5. `/articles`에서 글을 검토합니다.
-6. 수동 발행합니다.
-7. 공개 메타를 검증합니다.
+1. [Getting-Started](Getting-Started)
+2. [Deployment](Deployment)
+3. [Workflow](Workflow)
+4. [SEO-Metadata](SEO-Metadata)
 
-## 시작 문서
+## 핵심 운영 원칙
 
-- [시작하기](Getting-Started)
-- [워크플로](Workflow)
-- [SEO 메타데이터](SEO-Metadata)
-- [배포](Deployment)
-- [보안](Security)
-- [FAQ](FAQ)
-- [서비스 로드맵](Service-Roadmap)
+- generated article 이미지만 자동 마이그레이션 대상입니다.
+- synced-only 외부 Blogger 글은 자동 치환하지 않습니다.
+- `Image.public_url`은 기본 hero optimized URL입니다.
+- hero/card/thumb 최적화는 Cloudflare 변형 URL을 렌더링할 때만 적용됩니다.
+- 마이그레이션 검증 전에는 GitHub Pages, Cloudinary 기존 자산을 삭제하지 않습니다.
 
-## 제품 핵심 포인트
+## Cloudflare R2 구조 요약
 
-- 블로그별 워크플로와 프롬프트를 분리합니다.
-- 생성과 발행을 분리해 운영 리스크를 줄입니다.
-- GEO + SEO 구조로 제목, 메타, 본문 약속을 맞춥니다.
-- Blogger API 응답이 아니라 공개 페이지 기준으로 메타를 검증합니다.
+- 원본 저장: Cloudflare R2 bucket
+- 운영 도메인: `img.<domain>`
+- 원본 경로: `https://img.<domain>/<prefix>/<slug>.png`
+- 렌더링 URL:
+  - hero: `https://img.<domain>/cdn-cgi/image/format=auto,fit=scale-down,width=1600,quality=85/<prefix>/<slug>.png`
+  - card: `https://img.<domain>/cdn-cgi/image/format=auto,fit=cover,width=640,height=360,quality=75/<prefix>/<slug>.png`
+  - thumb: `https://img.<domain>/cdn-cgi/image/format=auto,fit=cover,width=160,height=160,quality=70/<prefix>/<slug>.png`
 
-## 주요 화면
+## 비용 메모
 
-- `/` 대시보드: 글 시작 액션, 작업 상태, 대표 프리뷰, 메타 상태
-- `/articles`: 제목, 메타, HTML, 최종 프리뷰, 수동 발행, 메타 검증
-- `/jobs`: 백그라운드 작업 큐와 실패 이력
-- `/settings`: Google OAuth, 블로그 가져오기, 연결 값, 워크플로 설정
+- 2026-03-20 기준 R2 Standard storage: `10 GB-month free`, 이후 `US$0.015/GB-month`
+- 이미지 변형 비용은 R2 저장 비용과 별도입니다.
+- `Cloudflare Images`와 `R2 + /cdn-cgi/image`는 같은 제품이 아닙니다.
 
-## 참고 링크
+## 관련 링크
 
-- 저장소: `https://github.com/sheryloe/BloggerGent`
-- GitHub Pages: `https://sheryloe.github.io/BloggerGent/`
+- [Cloudflare R2 pricing](https://developers.cloudflare.com/r2/pricing/)
+- [Cloudflare R2 S3 API compatibility](https://developers.cloudflare.com/r2/api/s3/api/)
+- [Transform images via URL](https://developers.cloudflare.com/images/transform-images/transform-via-url/)

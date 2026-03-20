@@ -68,8 +68,11 @@ def load_job(db: Session, job_id: int) -> Job | None:
             selectinload(Job.article).selectinload(Article.image),
             selectinload(Job.article).selectinload(Article.blogger_post),
             selectinload(Job.article).selectinload(Article.blog),
+            selectinload(Job.article).selectinload(Article.ai_usage_events),
+            selectinload(Job.article).selectinload(Article.publish_queue_items),
             selectinload(Job.image),
             selectinload(Job.blogger_post),
+            selectinload(Job.ai_usage_events),
             selectinload(Job.audit_logs),
         )
     )

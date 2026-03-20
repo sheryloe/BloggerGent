@@ -5,6 +5,7 @@ import re
 
 from app.models.entities import Article
 from app.services.related_posts import render_related_cards_html
+from app.services.storage_service import build_public_image_variants
 
 
 def _inject_inline_style(html: str, tag: str, style: str) -> str:
@@ -151,7 +152,21 @@ def assemble_article_html(article: Article, hero_image_url: str, related_posts: 
     escaped_lead_summary = html.escape(lead_summary, quote=True)
     hidden_lead_summary = html.escape(lead_summary)
     escaped_title = html.escape(article.title, quote=True)
-    escaped_hero_url = html.escape(hero_image_url, quote=True)
+    hero_variants = build_public_image_variants(
+        public_url=hero_image_url,
+        image_metadata=article.image.image_metadata if article.image else None,
+        width=article.image.width if article.image else None,
+        height=article.image.height if article.image else None,
+    )
+    escaped_hero_url = html.escape(str(hero_variants["hero_src"]), quote=True)
+    hero_srcset = str(hero_variants.get("hero_srcset") or "").strip()
+    hero_sizes = str(hero_variants.get("hero_sizes") or "").strip()
+    hero_width = hero_variants.get("width")
+    hero_height = hero_variants.get("height")
+    hero_srcset_attr = f' srcset="{html.escape(hero_srcset, quote=True)}"' if hero_srcset else ""
+    hero_sizes_attr = f' sizes="{html.escape(hero_sizes, quote=True)}"' if hero_srcset and hero_sizes else ""
+    hero_width_attr = f' width="{int(hero_width)}"' if isinstance(hero_width, int) and hero_width > 0 else ""
+    hero_height_attr = f' height="{int(hero_height)}"' if isinstance(hero_height, int) and hero_height > 0 else ""
     return f"""
 <article data-bloggent-meta-description="{escaped_lead_summary}" style="max-width:860px;margin:0 auto;padding:32px 22px 48px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:{theme['heading']};background:{theme['article_background']};border:1px solid {theme['article_border']};border-radius:{'0px' if category == 'mystery' else '32px'};box-shadow:{theme['article_shadow']};">
   <header style="margin-bottom:28px;display:flex;flex-direction:column;">
@@ -161,7 +176,7 @@ def assemble_article_html(article: Article, hero_image_url: str, related_posts: 
   </header>
   <div id="bloggent-seo-meta" data-bloggent-meta-source="body" style="display:none!important;visibility:hidden!important;max-height:0;overflow:hidden;">{hidden_lead_summary}</div>
   <figure style="margin:0 0 32px;">
-    <img src="{escaped_hero_url}" alt="{escaped_title}" style="width:100%;border-radius:28px;display:block;object-fit:cover;" />
+    <img src="{escaped_hero_url}"{hero_srcset_attr}{hero_sizes_attr}{hero_width_attr}{hero_height_attr} alt="{escaped_title}" loading="eager" decoding="async" style="width:100%;border-radius:28px;display:block;object-fit:cover;" />
   </figure>
   <section style="font-size:17px;line-height:1.9;color:{theme['body']};">{article_html}</section>
   {faq_html}

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import settings
 from app.models.entities import Article, BloggerPost, Image, Job, JobStatus, SyncedBloggerPost
+from app.services.storage_service import build_public_image_variants
 from app.utils.embeddings import cosine_similarity, text_to_embedding
 
 
@@ -107,7 +108,16 @@ def find_related_articles(db: Session, article: Article, limit: int | None = Non
                     title=candidate.title,
                     slug=candidate.slug,
                     excerpt=candidate.excerpt,
-                    thumbnail=candidate.image.public_url if candidate.image else "",
+                    thumbnail=(
+                        build_public_image_variants(
+                            public_url=candidate.image.public_url,
+                            image_metadata=candidate.image.image_metadata,
+                            width=candidate.image.width,
+                            height=candidate.image.height,
+                        )["card_src"]
+                        if candidate.image
+                        else ""
+                    ),
                     link=candidate.blogger_post.published_url if candidate.blogger_post else "#",
                     source="generated",
                     published_at=candidate.blogger_post.published_at if candidate.blogger_post else None,
@@ -170,7 +180,7 @@ def render_related_cards_html(
     for post in related_posts:
         thumbnail = (
             f"<img src='{post['thumbnail']}' alt='{post['title']}' "
-            "style='width:100%;height:120px;object-fit:cover;border-radius:14px;' />"
+            "loading='lazy' decoding='async' style='width:100%;height:120px;object-fit:cover;border-radius:14px;' />"
             if post["thumbnail"]
             else ""
         )

@@ -785,9 +785,19 @@ def render_agent_prompt(blog: Blog, agent: BlogAgentConfig, **replacements: str)
         "content_brief": blog.content_brief or "",
         "blogger_url": blog.blogger_url or "",
         "current_date": f"{local_now:%B} {local_now.day}, {local_now:%Y} ({settings.schedule_timezone})",
+        "target_reading_time_min_minutes": str(blog.target_reading_time_min_minutes),
+        "target_reading_time_max_minutes": str(blog.target_reading_time_max_minutes),
     }
     base_context.update(replacements)
-    return render_prompt_template(agent.prompt_template, **base_context)
+    rendered = render_prompt_template(agent.prompt_template, **base_context)
+    if agent.stage_type == WorkflowStageType.ARTICLE_GENERATION:
+        rendered = (
+            f"{rendered.rstrip()}\n\n"
+            "[Reading Time Target]\n"
+            f"- Aim for about {blog.target_reading_time_min_minutes} to {blog.target_reading_time_max_minutes} minutes of reading time.\n"
+            "- Keep the article detailed enough to sustain engagement without padding.\n"
+        )
+    return rendered
 
 
 def ensure_blog_workflow_steps(db: Session, blog: Blog) -> Blog:
@@ -890,6 +900,8 @@ def _create_demo_blog(db: Session, blueprint: DemoBlogBlueprint) -> Blog:
         profile_key=profile.key,
         target_audience=profile.target_audience,
         content_brief=profile.content_brief,
+        target_reading_time_min_minutes=6,
+        target_reading_time_max_minutes=8,
         publish_mode=profile.publish_mode,
         is_active=blueprint.is_active,
     )
@@ -1011,6 +1023,8 @@ def import_blog_from_remote(db: Session, remote_blog: dict, profile_key: str) ->
         profile_key=profile.key,
         target_audience=profile.target_audience,
         content_brief=profile.content_brief,
+        target_reading_time_min_minutes=6,
+        target_reading_time_max_minutes=8,
         blogger_blog_id=remote_id,
         blogger_url=(remote_blog.get("url") or "").strip() or None,
         publish_mode=profile.publish_mode,
@@ -1037,6 +1051,8 @@ def update_blog(
     primary_language: str,
     target_audience: str | None,
     content_brief: str | None,
+    target_reading_time_min_minutes: int,
+    target_reading_time_max_minutes: int,
     publish_mode: PublishMode,
     is_active: bool,
 ) -> Blog:
@@ -1047,6 +1063,8 @@ def update_blog(
     blog.primary_language = primary_language
     blog.target_audience = target_audience
     blog.content_brief = content_brief
+    blog.target_reading_time_min_minutes = target_reading_time_min_minutes
+    blog.target_reading_time_max_minutes = max(target_reading_time_min_minutes, target_reading_time_max_minutes)
     blog.publish_mode = publish_mode
     blog.is_active = is_active
     db.add(blog)

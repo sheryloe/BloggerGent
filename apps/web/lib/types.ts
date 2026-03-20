@@ -13,6 +13,7 @@ export type JobStatus =
 
 export type PublishMode = "draft" | "publish";
 export type PostStatus = "draft" | "scheduled" | "published";
+export type PublishQueueStatus = "queued" | "scheduled" | "processing" | "completed" | "failed" | "cancelled";
 
 export type WorkflowStageType =
   | "topic_discovery"
@@ -161,6 +162,8 @@ export interface Blog {
   ga4_property_id?: string | null;
   seo_theme_patch_installed: boolean;
   seo_theme_patch_verified_at?: string | null;
+  target_reading_time_min_minutes: number;
+  target_reading_time_max_minutes: number;
   publish_mode: PublishMode;
   is_active: boolean;
   created_at: string;
@@ -250,6 +253,54 @@ export interface BloggerPost {
   scheduled_for?: string | null;
 }
 
+export interface AIUsageEvent {
+  id: number;
+  stage_type: string;
+  provider_mode: string;
+  provider_name: string;
+  provider_model?: string | null;
+  endpoint: string;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  estimated_cost_usd?: number | null;
+  request_count: number;
+  latency_ms?: number | null;
+  image_count: number;
+  image_width?: number | null;
+  image_height?: number | null;
+  success: boolean;
+  error_message?: string | null;
+  raw_usage: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface AIUsageSummary {
+  event_count: number;
+  total_requests: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_tokens: number;
+  estimated_cost_usd?: number | null;
+  by_stage: Record<string, Record<string, unknown>>;
+}
+
+export interface PublishQueueItem {
+  id: number;
+  article_id: number;
+  blog_id: number;
+  requested_mode: string;
+  scheduled_for?: string | null;
+  not_before: string;
+  status: PublishQueueStatus;
+  attempt_count: number;
+  last_error?: string | null;
+  response_payload: Record<string, unknown>;
+  completed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Article {
   id: number;
   job_id: number;
@@ -270,6 +321,9 @@ export interface Article {
   blog?: BlogCompact | null;
   image?: ImageAsset | null;
   blogger_post?: BloggerPost | null;
+  usage_events: AIUsageEvent[];
+  usage_summary?: AIUsageSummary | null;
+  publish_queue?: PublishQueueItem | null;
 }
 
 export interface BlogArchiveItem {

@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.entities import Article, Blog, SyncedBloggerPost
+from app.services.storage_service import build_public_image_variants
 
 
 def _coerce_sort_datetime(value: datetime | None) -> datetime:
@@ -30,7 +31,16 @@ def _generated_archive_item(article: Article) -> dict:
         "blog_id": article.blog_id,
         "title": article.title,
         "excerpt": article.excerpt,
-        "thumbnail_url": article.image.public_url if article.image else None,
+        "thumbnail_url": (
+            build_public_image_variants(
+                public_url=article.image.public_url,
+                image_metadata=article.image.image_metadata,
+                width=article.image.width,
+                height=article.image.height,
+            )["thumb_src"]
+            if article.image
+            else None
+        ),
         "labels": article.labels or [],
         "published_url": blogger_post.published_url if blogger_post else None,
         "published_at": blogger_post.published_at if blogger_post else None,

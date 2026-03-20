@@ -60,6 +60,8 @@ class BlogRead(BaseModel):
     ga4_property_id: str | None = None
     seo_theme_patch_installed: bool = False
     seo_theme_patch_verified_at: datetime | None = None
+    target_reading_time_min_minutes: int = 6
+    target_reading_time_max_minutes: int = 8
     publish_mode: PublishMode
     is_active: bool
     created_at: datetime
@@ -84,6 +86,8 @@ class BlogUpdate(BaseModel):
     primary_language: str = Field(min_length=2, max_length=20)
     target_audience: str | None = None
     content_brief: str | None = None
+    target_reading_time_min_minutes: int = Field(default=6, ge=1, le=60)
+    target_reading_time_max_minutes: int = Field(default=8, ge=1, le=60)
     publish_mode: PublishMode
     is_active: bool = True
 
@@ -250,6 +254,58 @@ class BloggerPostRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class AIUsageEventRead(BaseModel):
+    id: int
+    stage_type: str
+    provider_mode: str
+    provider_name: str
+    provider_model: str | None = None
+    endpoint: str
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    estimated_cost_usd: float | None = None
+    request_count: int
+    latency_ms: int | None = None
+    image_count: int
+    image_width: int | None = None
+    image_height: int | None = None
+    success: bool
+    error_message: str | None = None
+    raw_usage: dict
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AIUsageSummaryRead(BaseModel):
+    event_count: int
+    total_requests: int
+    total_input_tokens: int
+    total_output_tokens: int
+    total_tokens: int
+    estimated_cost_usd: float | None = None
+    by_stage: dict = Field(default_factory=dict)
+
+
+class PublishQueueItemRead(BaseModel):
+    id: int
+    article_id: int
+    blog_id: int
+    requested_mode: str
+    scheduled_for: datetime | None = None
+    not_before: datetime
+    status: str
+    attempt_count: int
+    last_error: str | None = None
+    response_payload: dict = Field(default_factory=dict)
+    completed_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class ArticleRead(BaseModel):
     id: int
     job_id: int
@@ -266,9 +322,13 @@ class ArticleRead(BaseModel):
     assembled_html: str | None = None
     reading_time_minutes: int
     created_at: datetime
+    updated_at: datetime
     blog: BlogCompactRead | None = None
     image: ImageRead | None = None
     blogger_post: BloggerPostRead | None = None
+    usage_events: list[AIUsageEventRead] = Field(default_factory=list)
+    usage_summary: AIUsageSummaryRead | None = None
+    publish_queue: PublishQueueItemRead | None = None
 
     model_config = {"from_attributes": True}
 
@@ -364,6 +424,8 @@ class GeneratedDataResetResponse(BaseModel):
     deleted_articles: int
     deleted_images: int
     deleted_blogger_posts: int
+    deleted_ai_usage_events: int
+    deleted_publish_queue_items: int
     deleted_audit_logs: int
     deleted_storage_files: int
     message: str
@@ -418,6 +480,32 @@ class PromptTemplateUpdate(BaseModel):
 class ArticlePublishRequest(BaseModel):
     mode: str = Field(default="publish", pattern="^(publish|schedule)$")
     scheduled_for: datetime | None = None
+
+
+class CloudflareR2MigrationRequest(BaseModel):
+    mode: str = Field(default="dry_run", pattern="^(dry_run|execute)$")
+    blog_id: int | None = None
+    limit: int = Field(default=20, ge=1, le=200)
+
+
+class CloudflareR2MigrationItemRead(BaseModel):
+    article_id: int
+    title: str
+    current_provider: str
+    current_public_url: str | None = None
+    planned_public_url: str | None = None
+    status: str
+    message: str
+
+
+class CloudflareR2MigrationRead(BaseModel):
+    mode: str
+    candidate_count: int
+    processable_count: int
+    skipped_count: int
+    updated_count: int
+    failed_count: int
+    items: list[CloudflareR2MigrationItemRead] = Field(default_factory=list)
 
 
 class BloggerRemoteBlogRead(BaseModel):

@@ -5,7 +5,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
-from app.models.entities import Article, AuditLog, Blog, BloggerPost, Image, Job, PostStatus, PublishMode, Topic
+from app.models.entities import AIUsageEvent, Article, AuditLog, Blog, BloggerPost, Image, Job, PostStatus, PublishMode, PublishQueueItem, Topic
 from app.schemas.api import GeneratedDataResetResponse, JobCreate, JobRead, JobRetryResponse
 from app.services.blog_service import get_blog, list_visible_blog_ids
 from app.services.content_guard_service import DuplicateContentError
@@ -40,8 +40,11 @@ def list_jobs(
             selectinload(Job.article).selectinload(Article.image),
             selectinload(Job.article).selectinload(Article.blogger_post),
             selectinload(Job.article).selectinload(Article.blog),
+            selectinload(Job.article).selectinload(Article.ai_usage_events),
+            selectinload(Job.article).selectinload(Article.publish_queue_items),
             selectinload(Job.image),
             selectinload(Job.blogger_post),
+            selectinload(Job.ai_usage_events),
             selectinload(Job.audit_logs),
         )
         .order_by(Job.created_at.desc())
@@ -137,10 +140,14 @@ def reset_generated_data(db: Session = Depends(get_db)) -> GeneratedDataResetRes
         "deleted_articles": int(db.execute(select(func.count()).select_from(Article)).scalar_one()),
         "deleted_images": int(db.execute(select(func.count()).select_from(Image)).scalar_one()),
         "deleted_blogger_posts": int(db.execute(select(func.count()).select_from(BloggerPost)).scalar_one()),
+        "deleted_ai_usage_events": int(db.execute(select(func.count()).select_from(AIUsageEvent)).scalar_one()),
+        "deleted_publish_queue_items": int(db.execute(select(func.count()).select_from(PublishQueueItem)).scalar_one()),
         "deleted_audit_logs": int(db.execute(select(func.count()).select_from(AuditLog)).scalar_one()),
     }
 
     db.execute(delete(AuditLog))
+    db.execute(delete(AIUsageEvent))
+    db.execute(delete(PublishQueueItem))
     db.execute(delete(BloggerPost))
     db.execute(delete(Image))
     db.execute(delete(Article))

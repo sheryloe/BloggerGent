@@ -1,9 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { Blog, BlogImportOptions, BloggerConfig, WorkflowStageType } from "@/lib/types";
 
@@ -43,13 +47,57 @@ export function BlogSettingsManager({
   bloggerConfig: BloggerConfig;
   importOptions: BlogImportOptions;
 }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
   const [selectedBlogId, setSelectedBlogId] = useState<number | null>(blogs[0]?.id ?? null);
   const [tab, setTab] = useState<TabKey>("workflow");
+  const [readingTimeMin, setReadingTimeMin] = useState<number>(blogs[0]?.target_reading_time_min_minutes ?? 6);
+  const [readingTimeMax, setReadingTimeMax] = useState<number>(blogs[0]?.target_reading_time_max_minutes ?? 8);
+  const [saveStatus, setSaveStatus] = useState("");
 
   const selectedBlog = useMemo(
     () => blogs.find((blog) => blog.id === selectedBlogId) ?? null,
     [blogs, selectedBlogId],
   );
+
+  useEffect(() => {
+    if (!selectedBlog) return;
+    setReadingTimeMin(selectedBlog.target_reading_time_min_minutes);
+    setReadingTimeMax(selectedBlog.target_reading_time_max_minutes);
+    setSaveStatus("");
+  }, [selectedBlog]);
+
+  async function saveReadingTargets() {
+    if (!selectedBlog) return;
+    setSaveStatus("");
+    const min = Math.max(1, Math.min(60, Math.floor(readingTimeMin || 1)));
+    const max = Math.max(min, Math.min(60, Math.floor(readingTimeMax || min)));
+
+    const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/blogs/${selectedBlog.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: selectedBlog.name,
+        description: selectedBlog.description ?? null,
+        content_category: selectedBlog.content_category,
+        primary_language: selectedBlog.primary_language,
+        target_audience: selectedBlog.target_audience ?? null,
+        content_brief: selectedBlog.content_brief ?? null,
+        target_reading_time_min_minutes: min,
+        target_reading_time_max_minutes: max,
+        publish_mode: selectedBlog.publish_mode,
+        is_active: selectedBlog.is_active,
+      }),
+    });
+
+    if (!response.ok) {
+      setSaveStatus("읽기 시간 목표 저장에 실패했습니다.");
+      return;
+    }
+
+    setSaveStatus(`읽기 목표를 ${min}-${max}분으로 저장했습니다.`);
+    startTransition(() => router.refresh());
+  }
 
   if (!selectedBlog) {
     return (
@@ -160,29 +208,73 @@ export function BlogSettingsManager({
           ) : null}
 
           {tab === "basic" ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>Basic Info</CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-4 lg:grid-cols-2">
-                <div className="rounded-[24px] border border-ink/10 bg-white/70 p-4">
-                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Language</p>
-                  <p className="mt-2 text-sm text-ink">{selectedBlog.primary_language}</p>
-                </div>
-                <div className="rounded-[24px] border border-ink/10 bg-white/70 p-4">
-                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Category</p>
-                  <p className="mt-2 text-sm text-ink">{selectedBlog.content_category}</p>
-                </div>
-                <div className="rounded-[24px] border border-ink/10 bg-white/70 p-4 lg:col-span-2">
-                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Description</p>
-                  <p className="mt-2 text-sm leading-6 text-slate-700">{selectedBlog.description || "-"}</p>
-                </div>
-                <div className="rounded-[24px] border border-ink/10 bg-white/70 p-4 lg:col-span-2">
-                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Target Audience</p>
-                  <p className="mt-2 text-sm leading-6 text-slate-700">{selectedBlog.target_audience || "-"}</p>
-                </div>
-              </CardContent>
-            </Card>
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Basic Info</CardTitle>
+                </CardHeader>
+                <CardContent className="grid gap-4 lg:grid-cols-2">
+                  <div className="rounded-[24px] border border-ink/10 bg-white/70 p-4">
+                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Language</p>
+                    <p className="mt-2 text-sm text-ink">{selectedBlog.primary_language}</p>
+                  </div>
+                  <div className="rounded-[24px] border border-ink/10 bg-white/70 p-4">
+                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Category</p>
+                    <p className="mt-2 text-sm text-ink">{selectedBlog.content_category}</p>
+                  </div>
+                  <div className="rounded-[24px] border border-ink/10 bg-white/70 p-4 lg:col-span-2">
+                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Description</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-700">{selectedBlog.description || "-"}</p>
+                  </div>
+                  <div className="rounded-[24px] border border-ink/10 bg-white/70 p-4 lg:col-span-2">
+                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Target Audience</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-700">{selectedBlog.target_audience || "-"}</p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Reading Time Target</CardTitle>
+                  <CardDescription>
+                    Control how long each generated article should feel to read for this blog.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-4 md:grid-cols-[1fr_1fr_auto]">
+                  <div className="space-y-2">
+                    <Label htmlFor={`reading-min-${selectedBlog.id}`}>Minimum Minutes</Label>
+                    <Input
+                      id={`reading-min-${selectedBlog.id}`}
+                      type="number"
+                      min={1}
+                      max={60}
+                      value={readingTimeMin}
+                      onChange={(event) => setReadingTimeMin(Number(event.target.value))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor={`reading-max-${selectedBlog.id}`}>Maximum Minutes</Label>
+                    <Input
+                      id={`reading-max-${selectedBlog.id}`}
+                      type="number"
+                      min={1}
+                      max={60}
+                      value={readingTimeMax}
+                      onChange={(event) => setReadingTimeMax(Number(event.target.value))}
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <Button type="button" onClick={() => void saveReadingTargets()} disabled={isPending}>
+                      {isPending ? "Saving..." : "Save Target"}
+                    </Button>
+                  </div>
+                  <div className="rounded-[24px] border border-dashed border-ink/15 bg-slate-50 p-4 text-sm leading-6 text-slate-600 md:col-span-3">
+                    This value is injected into the writing prompt. Recommended starting point is 6 to 8 minutes.
+                    {saveStatus ? <p className="mt-2 text-ink">{saveStatus}</p> : null}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           ) : null}
 
           {tab === "workflow" ? (

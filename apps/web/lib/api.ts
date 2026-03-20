@@ -49,6 +49,24 @@ export async function getBlogs() {
   return apiFetch<Blog[]>("/blogs");
 }
 
+export async function updateBlog(blogId: number, payload: {
+  name: string;
+  description?: string | null;
+  content_category: string;
+  primary_language: string;
+  target_audience?: string | null;
+  content_brief?: string | null;
+  target_reading_time_min_minutes: number;
+  target_reading_time_max_minutes: number;
+  publish_mode: "draft" | "publish";
+  is_active: boolean;
+}) {
+  return apiFetch<Blog>(`/blogs/${blogId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function getBlogImportOptions() {
   return apiFetch<BlogImportOptions>("/blogs/import-options");
 }

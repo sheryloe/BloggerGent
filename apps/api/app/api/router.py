@@ -1,8 +1,9 @@
 from fastapi import APIRouter
 
-from app.api.routes import articles, blogs, dashboard, google, jobs, prompts, settings, topics
+from app.api.routes import admin, articles, blogs, dashboard, google, jobs, prompts, settings, topics
 
 api_router = APIRouter()
+api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
 api_router.include_router(blogs.router, prefix="/blogs", tags=["blogs"])
 api_router.include_router(topics.router, prefix="/topics", tags=["topics"])
 api_router.include_router(jobs.router, prefix="/jobs", tags=["jobs"])

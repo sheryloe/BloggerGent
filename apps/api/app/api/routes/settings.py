@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
@@ -14,10 +14,10 @@ from app.services.blogger_oauth_service import (
     BloggerOAuthError,
     build_blogger_authorization_url,
     exchange_blogger_code,
-    get_google_oauth_scopes,
-    get_granted_google_scopes,
     get_blogger_redirect_uri,
     get_blogger_web_return_url,
+    get_google_oauth_scopes,
+    get_granted_google_scopes,
     list_blogger_blogs,
 )
 from app.services.blogger_sync_service import sync_connected_blogger_posts
@@ -30,6 +30,20 @@ from app.services.storage_service import is_private_asset_url
 router = APIRouter()
 blogger_router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _parse_int_setting(values: dict[str, str], key: str, *, minimum: int, maximum: int, allow_zero: bool = False) -> None:
+    if key not in values:
+        return
+    raw_value = (values.get(key) or "").strip()
+    try:
+        parsed = int(raw_value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"{key} must be an integer") from exc
+    if allow_zero and parsed == 0:
+        return
+    if parsed < minimum or parsed > maximum:
+        raise HTTPException(status_code=422, detail=f"{key} must be between {minimum} and {maximum}")
 
 
 @router.get("", response_model=list[SettingItem])
@@ -47,6 +61,8 @@ def get_settings(db: Session = Depends(get_db)):
 
 @router.put("", response_model=list[SettingItem])
 def update_settings(payload: SettingUpdate, db: Session = Depends(get_db)):
+    _parse_int_setting(payload.values, "topic_discovery_max_topics_per_run", minimum=1, maximum=20, allow_zero=True)
+    _parse_int_setting(payload.values, "publish_min_interval_seconds", minimum=0, maximum=3600)
     return [
         SettingItem(
             key=item.key,
@@ -74,6 +90,79 @@ def get_openai_free_usage_route(db: Session = Depends(get_db)):
         ) from exc
 
 
+def _append_public_image_warnings(values: dict[str, str], warnings: list[str]) -> None:
+    public_image_provider = (values.get("public_image_provider") or "local").strip().lower()
+    public_asset_base_url = (values.get("public_asset_base_url") or "").strip()
+
+    if public_image_provider == "local":
+        if not public_asset_base_url:
+            warnings.append(
+                "Local delivery is selected but public_asset_base_url is empty. Blogger posts will still point at a private URL."
+            )
+        elif is_private_asset_url(public_asset_base_url):
+            warnings.append(
+                "Local delivery base URL still looks private. Use a real public domain, Cloudflare R2, or Cloudinary before publishing."
+            )
+        return
+
+    if public_image_provider == "cloudflare_r2":
+        account_id = (values.get("cloudflare_account_id") or "").strip()
+        bucket = (values.get("cloudflare_r2_bucket") or "").strip()
+        access_key_id = (values.get("cloudflare_r2_access_key_id") or "").strip()
+        secret_access_key = (values.get("cloudflare_r2_secret_access_key") or "").strip()
+        public_base_url = (values.get("cloudflare_r2_public_base_url") or "").strip()
+
+        if not account_id or not bucket or not access_key_id or not secret_access_key:
+            warnings.append(
+                "Cloudflare R2 is selected but account ID, bucket, access key ID, or secret access key is missing."
+            )
+        if not public_base_url:
+            warnings.append(
+                "Cloudflare R2 delivery needs cloudflare_r2_public_base_url set to the img.<domain> custom domain."
+            )
+        elif is_private_asset_url(public_base_url):
+            warnings.append(
+                "cloudflare_r2_public_base_url still looks private. Use the public img.<domain> hostname that sits behind Cloudflare."
+            )
+        else:
+            hostname = (urlparse(public_base_url).hostname or "").lower()
+            if hostname and not hostname.startswith("img."):
+                warnings.append(
+                    "Cloudflare R2 delivery works best on a dedicated img.<domain> hostname so transforms and cache rules stay isolated."
+                )
+        warnings.append(
+            "Cloudflare CDN alone does not optimize images. Hero/card/thumb performance only changes when rendered HTML uses /cdn-cgi/image transformation URLs."
+        )
+        return
+
+    if public_image_provider == "github_pages":
+        github_base_url = (values.get("github_pages_base_url") or "").strip()
+        github_owner = (values.get("github_pages_owner") or "").strip()
+        github_repo = (values.get("github_pages_repo") or "").strip()
+        github_token = (values.get("github_pages_token") or "").strip()
+        if not github_owner or not github_repo or not github_token:
+            warnings.append("GitHub Pages is selected but owner, repo, or token is missing.")
+        if github_base_url and is_private_asset_url(github_base_url):
+            warnings.append(
+                "GitHub Pages base URL still looks private. Check that it points to a public https://username.github.io/... address."
+            )
+        warnings.append(
+            "Deleting old GitHub Pages assets later will break images inside existing Blogger posts that still reference those URLs."
+        )
+        return
+
+    if public_image_provider == "cloudinary":
+        if not (
+            (values.get("cloudinary_cloud_name") or "").strip()
+            and (values.get("cloudinary_api_key") or "").strip()
+            and (values.get("cloudinary_api_secret") or "").strip()
+        ):
+            warnings.append("Cloudinary is selected but cloud name, API key, or API secret is missing.")
+        warnings.append(
+            "Cloudinary optimization only becomes real when rendered HTML uses transformation URLs instead of the original secure_url."
+        )
+
+
 @blogger_router.get("/config")
 def get_blogger_settings(db: Session = Depends(get_db)) -> dict:
     values = get_settings_map(db)
@@ -87,37 +176,7 @@ def get_blogger_settings(db: Session = Depends(get_db)) -> dict:
     config["search_console_sites"] = []
     config["analytics_properties"] = []
     config["warnings"] = []
-    public_image_provider = (values.get("public_image_provider") or "local").strip().lower()
-    public_asset_base_url = (values.get("public_asset_base_url") or "").strip()
-    if public_image_provider == "local":
-        if not public_asset_base_url:
-            config["warnings"].append(
-                "공개 이미지 베이스 URL이 비어 있습니다. 그대로 발행하면 localhost 이미지가 들어가서 Blogger 썸네일이 깨질 수 있습니다."
-            )
-        elif is_private_asset_url(public_asset_base_url):
-            config["warnings"].append(
-                "공개 이미지 베이스 URL이 사설 주소입니다. 외부에서 접근 가능한 도메인이나 Cloudinary를 사용해주세요."
-            )
-    elif public_image_provider == "github_pages":
-        github_base_url = (values.get("github_pages_base_url") or "").strip()
-        github_owner = (values.get("github_pages_owner") or "").strip()
-        github_repo = (values.get("github_pages_repo") or "").strip()
-        github_token = (values.get("github_pages_token") or "").strip()
-        if not github_owner or not github_repo or not github_token:
-            config["warnings"].append(
-                "GitHub Pages를 선택했지만 owner, repo, token 중 비어 있는 값이 있습니다."
-            )
-        if github_base_url and is_private_asset_url(github_base_url):
-            config["warnings"].append(
-                "GitHub Pages 공개 베이스 URL이 사설 주소로 보입니다. https://username.github.io/... 형태인지 확인해주세요."
-            )
-    elif public_image_provider == "cloudinary":
-        if not (
-            (values.get("cloudinary_cloud_name") or "").strip()
-            and (values.get("cloudinary_api_key") or "").strip()
-            and (values.get("cloudinary_api_secret") or "").strip()
-        ):
-            config["warnings"].append("Cloudinary를 선택했지만 Cloud Name, API Key, API Secret이 모두 입력되지 않았습니다.")
+    _append_public_image_warnings(values, config["warnings"])
 
     try:
         config["redirect_uri"] = get_blogger_redirect_uri(values)
@@ -140,11 +199,11 @@ def get_blogger_settings(db: Session = Depends(get_db)) -> dict:
         try:
             config["search_console_sites"] = list_search_console_sites(db)
         except BloggerOAuthError as exc:
-            config["warnings"].append(f"Search Console 사이트 목록을 가져오지 못했습니다: {exc.detail}")
+            config["warnings"].append(f"Failed to load Search Console sites: {exc.detail}")
         try:
             config["analytics_properties"] = list_analytics_properties(db)
         except BloggerOAuthError as exc:
-            config["warnings"].append(f"GA4 속성 목록을 가져오지 못했습니다: {exc.detail}")
+            config["warnings"].append(f"Failed to load GA4 properties: {exc.detail}")
 
     return config
 

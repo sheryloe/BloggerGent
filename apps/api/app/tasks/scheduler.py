@@ -7,6 +7,7 @@ from app.core.celery_app import celery_app
 from app.db.session import SessionLocal
 from app.models.entities import WorkflowStageType
 from app.services.blog_service import get_workflow_step, list_active_blogs
+from app.services.publishing_service import process_publish_queue_batch
 from app.services.settings_service import get_settings_map, upsert_settings
 from app.tasks.pipeline import discover_topics_and_enqueue
 
@@ -46,5 +47,14 @@ def run_scheduler_tick() -> dict:
                 if blog.id not in {item.id for item in discovery_enabled_blogs}
             ],
         }
+    finally:
+        db.close()
+
+
+@celery_app.task(name="app.tasks.scheduler.process_publish_queue")
+def process_publish_queue() -> dict:
+    db = SessionLocal()
+    try:
+        return process_publish_queue_batch(db)
     finally:
         db.close()

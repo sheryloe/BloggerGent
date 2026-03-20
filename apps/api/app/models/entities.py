@@ -82,6 +82,8 @@ class Blog(TimestampMixin, Base):
     ga4_property_id: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
     seo_theme_patch_installed: Mapped[bool] = mapped_column(sa.Boolean, default=False, nullable=False)
     seo_theme_patch_verified_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    target_reading_time_min_minutes: Mapped[int] = mapped_column(sa.Integer, default=6, nullable=False)
+    target_reading_time_max_minutes: Mapped[int] = mapped_column(sa.Integer, default=8, nullable=False)
     publish_mode: Mapped[PublishMode] = mapped_column(
         sa.Enum(PublishMode, name="publish_mode", values_callable=_enum_values),
         default=PublishMode.DRAFT,
@@ -97,6 +99,16 @@ class Blog(TimestampMixin, Base):
         back_populates="blog",
         cascade="all, delete-orphan",
         order_by="SyncedBloggerPost.id.desc()",
+    )
+    ai_usage_events: Mapped[list["AIUsageEvent"]] = relationship(
+        back_populates="blog",
+        cascade="all, delete-orphan",
+        order_by="AIUsageEvent.created_at.asc()",
+    )
+    publish_queue_items: Mapped[list["PublishQueueItem"]] = relationship(
+        back_populates="blog",
+        cascade="all, delete-orphan",
+        order_by="PublishQueueItem.created_at.desc()",
     )
     agent_configs: Mapped[list["BlogAgentConfig"]] = relationship(
         back_populates="blog",
@@ -179,6 +191,11 @@ class Job(TimestampMixin, Base):
     article: Mapped["Article | None"] = relationship(back_populates="job", uselist=False)
     image: Mapped["Image | None"] = relationship(back_populates="job", uselist=False)
     blogger_post: Mapped["BloggerPost | None"] = relationship(back_populates="job", uselist=False)
+    ai_usage_events: Mapped[list["AIUsageEvent"]] = relationship(
+        back_populates="job",
+        cascade="all, delete-orphan",
+        order_by="AIUsageEvent.created_at.asc()",
+    )
     audit_logs: Mapped[list["AuditLog"]] = relationship(back_populates="job", cascade="all, delete-orphan")
 
 
@@ -209,6 +226,69 @@ class Article(TimestampMixin, Base):
     topic: Mapped[Topic | None] = relationship(back_populates="articles")
     image: Mapped["Image | None"] = relationship(back_populates="article", uselist=False)
     blogger_post: Mapped["BloggerPost | None"] = relationship(back_populates="article", uselist=False)
+    ai_usage_events: Mapped[list["AIUsageEvent"]] = relationship(
+        back_populates="article",
+        cascade="all, delete-orphan",
+        order_by="AIUsageEvent.created_at.asc()",
+    )
+    publish_queue_items: Mapped[list["PublishQueueItem"]] = relationship(
+        back_populates="article",
+        cascade="all, delete-orphan",
+        order_by="PublishQueueItem.created_at.desc()",
+    )
+
+    @property
+    def usage_events(self) -> list["AIUsageEvent"]:
+        return sorted(self.ai_usage_events or [], key=lambda item: (item.created_at, item.id or 0))
+
+    @property
+    def usage_summary(self) -> dict:
+        events = self.usage_events
+        total_input_tokens = sum(int(item.input_tokens or 0) for item in events)
+        total_output_tokens = sum(int(item.output_tokens or 0) for item in events)
+        total_tokens = sum(int(item.total_tokens or 0) for item in events)
+        total_requests = sum(int(item.request_count or 0) for item in events)
+        known_costs = [float(item.estimated_cost_usd) for item in events if item.estimated_cost_usd is not None]
+        by_stage: dict[str, dict[str, int | float | None]] = {}
+        for item in events:
+            stage_bucket = by_stage.setdefault(
+                item.stage_type,
+                {
+                    "event_count": 0,
+                    "request_count": 0,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "total_tokens": 0,
+                    "estimated_cost_usd": 0.0,
+                },
+            )
+            stage_bucket["event_count"] = int(stage_bucket["event_count"]) + 1
+            stage_bucket["request_count"] = int(stage_bucket["request_count"]) + int(item.request_count or 0)
+            stage_bucket["input_tokens"] = int(stage_bucket["input_tokens"]) + int(item.input_tokens or 0)
+            stage_bucket["output_tokens"] = int(stage_bucket["output_tokens"]) + int(item.output_tokens or 0)
+            stage_bucket["total_tokens"] = int(stage_bucket["total_tokens"]) + int(item.total_tokens or 0)
+            if item.estimated_cost_usd is not None:
+                stage_bucket["estimated_cost_usd"] = float(stage_bucket["estimated_cost_usd"]) + float(item.estimated_cost_usd)
+        return {
+            "event_count": len(events),
+            "total_requests": total_requests,
+            "total_input_tokens": total_input_tokens,
+            "total_output_tokens": total_output_tokens,
+            "total_tokens": total_tokens,
+            "estimated_cost_usd": round(sum(known_costs), 6) if known_costs else None,
+            "by_stage": by_stage,
+        }
+
+    @property
+    def publish_queue(self) -> "PublishQueueItem | None":
+        items = list(self.publish_queue_items or [])
+        if not items:
+            return None
+        active_statuses = {"queued", "scheduled", "processing"}
+        for item in items:
+            if item.status in active_statuses:
+                return item
+        return items[0]
 
 
 class Image(TimestampMixin, Base):
@@ -251,6 +331,57 @@ class BloggerPost(TimestampMixin, Base):
     job: Mapped[Job] = relationship(back_populates="blogger_post")
     blog: Mapped[Blog] = relationship(back_populates="blogger_posts")
     article: Mapped[Article | None] = relationship(back_populates="blogger_post")
+
+
+class AIUsageEvent(TimestampMixin, Base):
+    __tablename__ = "ai_usage_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    blog_id: Mapped[int] = mapped_column(sa.ForeignKey("blogs.id", ondelete="CASCADE"), nullable=False, index=True)
+    job_id: Mapped[int | None] = mapped_column(sa.ForeignKey("jobs.id", ondelete="CASCADE"), nullable=True, index=True)
+    article_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("articles.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    stage_type: Mapped[str] = mapped_column(sa.String(50), nullable=False, index=True)
+    provider_mode: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="mock")
+    provider_name: Mapped[str] = mapped_column(sa.String(50), nullable=False, default="mock")
+    provider_model: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
+    endpoint: Mapped[str] = mapped_column(sa.String(100), nullable=False, default="unknown")
+    input_tokens: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    total_tokens: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    estimated_cost_usd: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    request_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=1)
+    latency_ms: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    image_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    image_width: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    image_height: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    success: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
+    error_message: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    raw_usage: Mapped[dict] = mapped_column(sa.JSON, default=dict, nullable=False)
+
+    blog: Mapped[Blog] = relationship(back_populates="ai_usage_events")
+    job: Mapped[Job | None] = relationship(back_populates="ai_usage_events")
+    article: Mapped[Article | None] = relationship(back_populates="ai_usage_events")
+
+
+class PublishQueueItem(TimestampMixin, Base):
+    __tablename__ = "publish_queue_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    article_id: Mapped[int] = mapped_column(sa.ForeignKey("articles.id", ondelete="CASCADE"), nullable=False, index=True)
+    blog_id: Mapped[int] = mapped_column(sa.ForeignKey("blogs.id", ondelete="CASCADE"), nullable=False, index=True)
+    requested_mode: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="publish")
+    scheduled_for: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    not_before: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="queued", index=True)
+    attempt_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    last_error: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    response_payload: Mapped[dict] = mapped_column(sa.JSON, default=dict, nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+
+    article: Mapped[Article] = relationship(back_populates="publish_queue_items")
+    blog: Mapped[Blog] = relationship(back_populates="publish_queue_items")
 
 
 class SyncedBloggerPost(TimestampMixin, Base):
