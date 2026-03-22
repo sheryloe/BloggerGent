@@ -222,6 +222,30 @@ export interface Topic {
   blog?: BlogCompact | null;
 }
 
+export interface TopicDiscoveryRunItem {
+  keyword: string;
+  reason?: string | null;
+  trend_score?: number | null;
+  status: "queued" | "skipped" | string;
+  skip_reasons: string[];
+  metadata: Record<string, string | null>;
+}
+
+export interface TopicDiscoveryRun {
+  id: number;
+  blog_id: number;
+  provider: string;
+  model?: string | null;
+  prompt: string;
+  raw_response: Record<string, unknown>;
+  items: TopicDiscoveryRunItem[];
+  queued_topics: number;
+  skipped_topics: number;
+  total_topics: number;
+  job_ids: number[];
+  created_at: string;
+}
+
 export interface AuditLog {
   id: number;
   level: "INFO" | "WARNING" | "ERROR";
@@ -314,6 +338,7 @@ export interface Article {
   html_article: string;
   faq_section: Array<{ question: string; answer: string }>;
   image_collage_prompt: string;
+  inline_media: Array<Record<string, unknown>>;
   assembled_html?: string | null;
   reading_time_minutes: number;
   created_at: string;
@@ -340,6 +365,20 @@ export interface BlogArchiveItem {
   updated_at?: string | null;
   status: string;
   content_html?: string | null;
+  has_published_url: boolean;
+  clickable: boolean;
+  publish_state: "pending" | "draft" | "scheduled" | "published" | string;
+  recovery_available: boolean;
+  recovery_block_reason?: string | null;
+  queue_status?: PublishQueueStatus | null;
+  last_publish_error?: string | null;
+  publish_status: "published" | "queued" | "scheduled" | "stopped" | "failed" | "pending" | string;
+  remote_validation_status?: "ok" | "missing" | "error_view" | "feed_fallback" | "unknown" | string;
+  remote_validation_message?: string | null;
+  telegram_delivery_status?: "sent" | "failed" | "skipped" | string | null;
+  telegram_error_message?: string | null;
+  telegram_error_code?: number | null;
+  telegram_response_text?: string | null;
 }
 
 export interface BlogArchivePage {
@@ -348,6 +387,70 @@ export interface BlogArchivePage {
   page: number;
   page_size: number;
   last_synced_at?: string | null;
+}
+
+export interface ArchiveChannel {
+  channel_key: string;
+  channel_label: string;
+  provider: "blogger" | "cloudflare" | string;
+  channel_id: string;
+  channel_name: string;
+  provider_status: string;
+}
+
+export interface ArchiveChannelItem {
+  provider: "blogger" | "cloudflare" | string;
+  channel_key: string;
+  channel_label: string;
+  channel_id: string;
+  channel_name: string;
+  provider_status: string;
+  source: string;
+  id: string;
+  remote_id: string;
+  blog_id?: number | null;
+  title: string;
+  excerpt: string;
+  category_slug?: string | null;
+  category_name?: string | null;
+  thumbnail_url?: string | null;
+  labels: string[];
+  published_url?: string | null;
+  published_at?: string | null;
+  scheduled_for?: string | null;
+  updated_at?: string | null;
+  status: string;
+  content_html?: string | null;
+  has_published_url: boolean;
+  clickable: boolean;
+  publish_state: string;
+  recovery_available: boolean;
+  recovery_block_reason?: string | null;
+  queue_status?: PublishQueueStatus | null;
+  last_publish_error?: string | null;
+  publish_status: string;
+  remote_validation_status?: string | null;
+  remote_validation_message?: string | null;
+  telegram_delivery_status?: string | null;
+  telegram_error_message?: string | null;
+  telegram_error_code?: number | null;
+  telegram_response_text?: string | null;
+}
+
+export interface ArchiveChannelPage {
+  channel_key: string;
+  channel_label: string;
+  provider: "blogger" | "cloudflare" | string;
+  channel_id: string;
+  channel_name: string;
+  provider_status: string;
+  items: ArchiveChannelItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  last_synced_at?: string | null;
+  available_categories?: Array<{ slug: string; name: string; count: number }>;
+  selected_category?: string | null;
 }
 
 export interface Job {
@@ -372,6 +475,22 @@ export interface Job {
   image?: ImageAsset | null;
   blogger_post?: BloggerPost | null;
   audit_logs: AuditLog[];
+  publish_status: "published" | "queued" | "scheduled" | "stopped" | "failed" | "pending" | string;
+  execution_status: JobStatus | string;
+  telegram_delivery_status?: "sent" | "failed" | "skipped" | string | null;
+  telegram_error_message?: string | null;
+  telegram_error_code?: number | null;
+  telegram_response_text?: string | null;
+}
+
+export interface TelegramTestResult {
+  delivery_status: "sent" | "failed" | "skipped" | string;
+  chat_id?: string | null;
+  message_id?: number | null;
+  error_code?: number | null;
+  error_message?: string | null;
+  response_text?: string | null;
+  skipped_reason?: string | null;
 }
 
 export interface DashboardPoint {
@@ -404,11 +523,118 @@ export interface DashboardMetrics {
   blog_summaries: DashboardBlogSummary[];
 }
 
+export interface IntegratedChannelSummary {
+  provider: "blogger" | "cloudflare" | string;
+  channel_id: string;
+  channel_name: string;
+  provider_status: string;
+  posts_count: number;
+  categories_count: number;
+  prompts_count: number;
+  runs_count: number;
+  site_title?: string | null;
+  base_url?: string | null;
+  error?: string | null;
+}
+
+export interface CloudflareCategory {
+  id: string;
+  slug: string;
+  name: string;
+  description?: string | null;
+  status: string;
+  scheduleTime: string;
+  scheduleTimezone: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CloudflarePrompt {
+  id: string;
+  categoryId: string;
+  categorySlug: string;
+  categoryName: string;
+  stage: string;
+  currentVersion: number;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CloudflarePromptBundle {
+  categories: CloudflareCategory[];
+  templates: CloudflarePrompt[];
+  stages: string[];
+}
+
+export interface IntegratedArchiveItem {
+  provider: "blogger" | "cloudflare" | string;
+  channel_id: string;
+  channel_name: string;
+  remote_id: string;
+  provider_status: string;
+  title: string;
+  excerpt?: string | null;
+  published_url?: string | null;
+  thumbnail_url?: string | null;
+  labels: string[];
+  published_at?: string | null;
+  updated_at?: string | null;
+  status: string;
+}
+
+export interface IntegratedRunItem {
+  provider: "blogger" | "cloudflare" | string;
+  channel_id: string;
+  channel_name: string;
+  remote_id: string;
+  provider_status: string;
+  title: string;
+  status: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  updated_at?: string | null;
+  summary?: string | null;
+  metadata: Record<string, unknown>;
+}
+
 export interface SettingItem {
   key: string;
   value: string;
   description?: string | null;
   is_secret: boolean;
+}
+
+export interface TrainingSchedule {
+  enabled: boolean;
+  time: string;
+  timezone: string;
+}
+
+export interface TrainingControlPayload {
+  session_hours: number;
+  save_every_minutes?: number | null;
+}
+
+export interface TrainingStatus {
+  state: string;
+  current_step: number;
+  total_steps: number;
+  loss?: number | null;
+  elapsed_seconds: number;
+  eta_seconds?: number | null;
+  last_checkpoint?: string | null;
+  next_scheduled_at?: string | null;
+  last_error?: string | null;
+  session_hours: number;
+  save_every_minutes: number;
+  pause_requested: boolean;
+  run_id?: number | null;
+  dataset_item_count: number;
+  recent_logs: string[];
+  schedule: TrainingSchedule;
+  model_name?: string | null;
+  data_scope: string;
 }
 
 export interface OpenAIFreeUsageBucket {

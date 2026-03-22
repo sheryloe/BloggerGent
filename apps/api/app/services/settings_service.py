@@ -1,6 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -21,7 +22,7 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     "provider_mode": DefaultSetting(settings.provider_mode, "mock or live provider mode"),
     "public_image_provider": DefaultSetting(
         settings.public_image_provider,
-        "Public image delivery provider. Recommended default is cloudflare_r2.",
+        "대표 이미지 공개 전달 방식. 현재 운영 권장값은 cloudflare_r2 입니다.",
     ),
     "public_asset_base_url": DefaultSetting(
         settings.public_asset_base_url,
@@ -41,7 +42,7 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     ),
     "cloudflare_r2_public_base_url": DefaultSetting(
         settings.cloudflare_r2_public_base_url,
-        "Cloudflare custom image domain base URL. Example: https://img.example.com",
+        "Cloudflare 공개 이미지 기준 URL. integration 업로드를 쓰면 비워둘 때 cloudflare_blog_api_base_url + /assets 가 자동 적용됩니다.",
     ),
     "cloudflare_r2_prefix": DefaultSetting(
         settings.cloudflare_r2_prefix,
@@ -69,7 +70,11 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
         "OpenAI Admin API key used for free-tier usage reporting",
         True,
     ),
-    "openai_text_model": DefaultSetting(settings.openai_text_model, "Default OpenAI text model"),
+    "openai_text_model": DefaultSetting(settings.openai_text_model, "기본 OpenAI 보조 텍스트 모델"),
+    "article_generation_model": DefaultSetting(
+        settings.article_generation_model,
+        "장문 본문 생성과 리라이트에 쓰는 주력 OpenAI 모델",
+    ),
     "openai_image_model": DefaultSetting(settings.openai_image_model, "Default OpenAI image model"),
     "openai_request_saver_mode": DefaultSetting(
         str(settings.openai_request_saver_mode).lower(),
@@ -127,11 +132,62 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
         str(settings.blogger_playwright_account_index),
         "Account index used in the Blogger editor URL. Usually 0.",
     ),
+    "telegram_bot_token": DefaultSetting(settings.telegram_bot_token, "Telegram bot token", True),
+    "telegram_chat_id": DefaultSetting(settings.telegram_chat_id, "Telegram chat ID", True),
+    "cloudflare_channel_enabled": DefaultSetting(
+        str(settings.cloudflare_channel_enabled).lower(),
+        "Cloudflare 채널 연동 사용 여부",
+    ),
+    "cloudflare_blog_api_base_url": DefaultSetting(
+        settings.cloudflare_blog_api_base_url,
+        "Cloudflare 연동 API 기본 주소. 예: https://api.dongriarchive.com",
+    ),
+    "cloudflare_blog_m2m_token": DefaultSetting(
+        settings.cloudflare_blog_m2m_token,
+        "Cloudflare integration Bearer 토큰",
+        True,
+    ),
+    "google_sheet_url": DefaultSetting(
+        settings.google_sheet_url,
+        "Google Sheets URL used for weekly blog snapshot sync.",
+    ),
+    "google_sheet_id": DefaultSetting(
+        settings.google_sheet_id,
+        "Derived Google Sheets document id. Usually filled automatically from google_sheet_url.",
+    ),
+    "google_sheet_travel_tab": DefaultSetting(
+        settings.google_sheet_travel_tab,
+        "Tab name used for Korea travel snapshot rows.",
+    ),
+    "google_sheet_mystery_tab": DefaultSetting(
+        settings.google_sheet_mystery_tab,
+        "Tab name used for mystery snapshot rows.",
+    ),
+    "sheet_sync_enabled": DefaultSetting(
+        str(settings.sheet_sync_enabled).lower(),
+        "Enable weekly Google Sheets snapshot sync.",
+    ),
+    "sheet_sync_day": DefaultSetting(
+        settings.sheet_sync_day,
+        "Weekly Google Sheets sync day. Example: SUNDAY.",
+    ),
+    "sheet_sync_time": DefaultSetting(
+        settings.sheet_sync_time,
+        "Weekly Google Sheets sync time in HH:MM format.",
+    ),
+    "last_sheet_sync_on": DefaultSetting(
+        settings.last_sheet_sync_on,
+        "Last successful Google Sheets sync date (YYYY-MM-DD).",
+    ),
     "default_publish_mode": DefaultSetting(settings.default_publish_mode, "Default publish mode"),
     "schedule_enabled": DefaultSetting(str(settings.schedule_enabled).lower(), "Enable the automatic scheduler"),
     "schedule_time": DefaultSetting(settings.schedule_time, "Scheduler run time in HH:MM format"),
     "schedule_timezone": DefaultSetting(settings.schedule_timezone, "Scheduler timezone"),
     "last_schedule_run_on": DefaultSetting("", "Last successful scheduler run date"),
+    "training_schedule_enabled": DefaultSetting("false", "Enable daily scheduled training session"),
+    "training_schedule_time": DefaultSetting("03:00", "Daily training schedule time in HH:MM format"),
+    "training_schedule_timezone": DefaultSetting("Asia/Seoul", "Timezone for daily training schedule"),
+    "training_schedule_last_run_on": DefaultSetting("", "Last date when scheduled training attempted"),
     "publish_daily_limit_per_blog": DefaultSetting("3", "Daily publish limit per blog"),
     "publish_min_interval_seconds": DefaultSetting(
         str(settings.publish_min_interval_seconds),
@@ -140,7 +196,25 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     "same_cluster_cooldown_hours": DefaultSetting("24", "Cooldown for repeating the same topic cluster"),
     "same_angle_cooldown_days": DefaultSetting("7", "Cooldown for repeating the same topic angle"),
     "topic_guard_enabled": DefaultSetting("true", "Enable topic memory based publish guard"),
+    "travel_research_mode": DefaultSetting(
+        settings.travel_research_mode,
+        "Travel fact-check mode: hybrid, prompt_only, validate, or off.",
+    ),
 }
+
+GOOGLE_SHEET_ID_PATTERN = re.compile(r"/spreadsheets/d/([a-zA-Z0-9-_]+)")
+
+
+def _extract_google_sheet_id(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    match = GOOGLE_SHEET_ID_PATTERN.search(raw)
+    if match:
+        return match.group(1)
+    if re.fullmatch(r"[a-zA-Z0-9-_]{20,}", raw):
+        return raw
+    return ""
 
 
 def ensure_default_settings(db: Session) -> None:
@@ -185,8 +259,11 @@ def list_settings(db: Session) -> list[Setting]:
 
 def upsert_settings(db: Session, values: dict[str, str]) -> list[Setting]:
     ensure_default_settings(db)
+    normalized_values = dict(values)
+    if "google_sheet_url" in normalized_values:
+        normalized_values["google_sheet_id"] = _extract_google_sheet_id(normalized_values.get("google_sheet_url", ""))
     existing = {item.key: item for item in db.execute(select(Setting)).scalars().all()}
-    for key, value in values.items():
+    for key, value in normalized_values.items():
         if key in existing:
             if existing[key].is_secret and not str(value).strip():
                 continue

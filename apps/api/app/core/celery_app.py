@@ -11,7 +11,7 @@ celery_app.conf.update(
     enable_utc=True,
     task_default_queue="default",
     result_extended=True,
-    imports=("app.tasks.pipeline", "app.tasks.scheduler"),
+    imports=("app.tasks.pipeline", "app.tasks.scheduler", "app.tasks.training"),
     beat_schedule={
         "run-scheduler-tick": {
             "task": "app.tasks.scheduler.run_scheduler_tick",

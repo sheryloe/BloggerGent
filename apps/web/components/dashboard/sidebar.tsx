@@ -1,10 +1,11 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
   BookOpenText,
+  Cpu,
   LayoutDashboard,
   MoonStar,
   Newspaper,
@@ -23,6 +24,7 @@ const items = [
   { href: "/jobs", label: "작업 현황", icon: Workflow },
   { href: "/articles", label: "글 보관함", icon: Newspaper },
   { href: "/settings", label: "설정", icon: Settings2 },
+  { href: "/training", label: "학습 진행", icon: Cpu },
 ];
 
 export function Sidebar() {
@@ -51,7 +53,7 @@ export function Sidebar() {
               </div>
             </div>
             <p className="mt-4 text-sm leading-7 text-slate-500 dark:text-zinc-400">
-              글 생성, 작업 큐, 프리뷰, 구글 연동 상태를 왼쪽 탐색과 한 화면 구조로 정리한 작업 공간입니다.
+              글 생성, 발행, 구글 지표, Cloudflare 채널 상태를 한 콘솔에서 관리합니다.
             </p>
           </div>
         </div>
@@ -95,19 +97,19 @@ export function Sidebar() {
                 <MoonStar className="h-4 w-4" />
               </div>
               <div>
-                <p className="text-sm font-semibold">자동 테마</p>
+                <p className="text-sm font-semibold">테마 모드</p>
                 <p className="text-xs uppercase tracking-[0.2em] text-white/55">Light / Dark</p>
               </div>
             </div>
             <p className="mt-4 text-sm leading-6 text-white/75">
-              디바이스 설정에 맞춰 밝기만 바뀌고, 데이터와 백엔드 동작은 손대지 않습니다.
+              UI 표시만 전환하고 데이터나 발행 로직에는 영향을 주지 않습니다.
             </p>
           </div>
 
           <div className="rounded-[28px] border border-slate-200/70 bg-slate-50/80 p-5 dark:border-white/10 dark:bg-white/5">
-            <p className="text-sm font-medium text-slate-500 dark:text-zinc-400">이번 변경 범위</p>
+            <p className="text-sm font-medium text-slate-500 dark:text-zinc-400">현재 범위</p>
             <p className="mt-3 text-sm leading-7 text-slate-600 dark:text-zinc-300">
-              배치, 여백, 가독성, 오버플로우 처리만 조정했습니다. API, DB, 발행 설정 로직은 그대로입니다.
+              Blogger 운영과 Cloudflare 채널 모니터링을 같은 대시보드에서 보도록 확장한 상태입니다.
             </p>
           </div>
         </div>
