@@ -165,6 +165,22 @@ class Topic(TimestampMixin, Base):
     articles: Mapped[list["Article"]] = relationship(back_populates="topic")
 
 
+class TopicDiscoveryRun(TimestampMixin, Base):
+    __tablename__ = "topic_discovery_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    blog_id: Mapped[int] = mapped_column(sa.ForeignKey("blogs.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(sa.String(50), nullable=False, default="")
+    model: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
+    prompt: Mapped[str] = mapped_column(sa.Text, nullable=False, default="")
+    raw_response: Mapped[dict] = mapped_column(sa.JSON, default=dict, nullable=False)
+    items: Mapped[list] = mapped_column(sa.JSON, default=list, nullable=False)
+    queued_topics: Mapped[int] = mapped_column(sa.Integer, default=0, nullable=False)
+    skipped_topics: Mapped[int] = mapped_column(sa.Integer, default=0, nullable=False)
+    total_topics: Mapped[int] = mapped_column(sa.Integer, default=0, nullable=False)
+    job_ids: Mapped[list] = mapped_column(sa.JSON, default=list, nullable=False)
+
+
 class Job(TimestampMixin, Base):
     __tablename__ = "jobs"
 
@@ -218,6 +234,7 @@ class Article(TimestampMixin, Base):
     html_article: Mapped[str] = mapped_column(sa.Text, nullable=False)
     faq_section: Mapped[list] = mapped_column(sa.JSON, default=list, nullable=False)
     image_collage_prompt: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    inline_media: Mapped[list] = mapped_column(sa.JSON, default=list, nullable=False)
     assembled_html: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     reading_time_minutes: Mapped[int] = mapped_column(sa.Integer, default=4, nullable=False)
 
@@ -430,6 +447,34 @@ class TopicMemory(TimestampMixin, Base):
     evidence_excerpt: Mapped[str] = mapped_column(sa.Text, default="", nullable=False)
 
     blog: Mapped[Blog] = relationship()
+
+
+class TrainingRun(TimestampMixin, Base):
+    __tablename__ = "training_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    state: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="idle", index=True)
+    trigger_source: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="manual")
+    task_id: Mapped[str | None] = mapped_column(sa.String(255), nullable=True, index=True)
+    session_hours: Mapped[float] = mapped_column(sa.Float, nullable=False, default=4.0)
+    save_every_minutes: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=20)
+    current_step: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    total_steps: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    loss: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    elapsed_seconds: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    eta_seconds: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    dataset_item_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    dataset_manifest_path: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    dataset_jsonl_path: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    last_checkpoint: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    checkpoint_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    last_checkpoint_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    pause_requested: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False)
+    started_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    session_deadline_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    log_tail: Mapped[list] = mapped_column(sa.JSON, nullable=False, default=list)
 
 
 class Setting(Base):

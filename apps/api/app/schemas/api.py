@@ -217,6 +217,32 @@ class TopicRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class TopicDiscoveryRunItem(BaseModel):
+    keyword: str
+    reason: str | None = None
+    trend_score: float | None = None
+    status: str
+    skip_reasons: list[str] = Field(default_factory=list)
+    metadata: dict[str, str | None] = Field(default_factory=dict)
+
+
+class TopicDiscoveryRunRead(BaseModel):
+    id: int
+    blog_id: int
+    provider: str
+    model: str | None = None
+    prompt: str
+    raw_response: dict
+    items: list[TopicDiscoveryRunItem]
+    queued_topics: int
+    skipped_topics: int
+    total_topics: int
+    job_ids: list[int]
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class AuditLogRead(BaseModel):
     id: int
     level: LogLevel
@@ -319,6 +345,7 @@ class ArticleRead(BaseModel):
     html_article: str
     faq_section: list[dict]
     image_collage_prompt: str
+    inline_media: list[dict] = Field(default_factory=list)
     assembled_html: str | None = None
     reading_time_minutes: int
     created_at: datetime
@@ -355,6 +382,12 @@ class JobRead(BaseModel):
     image: ImageRead | None = None
     blogger_post: BloggerPostRead | None = None
     audit_logs: list[AuditLogRead] = []
+    publish_status: str = "pending"
+    execution_status: str = "PENDING"
+    telegram_delivery_status: str | None = None
+    telegram_error_message: str | None = None
+    telegram_error_code: int | None = None
+    telegram_response_text: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -389,6 +422,85 @@ class DashboardMetrics(BaseModel):
     blog_summaries: list[DashboardBlogSummary]
 
 
+class IntegratedChannelSummaryRead(BaseModel):
+    provider: str
+    channel_id: str
+    channel_name: str
+    provider_status: str
+    posts_count: int = 0
+    categories_count: int = 0
+    prompts_count: int = 0
+    runs_count: int = 0
+    site_title: str | None = None
+    base_url: str | None = None
+    error: str | None = None
+
+
+class CloudflareCategoryRead(BaseModel):
+    id: str
+    slug: str
+    name: str
+    description: str | None = None
+    status: str
+    scheduleTime: str
+    scheduleTimezone: str
+    createdAt: str
+    updatedAt: str
+
+
+class CloudflarePromptRead(BaseModel):
+    id: str
+    categoryId: str
+    categorySlug: str
+    categoryName: str
+    stage: str
+    currentVersion: int
+    content: str
+    createdAt: str
+    updatedAt: str
+
+
+class CloudflarePromptBundleRead(BaseModel):
+    categories: list[CloudflareCategoryRead] = Field(default_factory=list)
+    templates: list[CloudflarePromptRead] = Field(default_factory=list)
+    stages: list[str] = Field(default_factory=list)
+
+
+class CloudflarePromptUpdate(BaseModel):
+    content: str = Field(min_length=20)
+
+
+class IntegratedArchiveItemRead(BaseModel):
+    provider: str
+    channel_id: str
+    channel_name: str
+    remote_id: str
+    provider_status: str
+    title: str
+    excerpt: str | None = None
+    published_url: str | None = None
+    thumbnail_url: str | None = None
+    labels: list[str] = Field(default_factory=list)
+    published_at: str | None = None
+    updated_at: str | None = None
+    status: str
+
+
+class IntegratedRunItemRead(BaseModel):
+    provider: str
+    channel_id: str
+    channel_name: str
+    remote_id: str
+    provider_status: str
+    title: str
+    status: str
+    started_at: str | None = None
+    finished_at: str | None = None
+    updated_at: str | None = None
+    summary: str | None = None
+    metadata: dict = Field(default_factory=dict)
+
+
 class JobCreate(BaseModel):
     blog_id: int | None = None
     keyword: str | None = None
@@ -401,6 +513,7 @@ class DiscoveryRunRequest(BaseModel):
     blog_id: int
     publish_mode: PublishMode | None = None
     stop_after_status: JobStatus | None = None
+    topic_count: int | None = Field(default=None, ge=1, le=20)
 
 
 class DiscoveryRunResponse(BaseModel):
@@ -410,6 +523,7 @@ class DiscoveryRunResponse(BaseModel):
     job_ids: list[int]
     message: str
     stop_after_status: JobStatus | None = None
+    topic_count: int | None = None
 
 
 class JobRetryResponse(BaseModel):
@@ -444,6 +558,44 @@ class SettingUpdate(BaseModel):
     values: dict[str, str] = Field(default_factory=dict)
 
 
+class TrainingControlPayload(BaseModel):
+    session_hours: float = Field(default=4.0, gt=0, le=24)
+    save_every_minutes: int | None = Field(default=None, ge=1, le=180)
+
+
+class TrainingScheduleRead(BaseModel):
+    enabled: bool = False
+    time: str = "03:00"
+    timezone: str = "Asia/Seoul"
+
+
+class TrainingScheduleUpdate(BaseModel):
+    enabled: bool = False
+    time: str = Field(default="03:00", pattern=r"^\d{2}:\d{2}$")
+    timezone: str = Field(default="Asia/Seoul", min_length=1, max_length=100)
+
+
+class TrainingStatusRead(BaseModel):
+    state: str
+    current_step: int
+    total_steps: int
+    loss: float | None = None
+    elapsed_seconds: int
+    eta_seconds: int | None = None
+    last_checkpoint: str | None = None
+    next_scheduled_at: str | None = None
+    last_error: str | None = None
+    session_hours: float = 4.0
+    save_every_minutes: int = 20
+    pause_requested: bool = False
+    run_id: int | None = None
+    dataset_item_count: int = 0
+    recent_logs: list[str] = Field(default_factory=list)
+    schedule: TrainingScheduleRead = Field(default_factory=TrainingScheduleRead)
+    model_name: str | None = None
+    data_scope: str
+
+
 class OpenAIFreeUsageBucketRead(BaseModel):
     label: str
     limit_tokens: int
@@ -464,6 +616,20 @@ class OpenAIFreeUsageRead(BaseModel):
     warning: str | None = None
 
 
+class TelegramTestRequest(BaseModel):
+    message: str | None = None
+
+
+class TelegramTestRead(BaseModel):
+    delivery_status: str
+    chat_id: str | None = None
+    message_id: int | None = None
+    error_code: int | None = None
+    error_message: str | None = None
+    response_text: str | None = None
+    skipped_reason: str | None = None
+
+
 class PromptTemplateRead(BaseModel):
     key: str
     title: str
@@ -480,6 +646,7 @@ class PromptTemplateUpdate(BaseModel):
 class ArticlePublishRequest(BaseModel):
     mode: str = Field(default="publish", pattern="^(publish|schedule)$")
     scheduled_for: datetime | None = None
+    force: bool = False
 
 
 class CloudflareR2MigrationRequest(BaseModel):
@@ -506,6 +673,35 @@ class CloudflareR2MigrationRead(BaseModel):
     updated_count: int
     failed_count: int
     items: list[CloudflareR2MigrationItemRead] = Field(default_factory=list)
+
+
+class CloudflarePublishedPostBackfillRequest(BaseModel):
+    mode: str = Field(default="dry_run", pattern="^(dry_run|execute)$")
+    limit: int = Field(default=20, ge=1, le=100)
+    only_missing_cover: bool = True
+
+
+class CloudflarePublishedPostBackfillItemRead(BaseModel):
+    post_id: str
+    slug: str
+    title: str
+    category_slug: str | None = None
+    current_cover_image: str | None = None
+    updated_cover_image: str | None = None
+    current_length: int = 0
+    updated_length: int | None = None
+    status: str
+    message: str
+
+
+class CloudflarePublishedPostBackfillRead(BaseModel):
+    mode: str
+    candidate_count: int
+    processable_count: int
+    skipped_count: int
+    updated_count: int
+    failed_count: int
+    items: list[CloudflarePublishedPostBackfillItemRead] = Field(default_factory=list)
 
 
 class BloggerRemoteBlogRead(BaseModel):
@@ -570,6 +766,20 @@ class BlogArchiveItemRead(BaseModel):
     updated_at: datetime | None = None
     status: str
     content_html: str | None = None
+    has_published_url: bool = False
+    clickable: bool = False
+    publish_state: str = "pending"
+    recovery_available: bool = False
+    recovery_block_reason: str | None = None
+    queue_status: str | None = None
+    last_publish_error: str | None = None
+    remote_validation_status: str = "unknown"
+    remote_validation_message: str | None = None
+    publish_status: str = "pending"
+    telegram_delivery_status: str | None = None
+    telegram_error_message: str | None = None
+    telegram_error_code: int | None = None
+    telegram_response_text: str | None = None
 
 
 class BlogArchivePageRead(BaseModel):
@@ -578,6 +788,74 @@ class BlogArchivePageRead(BaseModel):
     page: int = 1
     page_size: int = 20
     last_synced_at: datetime | None = None
+
+
+class ArchiveChannelRead(BaseModel):
+    channel_key: str
+    channel_label: str
+    provider: str
+    channel_id: str
+    channel_name: str
+    provider_status: str
+
+
+class ArchiveChannelListRead(BaseModel):
+    items: list[ArchiveChannelRead] = Field(default_factory=list)
+
+
+class ArchiveChannelItemRead(BaseModel):
+    provider: str
+    channel_key: str
+    channel_label: str
+    channel_id: str
+    channel_name: str
+    provider_status: str
+    source: str
+    id: str
+    remote_id: str
+    blog_id: int | None = None
+    title: str
+    excerpt: str = ""
+    category_slug: str | None = None
+    category_name: str | None = None
+    thumbnail_url: str | None = None
+    labels: list[str] = Field(default_factory=list)
+    published_url: str | None = None
+    published_at: datetime | None = None
+    scheduled_for: datetime | None = None
+    updated_at: datetime | None = None
+    status: str
+    content_html: str | None = None
+    has_published_url: bool = False
+    clickable: bool = False
+    publish_state: str = "pending"
+    recovery_available: bool = False
+    recovery_block_reason: str | None = None
+    queue_status: str | None = None
+    last_publish_error: str | None = None
+    remote_validation_status: str = "unknown"
+    remote_validation_message: str | None = None
+    publish_status: str = "pending"
+    telegram_delivery_status: str | None = None
+    telegram_error_message: str | None = None
+    telegram_error_code: int | None = None
+    telegram_response_text: str | None = None
+
+
+class ArchiveChannelPageRead(BaseModel):
+    channel_key: str
+    channel_label: str
+    provider: str
+    channel_id: str
+    channel_name: str
+    provider_status: str
+    items: list[ArchiveChannelItemRead] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    page_size: int = 24
+    last_synced_at: datetime | None = None
+    available_categories: list[dict[str, str | int]] = Field(default_factory=list)
+    selected_category: str | None = None
 
 
 class SearchConsoleSiteRead(BaseModel):
@@ -640,3 +918,19 @@ class GoogleIntegrationConfigRead(BaseModel):
     search_console_sites: list[SearchConsoleSiteRead] = Field(default_factory=list)
     analytics_properties: list[AnalyticsPropertyRead] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class GoogleSheetSyncRequest(BaseModel):
+    initial: bool = False
+
+
+class GoogleSheetSyncRead(BaseModel):
+    sheet_id: str
+    initial: bool
+    snapshot_date_kst: str
+    travel_blog_id: int
+    mystery_blog_id: int
+    travel_rows: int
+    mystery_rows: int
+    travel_tab: str
+    mystery_tab: str

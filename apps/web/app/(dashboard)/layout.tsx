@@ -1,5 +1,6 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 
+import { OpenAIFreeUsageWidget } from "@/components/dashboard/openai-free-usage-widget";
 import { Sidebar } from "@/components/dashboard/sidebar";
 import { Badge } from "@/components/ui/badge";
 
@@ -10,11 +11,13 @@ const nav = [
   { href: "/jobs", label: "작업 현황" },
   { href: "/articles", label: "글 보관함" },
   { href: "/settings", label: "설정" },
+  { href: "/training", label: "학습 진행" },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="dashboard-shell min-h-screen lg:flex">
+      <OpenAIFreeUsageWidget />
       <Sidebar />
       <main className="min-w-0 flex-1">
         <header className="sticky top-0 z-30 border-b border-slate-200/70 bg-white/75 px-4 py-4 backdrop-blur-2xl dark:border-white/10 dark:bg-zinc-950/75 lg:hidden">
@@ -24,10 +27,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <h1 className="font-display text-2xl font-semibold tracking-tight text-slate-950 dark:text-zinc-50">
                   Bloggent
                 </h1>
-                <p className="text-sm text-slate-500 dark:text-zinc-400">글 작성과 발행 관리를 한 화면에서</p>
+                <p className="text-sm text-slate-500 dark:text-zinc-400">Blogger와 Cloudflare 운영 콘솔</p>
               </div>
               <Badge className="border-emerald-200/80 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/15 dark:text-emerald-200">
-                UI 개선
+                Integrated UI
               </Badge>
             </div>
             <nav className="flex flex-wrap gap-2">
