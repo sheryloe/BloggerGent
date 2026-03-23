@@ -3,6 +3,8 @@ node_modules/
 __pycache__/
 .pytest_cache/
 *.pyc
+.venv/
+.venv-api/
 .env
 .env.local
 storage/images/*

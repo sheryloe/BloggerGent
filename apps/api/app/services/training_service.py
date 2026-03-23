@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
+from typing import Any
 import re
 from zoneinfo import ZoneInfo
 
@@ -28,11 +29,14 @@ SCHEDULE_ENABLED_KEY = "training_schedule_enabled"
 SCHEDULE_TIME_KEY = "training_schedule_time"
 SCHEDULE_TIMEZONE_KEY = "training_schedule_timezone"
 SCHEDULE_LAST_RUN_ON_KEY = "training_schedule_last_run_on"
+REAL_ENGINE_ENABLED_KEY = "training_use_real_engine"
 
 DATA_SCOPE_LABEL = "synced_blogger_posts.content_html + articles.html_article"
 MAX_LOG_LINES = 80
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 WS_RE = re.compile(r"\s+")
+CHECKPOINT_FORMAT_V1 = "training/checkpoint-v1"
+CHECKPOINT_VERSION = 1
 
 
 class TrainingServiceError(Exception):
@@ -78,6 +82,11 @@ def _normalize_timezone(raw: str) -> str:
     except Exception as exc:  # noqa: BLE001
         raise TrainingServiceError("timezone is invalid.", status_code=422) from exc
     return candidate
+
+
+def is_real_training_engine_enabled(db: Session) -> bool:
+    settings_map = get_settings_map(db)
+    return _as_bool(settings_map.get(REAL_ENGINE_ENABLED_KEY), default=False)
 
 
 def _normalize_session_hours(value: float | int | None) -> float:
@@ -221,6 +230,49 @@ def _build_dataset_snapshot(db: Session, run_id: int) -> tuple[str, str, int]:
     return str(manifest_path), str(dataset_jsonl_path), count
 
 
+def _load_checkpoint_payload(run: TrainingRun, checkpoint_path: str) -> dict[str, Any]:
+    path = Path(checkpoint_path)
+    if not path.is_file():
+        raise TrainingServiceError("Checkpoint file is not available.", status_code=409)
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:  # noqa: BLE001
+        raise TrainingServiceError(f"Failed to read checkpoint: {exc}", status_code=409) from exc
+    if not isinstance(payload, dict):
+        raise TrainingServiceError("Checkpoint payload format is invalid.", status_code=409)
+    return payload
+
+
+def _validate_resume_state(run: TrainingRun) -> dict[str, Any]:
+    if not run.last_checkpoint:
+        raise TrainingServiceError("No checkpoint is available for the paused run.", status_code=409)
+
+    payload = _load_checkpoint_payload(run, run.last_checkpoint)
+
+    resume_state = payload.get("resume_state")
+    if resume_state is not None and not isinstance(resume_state, dict):
+        raise TrainingServiceError("Checkpoint resume_state is malformed.", status_code=409)
+
+    checkpoint_version = payload.get("checkpoint_version", 0)
+    if checkpoint_version is None:
+        checkpoint_version = 0
+    if not isinstance(checkpoint_version, int):
+        raise TrainingServiceError("Checkpoint version is malformed.", status_code=409)
+    if checkpoint_version > CHECKPOINT_VERSION:
+        raise TrainingServiceError("Checkpoint version is not supported.", status_code=409)
+
+    artifact_format = payload.get("artifact_format")
+    if artifact_format is not None and artifact_format != CHECKPOINT_FORMAT_V1:
+        raise TrainingServiceError("Checkpoint format is not supported.", status_code=409)
+
+    checkpoint_run_id = payload.get("run_id")
+    if checkpoint_run_id is not None and checkpoint_run_id != run.id:
+        raise TrainingServiceError("Checkpoint belongs to a different training run.", status_code=409)
+
+    return payload
+
+
 def list_recent_runs(db: Session, *, limit: int = 5) -> list[TrainingRun]:
     return (
         db.execute(select(TrainingRun).order_by(TrainingRun.id.desc()).limit(max(1, min(limit, 20))))
@@ -327,6 +379,15 @@ def resume_training_run(
     if run.current_step >= run.total_steps and run.total_steps > 0:
         raise TrainingServiceError("The latest paused run is already complete.", status_code=409)
 
+    checkpoint_payload = _validate_resume_state(run)
+    checkpoint_step = checkpoint_payload.get("current_step")
+    checkpoint_time = checkpoint_payload.get("saved_at")
+    _append_log(
+        run,
+        f"Resume queued from checkpoint {Path(run.last_checkpoint).name} "
+        f"(step={checkpoint_step}, saved_at={checkpoint_time}).",
+    )
+
     run.state = "queued"
     run.pause_requested = False
     run.last_error = None
@@ -403,6 +464,17 @@ def create_checkpoint(db: Session, *, run_id: int, reason: str) -> str:
         "loss": run.loss,
         "elapsed_seconds": run.elapsed_seconds,
         "dataset_manifest_path": run.dataset_manifest_path,
+        "checkpoint_version": CHECKPOINT_VERSION,
+        "artifact_format": CHECKPOINT_FORMAT_V1,
+        "resume_state": {
+            "state": run.state,
+            "current_step": run.current_step,
+            "total_steps": run.total_steps,
+            "loss": run.loss,
+            "elapsed_seconds": run.elapsed_seconds,
+            "eta_seconds": run.eta_seconds,
+            "dataset_manifest_path": run.dataset_manifest_path,
+        },
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -587,4 +659,3 @@ def serialize_training_status(db: Session) -> dict:
         "model_name": model_name,
         "data_scope": DATA_SCOPE_LABEL,
     }
-

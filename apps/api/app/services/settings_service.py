@@ -188,6 +188,7 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     "training_schedule_time": DefaultSetting("03:00", "Daily training schedule time in HH:MM format"),
     "training_schedule_timezone": DefaultSetting("Asia/Seoul", "Timezone for daily training schedule"),
     "training_schedule_last_run_on": DefaultSetting("", "Last date when scheduled training attempted"),
+    "training_use_real_engine": DefaultSetting("false", "Enable real training engine execution (simulation remains default)"),
     "publish_daily_limit_per_blog": DefaultSetting("3", "Daily publish limit per blog"),
     "publish_min_interval_seconds": DefaultSetting(
         str(settings.publish_min_interval_seconds),
