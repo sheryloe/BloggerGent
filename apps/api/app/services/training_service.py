@@ -31,7 +31,7 @@ SCHEDULE_TIMEZONE_KEY = "training_schedule_timezone"
 SCHEDULE_LAST_RUN_ON_KEY = "training_schedule_last_run_on"
 REAL_ENGINE_ENABLED_KEY = "training_use_real_engine"
 
-DATA_SCOPE_LABEL = "synced_blogger_posts.content_html + articles.html_article"
+DATA_SCOPE_LABEL = "synced_blogger_posts.content_html + articles.html_article + content_ops.curated_learning"
 MAX_LOG_LINES = 80
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 WS_RE = re.compile(r"\s+")
@@ -146,6 +146,35 @@ def _dataset_snapshot_paths(run_id: int) -> tuple[Path, Path]:
     return base.with_suffix(".jsonl"), base.with_suffix(".manifest.json")
 
 
+def _append_curated_learning_snapshot(db: Session, fp, manifest_sources: dict[str, int]) -> int:
+    settings_map = get_settings_map(db)
+    curated_path_raw = (settings_map.get("content_ops_learning_snapshot_path") or "").strip()
+    if not curated_path_raw:
+        return 0
+
+    curated_path = Path(curated_path_raw)
+    if not curated_path.is_file():
+        return 0
+
+    count = 0
+    with curated_path.open("r", encoding="utf-8") as curated_fp:
+        for line in curated_fp:
+            candidate = line.strip()
+            if not candidate:
+                continue
+            try:
+                payload = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            fp.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            count += 1
+
+    manifest_sources["content_ops_curated_learning"] = count
+    return count
+
+
 def _build_dataset_snapshot(db: Session, run_id: int) -> tuple[str, str, int]:
     dataset_jsonl_path, manifest_path = _dataset_snapshot_paths(run_id)
     dataset_jsonl_path.parent.mkdir(parents=True, exist_ok=True)
@@ -170,6 +199,11 @@ def _build_dataset_snapshot(db: Session, run_id: int) -> tuple[str, str, int]:
         ).order_by(Article.id.asc())
     ).all()
 
+    manifest_sources = {
+        "synced_blogger_posts": len(synced_rows),
+        "articles": len(article_rows),
+    }
+
     count = 0
     with dataset_jsonl_path.open("w", encoding="utf-8") as fp:
         for row in synced_rows:
@@ -190,6 +224,8 @@ def _build_dataset_snapshot(db: Session, run_id: int) -> tuple[str, str, int]:
                 + "\n"
             )
             count += 1
+
+        count += _append_curated_learning_snapshot(db, fp, manifest_sources)
 
         for row in article_rows:
             text = _strip_html(row.html_article or "")
@@ -221,10 +257,7 @@ def _build_dataset_snapshot(db: Session, run_id: int) -> tuple[str, str, int]:
         "scope": DATA_SCOPE_LABEL,
         "dataset_jsonl_path": str(dataset_jsonl_path),
         "item_count": count,
-        "sources": {
-            "synced_blogger_posts": len(synced_rows),
-            "articles": len(article_rows),
-        },
+        "sources": manifest_sources,
     }
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     return str(manifest_path), str(dataset_jsonl_path), count

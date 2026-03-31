@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import enum
-from datetime import datetime
+from datetime import date, datetime
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -115,6 +115,11 @@ class Blog(TimestampMixin, Base):
         cascade="all, delete-orphan",
         order_by="BlogAgentConfig.sort_order.asc()",
     )
+    content_review_items: Mapped[list["ContentReviewItem"]] = relationship(
+        back_populates="blog",
+        cascade="all, delete-orphan",
+        order_by="ContentReviewItem.updated_at.desc()",
+    )
 
 
 class BlogAgentConfig(TimestampMixin, Base):
@@ -158,6 +163,8 @@ class Topic(TimestampMixin, Base):
     locale: Mapped[str] = mapped_column(sa.String(20), default="global", nullable=False)
     topic_cluster_label: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
     topic_angle_label: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    editorial_category_key: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
+    editorial_category_label: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
     distinct_reason: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
 
     blog: Mapped[Blog] = relationship(back_populates="topics")
@@ -234,9 +241,18 @@ class Article(TimestampMixin, Base):
     html_article: Mapped[str] = mapped_column(sa.Text, nullable=False)
     faq_section: Mapped[list] = mapped_column(sa.JSON, default=list, nullable=False)
     image_collage_prompt: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    editorial_category_key: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
+    editorial_category_label: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
     inline_media: Mapped[list] = mapped_column(sa.JSON, default=list, nullable=False)
     assembled_html: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     reading_time_minutes: Mapped[int] = mapped_column(sa.Integer, default=4, nullable=False)
+    quality_similarity_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    quality_most_similar_url: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    quality_seo_score: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    quality_geo_score: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    quality_status: Mapped[str | None] = mapped_column(sa.String(50), nullable=True)
+    quality_rewrite_attempts: Mapped[int] = mapped_column(sa.Integer, default=0, nullable=False)
+    quality_last_audited_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
 
     job: Mapped[Job] = relationship(back_populates="article")
     blog: Mapped[Blog] = relationship(back_populates="articles")
@@ -477,6 +493,54 @@ class TrainingRun(TimestampMixin, Base):
     log_tail: Mapped[list] = mapped_column(sa.JSON, nullable=False, default=list)
 
 
+class ContentReviewItem(TimestampMixin, Base):
+    __tablename__ = "content_review_items"
+    __table_args__ = (
+        sa.UniqueConstraint("source_type", "source_id", "review_kind", name="uq_content_review_items_source_kind"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    blog_id: Mapped[int] = mapped_column(sa.ForeignKey("blogs.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_type: Mapped[str] = mapped_column(sa.String(50), nullable=False, index=True)
+    source_id: Mapped[str] = mapped_column(sa.String(255), nullable=False, index=True)
+    source_title: Mapped[str] = mapped_column(sa.String(500), nullable=False, default="")
+    source_url: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    review_kind: Mapped[str] = mapped_column(sa.String(50), nullable=False, index=True)
+    content_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False, default="")
+    quality_score: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    risk_level: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="medium", index=True)
+    issues: Mapped[list] = mapped_column(sa.JSON, nullable=False, default=list)
+    proposed_patch: Mapped[dict] = mapped_column(sa.JSON, nullable=False, default=dict)
+    approval_status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="pending", index=True)
+    apply_status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="pending", index=True)
+    learning_state: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="pending", index=True)
+    source_updated_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    last_reviewed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    last_applied_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+
+    blog: Mapped[Blog] = relationship(back_populates="content_review_items")
+    actions: Mapped[list["ContentReviewAction"]] = relationship(
+        back_populates="item",
+        cascade="all, delete-orphan",
+        order_by="ContentReviewAction.created_at.desc()",
+    )
+
+
+class ContentReviewAction(Base):
+    __tablename__ = "content_review_actions"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    item_id: Mapped[int] = mapped_column(sa.ForeignKey("content_review_items.id", ondelete="CASCADE"), nullable=False, index=True)
+    action: Mapped[str] = mapped_column(sa.String(30), nullable=False, index=True)
+    actor: Mapped[str] = mapped_column(sa.String(100), nullable=False, default="system")
+    channel: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="system")
+    result_payload: Mapped[dict] = mapped_column(sa.JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False)
+
+    item: Mapped[ContentReviewItem] = relationship(back_populates="actions")
+
+
 class Setting(Base):
     __tablename__ = "settings"
 
@@ -505,3 +569,123 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False)
 
     job: Mapped[Job | None] = relationship(back_populates="audit_logs")
+
+
+class BlogTheme(TimestampMixin, Base):
+    __tablename__ = "blog_themes"
+    __table_args__ = (sa.UniqueConstraint("blog_id", "key", name="uq_blog_themes_blog_id_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    blog_id: Mapped[int] = mapped_column(sa.ForeignKey("blogs.id", ondelete="CASCADE"), nullable=False, index=True)
+    key: Mapped[str] = mapped_column(sa.String(100), nullable=False)
+    name: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    weight: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=10)
+    color: Mapped[str | None] = mapped_column(sa.String(32), nullable=True)
+    sort_order: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=1)
+    is_active: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
+
+    blog: Mapped[Blog] = relationship("Blog")
+
+
+class ContentPlanDay(TimestampMixin, Base):
+    __tablename__ = "content_plan_days"
+    __table_args__ = (sa.UniqueConstraint("blog_id", "plan_date", name="uq_content_plan_days_blog_date"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    blog_id: Mapped[int] = mapped_column(sa.ForeignKey("blogs.id", ondelete="CASCADE"), nullable=False, index=True)
+    plan_date: Mapped[date] = mapped_column(sa.Date, nullable=False, index=True)
+    target_post_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(sa.String(50), nullable=False, default="planned")
+
+    blog: Mapped[Blog] = relationship("Blog")
+    slots: Mapped[list[ContentPlanSlot]] = relationship(
+        "ContentPlanSlot",
+        back_populates="plan_day",
+        cascade="all, delete-orphan",
+        order_by="ContentPlanSlot.scheduled_for",
+    )
+
+
+class ContentPlanSlot(TimestampMixin, Base):
+    __tablename__ = "content_plan_slots"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    plan_day_id: Mapped[int] = mapped_column(sa.ForeignKey("content_plan_days.id", ondelete="CASCADE"), nullable=False, index=True)
+    theme_id: Mapped[int | None] = mapped_column(sa.ForeignKey("blog_themes.id", ondelete="SET NULL"), nullable=True, index=True)
+    scheduled_for: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
+    slot_order: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(sa.String(50), nullable=False, default="planned")
+    brief_topic: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    brief_audience: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    brief_information_level: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    brief_extra_context: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    article_id: Mapped[int | None] = mapped_column(sa.ForeignKey("articles.id", ondelete="SET NULL"), nullable=True, index=True)
+    job_id: Mapped[int | None] = mapped_column(sa.ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True, index=True)
+    error_message: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+
+    plan_day: Mapped[ContentPlanDay] = relationship("ContentPlanDay", back_populates="slots")
+    theme: Mapped[BlogTheme | None] = relationship("BlogTheme")
+    article: Mapped[Article | None] = relationship("Article")
+    job: Mapped[Job | None] = relationship("Job")
+
+
+class AnalyticsArticleFact(TimestampMixin, Base):
+    __tablename__ = "analytics_article_facts"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    blog_id: Mapped[int] = mapped_column(sa.ForeignKey("blogs.id", ondelete="CASCADE"), nullable=False, index=True)
+    month: Mapped[str] = mapped_column(sa.String(7), nullable=False, index=True)
+    article_id: Mapped[int | None] = mapped_column(sa.ForeignKey("articles.id", ondelete="SET NULL"), nullable=True, index=True)
+    synced_post_id: Mapped[int | None] = mapped_column(sa.ForeignKey("synced_blogger_posts.id", ondelete="SET NULL"), nullable=True, index=True)
+    published_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(sa.String(500), nullable=False)
+    theme_key: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
+    theme_name: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    category: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    seo_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    geo_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    similarity_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    most_similar_url: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    status: Mapped[str | None] = mapped_column(sa.String(50), nullable=True)
+    actual_url: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    source_type: Mapped[str] = mapped_column(sa.String(50), nullable=False, default="generated")
+
+
+class AnalyticsThemeMonthlyStat(TimestampMixin, Base):
+    __tablename__ = "analytics_theme_monthly_stats"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    blog_id: Mapped[int] = mapped_column(sa.ForeignKey("blogs.id", ondelete="CASCADE"), nullable=False, index=True)
+    month: Mapped[str] = mapped_column(sa.String(7), nullable=False, index=True)
+    theme_key: Mapped[str] = mapped_column(sa.String(100), nullable=False)
+    theme_name: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    planned_posts: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    actual_posts: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    planned_share: Mapped[float] = mapped_column(sa.Float, nullable=False, default=0)
+    actual_share: Mapped[float] = mapped_column(sa.Float, nullable=False, default=0)
+    gap_share: Mapped[float] = mapped_column(sa.Float, nullable=False, default=0)
+    avg_seo_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    avg_geo_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    avg_similarity_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    coverage_gap_score: Mapped[float] = mapped_column(sa.Float, nullable=False, default=0)
+    next_month_weight_suggestion: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=10)
+
+
+class AnalyticsBlogMonthlyReport(TimestampMixin, Base):
+    __tablename__ = "analytics_blog_monthly_reports"
+    __table_args__ = (sa.UniqueConstraint("blog_id", "month", name="uq_analytics_blog_monthly_reports_blog_month"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    blog_id: Mapped[int] = mapped_column(sa.ForeignKey("blogs.id", ondelete="CASCADE"), nullable=False, index=True)
+    month: Mapped[str] = mapped_column(sa.String(7), nullable=False, index=True)
+    total_posts: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    avg_seo_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    avg_geo_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    avg_similarity_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    most_underused_theme_key: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
+    most_underused_theme_name: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    most_overused_theme_key: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
+    most_overused_theme_name: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    next_month_focus: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    report_summary: Mapped[str | None] = mapped_column(sa.Text, nullable=True)

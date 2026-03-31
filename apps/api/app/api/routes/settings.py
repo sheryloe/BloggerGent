@@ -8,7 +8,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.api import OpenAIFreeUsageRead, SettingItem, SettingUpdate
+from app.schemas.api import ModelPolicyRead, OpenAIFreeUsageRead, SettingItem, SettingUpdate
 from app.services.blog_service import list_blog_profiles
 from app.services.blogger_oauth_service import (
     BloggerOAuthError,
@@ -22,6 +22,7 @@ from app.services.blogger_oauth_service import (
 )
 from app.services.blogger_sync_service import sync_connected_blogger_posts
 from app.services.google_reporting_service import list_analytics_properties, list_search_console_sites
+from app.services.model_policy_service import build_model_policy, validate_text_settings_payload
 from app.services.openai_usage_service import get_openai_free_usage
 from app.services.providers.base import ProviderRuntimeError
 from app.services.settings_service import get_blogger_config, get_settings_map, list_settings, upsert_settings
@@ -46,6 +47,37 @@ def _parse_int_setting(values: dict[str, str], key: str, *, minimum: int, maximu
         raise HTTPException(status_code=422, detail=f"{key} must be between {minimum} and {maximum}")
 
 
+def _cloudflare_direct_upload_ready(values: dict[str, str]) -> bool:
+    return all(
+        (
+            (values.get("cloudflare_account_id") or "").strip(),
+            (values.get("cloudflare_r2_bucket") or "").strip(),
+            (values.get("cloudflare_r2_access_key_id") or "").strip(),
+            (values.get("cloudflare_r2_secret_access_key") or "").strip(),
+        )
+    )
+
+
+def _cloudflare_integration_upload_ready(values: dict[str, str]) -> bool:
+    return all(
+        (
+            (values.get("cloudflare_blog_api_base_url") or "").strip(),
+            (values.get("cloudflare_blog_m2m_token") or "").strip(),
+        )
+    )
+
+
+def _cloudflare_public_base_url(values: dict[str, str]) -> str:
+    configured_public_base_url = (values.get("cloudflare_r2_public_base_url") or "").strip()
+    if configured_public_base_url:
+        return configured_public_base_url
+
+    integration_base_url = (values.get("cloudflare_blog_api_base_url") or "").strip().rstrip("/")
+    if integration_base_url:
+        return f"{integration_base_url}/assets"
+    return ""
+
+
 @router.get("", response_model=list[SettingItem])
 def get_settings(db: Session = Depends(get_db)):
     return [
@@ -63,6 +95,17 @@ def get_settings(db: Session = Depends(get_db)):
 def update_settings(payload: SettingUpdate, db: Session = Depends(get_db)):
     _parse_int_setting(payload.values, "topic_discovery_max_topics_per_run", minimum=1, maximum=20, allow_zero=True)
     _parse_int_setting(payload.values, "publish_min_interval_seconds", minimum=0, maximum=3600)
+    _parse_int_setting(payload.values, "travel_schedule_interval_hours", minimum=1, maximum=24)
+    _parse_int_setting(payload.values, "travel_topics_per_run", minimum=1, maximum=5)
+    _parse_int_setting(payload.values, "mystery_schedule_interval_hours", minimum=1, maximum=24)
+    _parse_int_setting(payload.values, "mystery_topics_per_run", minimum=1, maximum=5)
+    _parse_int_setting(payload.values, "cloudflare_daily_publish_interval_hours", minimum=1, maximum=24)
+    _parse_int_setting(payload.values, "cloudflare_daily_publish_weekday_quota", minimum=0, maximum=24)
+    _parse_int_setting(payload.values, "cloudflare_daily_publish_sunday_quota", minimum=0, maximum=24)
+    try:
+        validate_text_settings_payload(payload.values)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return [
         SettingItem(
             key=item.key,
@@ -90,6 +133,17 @@ def get_openai_free_usage_route(db: Session = Depends(get_db)):
         ) from exc
 
 
+@router.get("/model-policy", response_model=ModelPolicyRead)
+def get_model_policy_route():
+    policy = build_model_policy()
+    return ModelPolicyRead(
+        large=policy.large,
+        small=policy.small,
+        deprecated=policy.deprecated,
+        defaults=policy.defaults,
+    )
+
+
 def _append_public_image_warnings(values: dict[str, str], warnings: list[str]) -> None:
     public_image_provider = (values.get("public_image_provider") or "local").strip().lower()
     public_asset_base_url = (values.get("public_asset_base_url") or "").strip()
@@ -106,32 +160,30 @@ def _append_public_image_warnings(values: dict[str, str], warnings: list[str]) -
         return
 
     if public_image_provider == "cloudflare_r2":
-        account_id = (values.get("cloudflare_account_id") or "").strip()
-        bucket = (values.get("cloudflare_r2_bucket") or "").strip()
-        access_key_id = (values.get("cloudflare_r2_access_key_id") or "").strip()
-        secret_access_key = (values.get("cloudflare_r2_secret_access_key") or "").strip()
-        public_base_url = (values.get("cloudflare_r2_public_base_url") or "").strip()
+        direct_ready = _cloudflare_direct_upload_ready(values)
+        integration_ready = _cloudflare_integration_upload_ready(values)
+        public_base_url = _cloudflare_public_base_url(values)
 
-        if not account_id or not bucket or not access_key_id or not secret_access_key:
+        if not direct_ready and not integration_ready:
             warnings.append(
-                "Cloudflare R2 is selected but account ID, bucket, access key ID, or secret access key is missing."
+                "Cloudflare R2를 선택했지만 직접 업로드용 계정 정보 또는 연동 API 주소/토큰이 비어 있습니다."
             )
         if not public_base_url:
             warnings.append(
-                "Cloudflare R2 delivery needs cloudflare_r2_public_base_url set to the img.<domain> custom domain."
+                "Cloudflare 공개 이미지 기준 URL이 없습니다. 권장값은 https://img.example.com 이며, integration 업로드를 쓰면 cloudflare_blog_api_base_url + /assets 가 기본값으로 사용됩니다."
             )
         elif is_private_asset_url(public_base_url):
             warnings.append(
-                "cloudflare_r2_public_base_url still looks private. Use the public img.<domain> hostname that sits behind Cloudflare."
+                "Cloudflare 공개 이미지 URL이 아직 사설 주소로 보입니다. 외부에서 열리는 https://img.<domain> 또는 공개 자산 도메인을 사용해야 합니다."
             )
         else:
             hostname = (urlparse(public_base_url).hostname or "").lower()
             if hostname and not hostname.startswith("img."):
                 warnings.append(
-                    "Cloudflare R2 delivery works best on a dedicated img.<domain> hostname so transforms and cache rules stay isolated."
+                    "현재 공개 이미지 호스트가 img.<domain> 전용 서브도메인은 아닙니다. 동작은 가능하지만 변환 캐시와 규칙 분리를 위해 img.<domain> 구성을 권장합니다."
                 )
         warnings.append(
-            "Cloudflare CDN alone does not optimize images. Hero/card/thumb performance only changes when rendered HTML uses /cdn-cgi/image transformation URLs."
+            "참고: 원본 파일만 Cloudflare에 올린다고 이미지 최적화가 적용되지는 않습니다. 실제 렌더링 HTML이 /cdn-cgi/image 변환 URL을 사용해야 hero/card/thumb 성능이 개선됩니다."
         )
         return
 

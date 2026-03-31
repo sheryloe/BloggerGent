@@ -35,13 +35,13 @@ type SectionConfig = {
 
 const sections: SectionConfig[] = [
   {
-    title: "AI Providers",
-    description: "Choose how BloggerGent discovers topics, writes articles, and generates images.",
+    title: "AI 공급자",
+    description: "BloggerGent가 토픽을 찾고, 글을 쓰고, 이미지를 생성하는 방식을 정합니다.",
     fields: [
       {
         key: "provider_mode",
-        label: "Provider mode",
-        help: "Use mock on the test PC. Use live only when you want real API calls.",
+        label: "공급자 모드",
+        help: "테스트 PC에서는 mock을 사용하고, 실제 API 호출이 필요할 때만 live로 전환합니다.",
         required: true,
         options: [
           { value: "mock", label: "mock" },
@@ -50,41 +50,41 @@ const sections: SectionConfig[] = [
       },
       {
         key: "openai_api_key",
-        label: "OpenAI API key",
-        help: "Required for live article and image generation.",
+        label: "OpenAI API 키",
+        help: "실제 본문 생성과 이미지 생성에 필요합니다.",
         type: "password",
       },
       {
         key: "openai_admin_api_key",
-        label: "OpenAI admin API key",
-        help: "Optional. Used only for the free usage dashboard and shared usage reporting.",
+        label: "OpenAI Admin API 키",
+        help: "선택 항목입니다. 무료 사용량 위젯과 조직 사용량 조회에만 사용합니다.",
         type: "password",
       },
       {
         key: "openai_text_model",
-        label: "OpenAI text model",
-        help: "Main model used for article writing when a blog stage does not override it.",
+        label: "OpenAI 텍스트 모델",
+        help: "블로그 단계별로 따로 지정하지 않았을 때 기본 글쓰기 모델로 사용합니다.",
         suggestions: OPENAI_TEXT_MODEL_SUGGESTIONS,
       },
       {
         key: "openai_image_model",
-        label: "OpenAI image model",
-        help: "Only used in live mode. In mock mode, images are created locally by MockImageProvider using Pillow.",
+        label: "OpenAI 이미지 모델",
+        help: "live 모드에서만 사용합니다. mock 모드에서는 로컬 MockImageProvider가 Pillow로 이미지를 만듭니다.",
         suggestions: OPENAI_IMAGE_MODEL_SUGGESTIONS,
       },
       {
         key: "openai_request_saver_mode",
-        label: "Request saver mode",
-        help: "Skips the extra image prompt refinement call and reuses article output when possible.",
+        label: "요청 절약 모드",
+        help: "가능한 경우 추가 이미지 프롬프트 정제 호출을 생략하고 기존 본문 출력을 재사용합니다.",
         options: [
-          { value: "true", label: "enabled" },
-          { value: "false", label: "disabled" },
+          { value: "true", label: "사용" },
+          { value: "false", label: "사용 안 함" },
         ],
       },
       {
         key: "topic_discovery_provider",
-        label: "Topic discovery provider",
-        help: "Choose which provider discovers daily topics before jobs are queued.",
+        label: "토픽 발굴 공급자",
+        help: "작업 큐에 넣기 전에 매일 토픽을 누가 찾을지 정합니다.",
         options: [
           { value: "openai", label: "OpenAI" },
           { value: "gemini", label: "Gemini" },
@@ -92,256 +92,290 @@ const sections: SectionConfig[] = [
       },
       {
         key: "topic_discovery_max_topics_per_run",
-        label: "Topic discovery max topics per run",
-        help: "Hard cap applied right after the model returns topics. 0 means unlimited. Recommended default is 3 to prevent over-queuing.",
+        label: "1회 토픽 발굴 최대 개수",
+        help: "모델이 토픽을 돌려준 직후 적용되는 상한입니다. 0은 무제한이며, 과도한 큐 적재 방지를 위해 기본값 3을 권장합니다.",
         type: "number",
       },
       {
         key: "topic_discovery_model",
-        label: "Topic discovery model",
-        help: "Default OpenAI model for topic discovery when provider is OpenAI.",
+        label: "토픽 발굴 모델",
+        help: "토픽 발굴 공급자가 OpenAI일 때 사용할 기본 모델입니다.",
         suggestions: OPENAI_TEXT_MODEL_SUGGESTIONS,
         showWhen: (values) => (values.topic_discovery_provider || "openai") === "openai",
       },
       {
         key: "gemini_api_key",
-        label: "Gemini API key",
-        help: "Only needed when topic discovery provider is Gemini.",
+        label: "Gemini API 키",
+        help: "토픽 발굴 공급자가 Gemini일 때만 필요합니다.",
         type: "password",
         showWhen: (values) => values.topic_discovery_provider === "gemini",
       },
       {
         key: "gemini_model",
-        label: "Gemini model",
-        help: "Model used for topic discovery when Gemini is enabled.",
+        label: "Gemini 모델",
+        help: "Gemini 토픽 발굴에 사용할 모델입니다.",
         suggestions: GEMINI_MODEL_SUGGESTIONS,
         showWhen: (values) => values.topic_discovery_provider === "gemini",
       },
     ],
   },
   {
-    title: "Public Image Delivery",
-    description: "Pick where public image URLs come from so Blogger posts can safely render thumbnails and hero images.",
+    title: "공개 이미지 전달",
+    description: "Blogger 글에서 썸네일과 대표 이미지를 안정적으로 열 수 있도록 공개 이미지 URL의 원본을 정합니다.",
     fields: [
       {
         key: "public_image_provider",
-        label: "Public image provider",
-        help: "Recommended order: Cloudflare R2 on an img subdomain, then Cloudinary, then GitHub Pages. Local works only if the URL is publicly reachable.",
+        label: "공개 이미지 공급자",
+        help: "권장 순서는 img 서브도메인을 붙인 Cloudflare R2, 그다음 Cloudinary, 그다음 GitHub Pages입니다. Local은 외부 공개 URL일 때만 안전합니다.",
         required: true,
         options: [
           { value: "cloudflare_r2", label: "Cloudflare R2" },
           { value: "cloudinary", label: "Cloudinary" },
           { value: "github_pages", label: "GitHub Pages" },
-          { value: "local", label: "Local URL" },
+          { value: "local", label: "로컬 URL" },
         ],
       },
       {
         key: "cloudflare_account_id",
-        label: "Cloudflare account ID",
-        help: "Used for authenticated R2 uploads through the S3-compatible API.",
+        label: "Cloudflare 계정 ID",
+        help: "S3 호환 API로 직접 R2 업로드할 때 사용합니다.",
         showWhen: (values) => values.public_image_provider === "cloudflare_r2",
       },
       {
         key: "cloudflare_r2_bucket",
-        label: "Cloudflare R2 bucket",
-        help: "Bucket that stores the original uploaded image for each article.",
+        label: "Cloudflare R2 버킷",
+        help: "글마다 업로드되는 원본 이미지를 저장하는 버킷입니다.",
         showWhen: (values) => values.public_image_provider === "cloudflare_r2",
       },
       {
         key: "cloudflare_r2_access_key_id",
-        label: "R2 access key ID",
-        help: "Access key issued for the R2 bucket.",
+        label: "R2 접근 키 ID",
+        help: "R2 버킷에 발급된 접근 키입니다.",
         type: "password",
         showWhen: (values) => values.public_image_provider === "cloudflare_r2",
       },
       {
         key: "cloudflare_r2_secret_access_key",
-        label: "R2 secret access key",
-        help: "Secret access key paired with the R2 access key ID.",
+        label: "R2 비밀 접근 키",
+        help: "R2 접근 키 ID와 짝을 이루는 비밀 키입니다.",
         type: "password",
         showWhen: (values) => values.public_image_provider === "cloudflare_r2",
       },
       {
         key: "cloudflare_r2_public_base_url",
-        label: "Cloudflare public base URL",
-        help: "Recommended: https://img.example.com. Rendered pages use /cdn-cgi/image transforms on this host for hero/card/thumb variants.",
+        label: "Cloudflare 공개 기준 URL",
+        help: "권장값은 https://img.example.com 입니다. 렌더링된 페이지는 이 호스트에서 /cdn-cgi/image 변환 URL로 hero/card/thumb 변형을 만듭니다.",
         showWhen: (values) => values.public_image_provider === "cloudflare_r2",
       },
       {
         key: "cloudflare_r2_prefix",
-        label: "R2 object prefix",
-        help: "Optional prefix inside the bucket. Files are stored as <prefix>/<slug>.png.",
+        label: "R2 오브젝트 prefix",
+        help: "버킷 내부 경로 prefix입니다. 파일은 <prefix>/<slug>.png 형태로 저장됩니다.",
         showWhen: (values) => values.public_image_provider === "cloudflare_r2",
       },
       {
         key: "cloudinary_cloud_name",
-        label: "Cloudinary cloud name",
-        help: "BloggerGent uploads directly to Cloudinary. The original secure URL is stored as a reference, and rendered pages should use transformation URLs for optimized delivery.",
+        label: "Cloudinary 클라우드 이름",
+        help: "BloggerGent가 Cloudinary에 직접 업로드합니다. 원본 secure URL을 기준으로 저장하고, 렌더링된 페이지에서는 변환 URL을 써야 최적화 전달이 됩니다.",
         showWhen: (values) => values.public_image_provider === "cloudinary",
       },
       {
         key: "cloudinary_api_key",
-        label: "Cloudinary API key",
-        help: "Required for direct Cloudinary upload.",
+        label: "Cloudinary API 키",
+        help: "Cloudinary 직접 업로드에 필요합니다.",
         type: "password",
         showWhen: (values) => values.public_image_provider === "cloudinary",
       },
       {
         key: "cloudinary_api_secret",
-        label: "Cloudinary API secret",
-        help: "Required for direct Cloudinary upload.",
+        label: "Cloudinary API 비밀키",
+        help: "Cloudinary 직접 업로드에 필요합니다.",
         type: "password",
         showWhen: (values) => values.public_image_provider === "cloudinary",
       },
       {
         key: "cloudinary_folder",
-        label: "Cloudinary folder",
-        help: "Optional folder prefix for uploaded images. Keep old assets until Cloudinary migration verification is complete.",
+        label: "Cloudinary 폴더",
+        help: "업로드 이미지용 선택 폴더 prefix입니다. Cloudinary 마이그레이션 검증이 끝날 때까지 기존 자산은 삭제하지 마세요.",
         showWhen: (values) => values.public_image_provider === "cloudinary",
       },
       {
         key: "github_pages_owner",
-        label: "GitHub owner",
-        help: "Repository owner for GitHub Pages delivery. Deleting remote files later can break images inside older Blogger posts.",
+        label: "GitHub 소유자",
+        help: "GitHub Pages 전달에 쓰는 저장소 소유자입니다. 나중에 원격 파일을 지우면 예전 Blogger 글의 이미지가 깨질 수 있습니다.",
         showWhen: (values) => values.public_image_provider === "github_pages",
       },
       {
         key: "github_pages_repo",
-        label: "GitHub repository",
-        help: "Repository that stores public images.",
+        label: "GitHub 저장소",
+        help: "공개 이미지를 저장하는 저장소입니다.",
         showWhen: (values) => values.public_image_provider === "github_pages",
       },
       {
         key: "github_pages_branch",
-        label: "GitHub branch",
-        help: "Usually main.",
+        label: "GitHub 브랜치",
+        help: "보통 main 입니다.",
         showWhen: (values) => values.public_image_provider === "github_pages",
       },
       {
         key: "github_pages_token",
-        label: "GitHub token",
-        help: "Needs Contents read/write permission for uploads.",
+        label: "GitHub 토큰",
+        help: "업로드를 위해 Contents 읽기/쓰기 권한이 필요합니다.",
         type: "password",
         showWhen: (values) => values.public_image_provider === "github_pages",
       },
       {
         key: "github_pages_base_url",
-        label: "GitHub Pages base URL",
-        help: "Example: https://username.github.io/repository",
+        label: "GitHub Pages 기준 URL",
+        help: "예: https://username.github.io/repository",
         showWhen: (values) => values.public_image_provider === "github_pages",
       },
       {
         key: "github_pages_assets_dir",
-        label: "GitHub assets directory",
-        help: "Optional folder path inside the repository. Do not delete GitHub assets until Cloudinary migration verification is complete.",
+        label: "GitHub 자산 디렉터리",
+        help: "저장소 내부의 선택 폴더 경로입니다. Cloudinary 마이그레이션 검증이 끝날 때까지 GitHub 자산을 삭제하지 마세요.",
         showWhen: (values) => values.public_image_provider === "github_pages",
       },
       {
         key: "public_asset_base_url",
-        label: "Local public asset base URL",
-        help: "Use only when your API or static storage is reachable from the public internet.",
+        label: "로컬 공개 자산 기준 URL",
+        help: "API 또는 정적 저장소가 외부 인터넷에서 직접 접근 가능할 때만 사용하세요.",
         showWhen: (values) => values.public_image_provider === "local",
       },
     ],
   },
   {
     title: "Google OAuth",
-    description: "Credentials used for Blogger, Search Console, and GA4 integration.",
+    description: "Blogger, Search Console, GA4 연동에 사용하는 인증 정보입니다.",
     fields: [
-      { key: "blogger_client_name", label: "OAuth app name", help: "Name shown on the Google consent screen." },
-      { key: "blogger_client_id", label: "Client ID", help: "Google Cloud OAuth web client ID.", required: true },
-      { key: "blogger_client_secret", label: "Client secret", help: "Google Cloud OAuth client secret.", type: "password", required: true },
-      { key: "blogger_redirect_uri", label: "Redirect URI", help: "Default: http://localhost:8000/api/v1/blogger/oauth/callback", required: true },
+      { key: "blogger_client_name", label: "OAuth 앱 이름", help: "Google 동의 화면에 표시되는 앱 이름입니다." },
+      { key: "blogger_client_id", label: "클라이언트 ID", help: "Google Cloud OAuth 웹 클라이언트 ID입니다.", required: true },
+      { key: "blogger_client_secret", label: "클라이언트 시크릿", help: "Google Cloud OAuth 클라이언트 비밀값입니다.", type: "password", required: true },
+      { key: "blogger_redirect_uri", label: "리디렉션 URI", help: "기본값: http://localhost:8000/api/v1/blogger/oauth/callback", required: true },
     ],
   },
   {
-    title: "Operations",
-    description: "These settings control how often the system discovers topics and how safely it publishes posts.",
+    title: "운영 설정",
+    description: "토픽 발굴 주기와 발행 안전장치를 조정합니다.",
     fields: [
       {
         key: "schedule_enabled",
-        label: "Automatic schedule",
-        help: "Turns on the daily discovery scheduler.",
+        label: "자동 스케줄",
+        help: "일일 토픽 발굴 스케줄러를 켭니다.",
         options: [
-          { value: "true", label: "enabled" },
-          { value: "false", label: "disabled" },
+          { value: "true", label: "사용" },
+          { value: "false", label: "사용 안 함" },
         ],
       },
-      { key: "schedule_time", label: "Daily schedule time", help: "Format: HH:MM" },
-      { key: "schedule_timezone", label: "Schedule timezone", help: "Example: Asia/Seoul" },
+      { key: "schedule_time", label: "일일 스케줄 시간", help: "형식: HH:MM" },
+      { key: "schedule_timezone", label: "스케줄 시간대", help: "예: Asia/Seoul" },
+      {
+        key: "travel_schedule_time",
+        label: "여행 시작 시각",
+        help: "여행 자동 발행 슬롯의 첫 시작 시각입니다. 예: 00:00",
+      },
+      {
+        key: "travel_schedule_interval_hours",
+        label: "여행 반복 간격(시간)",
+        help: "여행 글을 몇 시간 간격으로 1개씩 올릴지 정합니다.",
+        type: "number",
+      },
+      {
+        key: "travel_topics_per_run",
+        label: "여행 슬롯당 글 수",
+        help: "현재 권장값은 1입니다.",
+        type: "number",
+      },
+      {
+        key: "mystery_schedule_time",
+        label: "미스테리 시작 시각",
+        help: "미스테리 자동 발행 슬롯의 첫 시작 시각입니다. 예: 01:00",
+      },
+      {
+        key: "mystery_schedule_interval_hours",
+        label: "미스테리 반복 간격(시간)",
+        help: "미스테리 글을 몇 시간 간격으로 1개씩 올릴지 정합니다.",
+        type: "number",
+      },
+      {
+        key: "mystery_topics_per_run",
+        label: "미스테리 슬롯당 글 수",
+        help: "현재 권장값은 1입니다.",
+        type: "number",
+      },
       {
         key: "publish_daily_limit_per_blog",
-        label: "Daily public publish limit per blog",
-        help: "This limits real publish or schedule actions. It does not cap topic discovery or draft creation.",
+        label: "블로그별 일일 공개 발행 한도",
+        help: "실제 발행과 예약 작업만 제한합니다. 주제 발굴이나 초안 생성 개수는 제한하지 않습니다.",
         type: "number",
       },
       {
         key: "publish_min_interval_seconds",
-        label: "Minimum publish interval seconds",
-        help: "Minimum gap between Blogger publish API calls for the same blog. Recommended: 60 seconds or more.",
+        label: "최소 발행 간격(초)",
+        help: "같은 블로그에서 Blogger 발행 API 호출 사이의 최소 간격입니다. 권장값은 60초 이상입니다.",
         type: "number",
       },
       {
         key: "gemini_daily_request_limit",
-        label: "Gemini daily request limit",
-        help: "Safety guard for free-tier Gemini usage. 0 means unlimited.",
+        label: "Gemini 일일 요청 한도",
+        help: "Gemini 무료 티어 보호용 제한입니다. 0이면 무제한입니다.",
         type: "number",
         showWhen: (values) => values.topic_discovery_provider === "gemini",
       },
       {
         key: "gemini_requests_per_minute_limit",
-        label: "Gemini requests per minute",
-        help: "Rate guard for Gemini topic discovery. 0 means unlimited.",
+        label: "Gemini 분당 요청 한도",
+        help: "Gemini 토픽 발굴 속도 제한입니다. 0이면 무제한입니다.",
         type: "number",
         showWhen: (values) => values.topic_discovery_provider === "gemini",
       },
       {
         key: "pipeline_stop_after",
-        label: "Pipeline stop after",
-        help: "Use this only on the test PC when you want to stop before full output generation.",
+        label: "파이프라인 중단 단계",
+        help: "전체 결과물을 만들기 전에 멈추고 싶을 때 테스트 PC에서만 사용하세요.",
         options: [
-          { value: "none", label: "Run full pipeline" },
-          { value: "GENERATING_ARTICLE", label: "Stop after article generation" },
-          { value: "GENERATING_IMAGE_PROMPT", label: "Stop after image prompt stage" },
-          { value: "GENERATING_IMAGE", label: "Stop after image generation" },
-          { value: "ASSEMBLING_HTML", label: "Stop after HTML assembly" },
+          { value: "none", label: "전체 파이프라인 실행" },
+          { value: "GENERATING_ARTICLE", label: "글 생성 후 중단" },
+          { value: "GENERATING_IMAGE_PROMPT", label: "이미지 프롬프트 단계 후 중단" },
+          { value: "GENERATING_IMAGE", label: "이미지 생성 후 중단" },
+          { value: "ASSEMBLING_HTML", label: "HTML 조립 후 중단" },
         ],
       },
     ],
   },
   {
-    title: "Blogger Editor Automation",
-    description: "Optional Playwright automation that updates Blogger search description after publish.",
+    title: "Blogger 에디터 자동화",
+    description: "발행 후 Blogger 검색 설명을 갱신하는 선택형 Playwright 자동화입니다.",
     fields: [
       {
         key: "blogger_playwright_enabled",
-        label: "Enable Playwright sync",
-        help: "Turn this on only when a remote-debug browser session is already logged in to Blogger.",
+        label: "Playwright 동기화 사용",
+        help: "원격 디버그 브라우저 세션이 이미 Blogger에 로그인된 경우에만 켜세요.",
         options: [
-          { value: "true", label: "enabled" },
-          { value: "false", label: "disabled" },
+          { value: "true", label: "사용" },
+          { value: "false", label: "사용 안 함" },
         ],
       },
       {
         key: "blogger_playwright_auto_sync",
-        label: "Auto sync after publish",
-        help: "If enabled, the worker attempts search description sync after a successful public publish.",
+        label: "발행 후 자동 동기화",
+        help: "켜면 공개 발행 성공 후 워커가 검색 설명 동기화를 시도합니다.",
         options: [
-          { value: "true", label: "enabled" },
-          { value: "false", label: "disabled" },
+          { value: "true", label: "사용" },
+          { value: "false", label: "사용 안 함" },
         ],
         showWhen: (values) => values.blogger_playwright_enabled === "true",
       },
       {
         key: "blogger_playwright_cdp_url",
-        label: "Remote debugging URL",
-        help: "Default: http://host.docker.internal:9223",
+        label: "원격 디버깅 URL",
+        help: "기본값: http://host.docker.internal:9223",
         showWhen: (values) => values.blogger_playwright_enabled === "true",
       },
       {
         key: "blogger_playwright_account_index",
-        label: "Blogger account index",
-        help: "Usually 0. Change only when the Blogger editor URL uses another /u/{index} value.",
+        label: "Blogger 계정 인덱스",
+        help: "보통 0입니다. Blogger 에디터 URL이 다른 /u/{index} 값을 쓸 때만 바꾸세요.",
         type: "number",
         showWhen: (values) => values.blogger_playwright_enabled === "true",
       },
@@ -355,9 +389,9 @@ function getInputType(field: FieldConfig): "password" | "number" | "text" {
 }
 
 function sharingGroupLabel(groupId: string) {
-  if (groupId === "shared-1m") return "Shared daily free pool: 1M tokens";
-  if (groupId === "shared-10m") return "Shared daily free pool: 10M tokens";
-  return "Shared free pool";
+  if (groupId === "shared-1m") return "일일 공유 무료 풀: 100만 토큰";
+  if (groupId === "shared-10m") return "일일 공유 무료 풀: 1,000만 토큰";
+  return "공유 무료 풀";
 }
 
 export function SettingsForm({ settings }: { settings: SettingItem[] }) {
@@ -379,11 +413,11 @@ export function SettingsForm({ settings }: { settings: SettingItem[] }) {
 
     if (!response.ok) {
       const payload = await response.json().catch(() => null);
-      setStatus(typeof payload?.detail === "string" ? payload.detail : "Failed to save settings.");
+      setStatus(typeof payload?.detail === "string" ? payload.detail : "설정을 저장하지 못했습니다.");
       return;
     }
 
-    setStatus("Settings saved.");
+    setStatus("설정을 저장했습니다.");
     startTransition(() => router.refresh());
   }
 
@@ -391,30 +425,30 @@ export function SettingsForm({ settings }: { settings: SettingItem[] }) {
     <form onSubmit={onSubmit} className="space-y-6">
       <Card>
         <CardHeader>
-          <CardDescription>Quick orientation</CardDescription>
-          <CardTitle>What matters most</CardTitle>
+          <CardDescription>빠른 안내</CardDescription>
+          <CardTitle>먼저 볼 핵심</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-3 text-sm leading-7 text-slate-700 lg:grid-cols-3">
           <div className="rounded-[24px] border border-ink/10 bg-white/70 px-4 py-4">
-            <p className="font-semibold text-ink">Safe test mode</p>
-            <p className="mt-1"><code>provider_mode=mock</code> keeps article, image, and publish work local on the test PC.</p>
+            <p className="font-semibold text-ink">안전한 테스트 모드</p>
+            <p className="mt-1"><code>provider_mode=mock</code>이면 글 생성, 이미지 생성, 발행 작업이 테스트 PC 안에서만 동작합니다.</p>
           </div>
           <div className="rounded-[24px] border border-ink/10 bg-white/70 px-4 py-4">
-            <p className="font-semibold text-ink">Prevent topic explosions</p>
-            <p className="mt-1"><code>topic_discovery_max_topics_per_run</code> hard-caps how many discovered topics become queued jobs.</p>
+            <p className="font-semibold text-ink">과도한 토픽 적재 방지</p>
+            <p className="mt-1"><code>topic_discovery_max_topics_per_run</code>은 발굴된 토픽이 실제 작업 큐로 넘어가는 개수를 강제로 제한합니다.</p>
           </div>
           <div className="rounded-[24px] border border-ink/10 bg-white/70 px-4 py-4">
-            <p className="font-semibold text-ink">Protect Blogger API</p>
-            <p className="mt-1"><code>publish_min_interval_seconds</code> keeps a safe gap between Blogger publish requests.</p>
+            <p className="font-semibold text-ink">Blogger API 보호</p>
+            <p className="mt-1"><code>publish_min_interval_seconds</code>는 Blogger 발행 요청 사이의 안전 간격을 유지합니다.</p>
           </div>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardDescription>OpenAI traffic sharing free pools</CardDescription>
-          <CardTitle>Free usage strategy reference</CardTitle>
-          <p className="text-sm leading-6 text-slate-600">These are shared daily token pools. Text usage is the main thing to watch here; image billing is tracked separately.</p>
+          <CardDescription>OpenAI 공유 무료 풀</CardDescription>
+          <CardTitle>무료 사용량 참고</CardTitle>
+          <p className="text-sm leading-6 text-slate-600">이 수치는 일일 공유 토큰 풀 기준입니다. 여기서는 텍스트 사용량이 핵심이고, 이미지 과금은 별도로 추적됩니다.</p>
         </CardHeader>
         <CardContent className="grid gap-4 lg:grid-cols-2">
           {OPENAI_DATA_SHARING_FREE_TIERS.map((group) => (
@@ -435,7 +469,7 @@ export function SettingsForm({ settings }: { settings: SettingItem[] }) {
         return (
           <Card key={section.title}>
             <CardHeader>
-              <CardDescription>Global settings</CardDescription>
+              <CardDescription>전역 설정</CardDescription>
               <CardTitle>{section.title}</CardTitle>
               <p className="text-sm leading-6 text-slate-600">{section.description}</p>
             </CardHeader>
@@ -443,12 +477,12 @@ export function SettingsForm({ settings }: { settings: SettingItem[] }) {
               {fields.map((field) => {
                 const item = settingsByKey.get(field.key);
                 const isSecret = item?.is_secret || field.type === "password";
-                const placeholder = isSecret ? "Leave blank to keep the current secret." : "";
+                const placeholder = isSecret ? "비워 두면 기존 비밀값을 유지합니다." : "";
                 return (
                   <div key={field.key} className="space-y-2">
                     <div className="flex items-center gap-2">
                       <Label htmlFor={field.key}>{field.label}</Label>
-                      {field.required ? <Badge className="px-2 py-0 text-[10px]">required</Badge> : null}
+                      {field.required ? <Badge className="px-2 py-0 text-[10px]">필수</Badge> : null}
                     </div>
                     {field.options ? (
                       <select
@@ -483,9 +517,10 @@ export function SettingsForm({ settings }: { settings: SettingItem[] }) {
       })}
 
       <div className="flex items-center gap-3">
-        <Button type="submit" disabled={isPending}>{isPending ? "Saving..." : "Save settings"}</Button>
+        <Button type="submit" disabled={isPending}>{isPending ? "저장 중..." : "설정 저장"}</Button>
         {status ? <p className="text-sm text-slate-600">{status}</p> : null}
       </div>
     </form>
   );
 }
+

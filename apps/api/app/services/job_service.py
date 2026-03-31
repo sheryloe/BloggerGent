@@ -19,6 +19,7 @@ def create_job(
     topic_id: int | None = None,
     publish_mode: PublishMode = PublishMode.DRAFT,
     initial_status: JobStatus = JobStatus.PENDING,
+    target_datetime: datetime | None = None,
     raw_prompts: dict | None = None,
     raw_responses: dict | None = None,
 ) -> Job:
@@ -30,7 +31,7 @@ def create_job(
         if existing_topic:
             resolved_topic_id = existing_topic.id
 
-    validate_candidate_topic(db, blog_id=blog_id, title=keyword)
+    validate_candidate_topic(db, blog_id=blog_id, title=keyword, target_datetime=target_datetime)
 
     duplicate = find_duplicate_match(
         db,

@@ -20,6 +20,7 @@ You are generating a complete SEO + GEO-ready Blogger blog package.
   - html_article
   - faq_section
   - image_collage_prompt
+  - inline_collage_prompt
 
 [Accuracy Rules]
 - Never invent exact dates, schedules, prices, opening hours, lineup details, or policy claims.
@@ -59,6 +60,7 @@ You are generating a complete SEO + GEO-ready Blogger blog package.
 - No other tags.
 - Do not insert related-post cards, related-post markup, or <!--RELATED_POSTS--> anywhere in html_article.
 - The system appends the related-post section automatically at the very end after the article and FAQ.
+- Do not place raw image tags or markdown images inside html_article.
 
 [Writing Rules]
 - Keep paragraphs short and mobile-friendly.
@@ -95,8 +97,12 @@ You are generating a complete SEO + GEO-ready Blogger blog package.
   - the first sentence must mirror the meta_description promise
 
 [Image Prompt Rules]
-- image_collage_prompt must describe one strong editorial image concept in English.
+- image_collage_prompt must describe one strong editorial 3x3 hero collage concept in English.
+- Use exactly 9 distinct panels with visible gutters and a dominant center panel.
 - No text overlays.
 - Realistic photography only.
+- inline_collage_prompt must describe one supporting 3x2 collage concept in English for mid-article placement.
+- Use exactly 6 distinct panels with visible gutters.
+- The supporting collage should reinforce the middle of the article rather than copy the hero exactly.
 
 Return the final JSON now.

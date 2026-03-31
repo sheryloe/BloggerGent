@@ -5,8 +5,9 @@ Article context:
 
 Rules:
 - Return plain text only.
-- Write one final prompt for a single high-resolution image divided into an 8-panel collage.
-- The image must clearly look like 8 separate photo panels with visible borders or gutters.
+- Write one final prompt for a single high-resolution hero image divided into a 3x3 collage.
+- The image must clearly look like 9 separate photo panels with visible borders or gutters.
+- The center panel must be visually dominant.
 - Use realistic photography language.
 - No text overlays.
 - No logos.

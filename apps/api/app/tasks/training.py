@@ -9,6 +9,7 @@ from celery import Task
 
 from app.core.celery_app import celery_app
 from app.db.session import SessionLocal
+from app.services.telegram_service import send_telegram_ops_notification
 from app.services.training_service import (
     PAUSED_STATE,
     create_checkpoint,
@@ -104,12 +105,28 @@ def run_training_session(self: Task, run_id: int) -> dict:
         save_interval_seconds = max(60, int(run.save_every_minutes * 60))
         last_save_at = time.monotonic()
         runner = _select_training_runner(db)
-        return runner(db=db, run_id=run.id, save_interval_seconds=save_interval_seconds, last_save_at=last_save_at)
+        result = runner(db=db, run_id=run.id, save_interval_seconds=save_interval_seconds, last_save_at=last_save_at)
+        if result.get("status") == "completed":
+            send_telegram_ops_notification(db, title="Training completed", detail=f"run_id={run.id}")
+        elif result.get("status") == PAUSED_STATE:
+            send_telegram_ops_notification(
+                db,
+                title="Training paused",
+                detail=f"run_id={run.id} reason={result.get('reason', 'unknown')}",
+            )
+        elif result.get("status") == "failed":
+            send_telegram_ops_notification(
+                db,
+                title="Training failed",
+                detail=f"run_id={run.id} detail={result.get('detail', 'unknown')}",
+            )
+        return result
     except Exception as exc:  # noqa: BLE001
         try:
             mark_run_failed(db, run_id=run_id, detail=str(exc))
         except Exception:  # noqa: BLE001
             db.rollback()
+        send_telegram_ops_notification(db, title="Training failed", detail=f"run_id={run_id} detail={exc}")
         return {"status": "failed", "run_id": run_id, "detail": str(exc)}
     finally:
         db.close()

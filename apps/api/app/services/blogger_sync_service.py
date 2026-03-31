@@ -207,6 +207,9 @@ def sync_blogger_posts_for_blog(db: Session, blog: Blog) -> dict:
 
         db.commit()
         rebuild_topic_memories_for_blog(db, blog)
+        from app.services.analytics_service import sync_synced_post_facts_for_blog
+
+        sync_synced_post_facts_for_blog(db, blog.id)
         return {
             "blog_id": blog.id,
             "count": len(remote_posts),

@@ -11,7 +11,7 @@ celery_app.conf.update(
     enable_utc=True,
     task_default_queue="default",
     result_extended=True,
-    imports=("app.tasks.pipeline", "app.tasks.scheduler", "app.tasks.training"),
+    imports=("app.tasks.admin", "app.tasks.pipeline", "app.tasks.scheduler", "app.tasks.training"),
     beat_schedule={
         "run-scheduler-tick": {
             "task": "app.tasks.scheduler.run_scheduler_tick",
@@ -20,6 +20,14 @@ celery_app.conf.update(
         "process-publish-queue": {
             "task": "app.tasks.scheduler.process_publish_queue",
             "schedule": 30.0,
+        },
+        "run-content-ops-scan": {
+            "task": "app.tasks.scheduler.run_content_ops_scan",
+            "schedule": 300.0,
+        },
+        "poll-telegram-ops": {
+            "task": "app.tasks.scheduler.poll_telegram_ops",
+            "schedule": 15.0,
         },
     },
 )

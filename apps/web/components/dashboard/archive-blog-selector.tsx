@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
 
@@ -7,21 +7,30 @@ import type { Blog } from "@/lib/types";
 export function ArchiveBlogSelector({
   blogs,
   selectedBlogId,
+  basePath = "/articles",
+  fixedParams,
 }: {
   blogs: Blog[];
   selectedBlogId: number;
+  basePath?: string;
+  fixedParams?: Record<string, string>;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
   function handleChange(nextBlogId: number) {
     const params = new URLSearchParams(searchParams.toString());
+    Object.entries(fixedParams ?? {}).forEach(([key, value]) => {
+      params.set(key, value);
+    });
     params.set("blog", String(nextBlogId));
     params.set("page", "1");
     params.delete("item");
     params.delete("source");
+    params.delete("article");
+    params.delete("job");
     const query = params.toString();
-    router.push(query ? `/articles?${query}` : "/articles");
+    router.push(query ? `${basePath}?${query}` : basePath);
   }
 
   return (

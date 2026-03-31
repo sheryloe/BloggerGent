@@ -1,5 +1,21 @@
 name: bloggent
 
+x-api-common: &api-common
+  image: bloggent-api:local
+  env_file:
+    - .env
+  environment:
+    DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://bloggent:bloggent@postgres:5432/bloggent}
+    REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    STORAGE_ROOT: /app/storage
+    PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8000}
+  volumes:
+    - ./apps/api:/app
+    - ./storage:/app/storage
+    - ./prompts:/app/prompts
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
 services:
   postgres:
     image: bloggent-postgres:local
@@ -43,11 +59,97 @@ services:
       timeout: 5s
       retries: 10
 
+  api:
+    <<: *api-common
+    build:
+      context: .
+      dockerfile: infra/docker/api.Dockerfile
+    container_name: bloggent-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${API_PORT:-8000}:8000"
+    command: >
+      sh -c "python -m app.prestart &&
+      uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app"
+
+  web:
+    image: bloggent-web:local
+    build:
+      context: .
+      dockerfile: infra/docker/web.Dockerfile
+    container_name: bloggent-web
+    env_file:
+      - .env
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000/api/v1}
+      API_INTERNAL_URL: ${API_INTERNAL_URL:-http://api:8000/api/v1}
+      CHOKIDAR_USEPOLLING: "true"
+      WATCHPACK_POLLING: "true"
+    depends_on:
+      api:
+        condition: service_started
+    volumes:
+      - ./apps/web:/app
+      - web_node_modules:/app/node_modules
+      - web_next_cache:/app/.next
+    ports:
+      - "${WEB_PORT:-3001}:3000"
+    command: npm run dev -- --hostname 0.0.0.0 --port 3000
+
+  bootstrap:
+    <<: *api-common
+    profiles: ["bootstrap"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: "no"
+    command: >
+      sh -c "python -m app.prestart &&
+      alembic upgrade head &&
+      python -m app.seed"
+
+  worker:
+    <<: *api-common
+    profiles: ["async", "full"]
+    container_name: bloggent-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    command: >
+      sh -c "python -m app.prestart &&
+      celery -A app.core.celery_app.celery_app worker --loglevel=info --queues pipeline,default,training"
+
+  scheduler:
+    <<: *api-common
+    profiles: ["async", "full"]
+    container_name: bloggent-scheduler
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    command: >
+      sh -c "python -m app.prestart &&
+      celery -A app.core.celery_app.celery_app beat --loglevel=info"
+
   minio:
     image: bloggent-minio:local
     build:
       context: .
       dockerfile: infra/docker/minio.Dockerfile
+    profiles: ["storage", "full"]
     container_name: bloggent-minio
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
@@ -61,112 +163,6 @@ services:
       - "9000:9000"
       - "9001:9001"
 
-  api:
-    image: bloggent-api:local
-    build:
-      context: .
-      dockerfile: infra/docker/api.Dockerfile
-    container_name: bloggent-api
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://bloggent:bloggent@postgres:5432/bloggent}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      STORAGE_ROOT: /app/storage
-      PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8000}
-    volumes:
-      - ./apps/api:/app
-      - ./storage:/app/storage
-      - ./prompts:/app/prompts
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    ports:
-      - "${API_PORT:-8000}:8000"
-    command: >
-      sh -c "python -m app.prestart &&
-      alembic upgrade heads &&
-      python -m app.seed &&
-      uvicorn app.main:app --host 0.0.0.0 --port 8000"
-
-  worker:
-    image: bloggent-worker:local
-    build:
-      context: .
-      dockerfile: infra/docker/api.Dockerfile
-    container_name: bloggent-worker
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://bloggent:bloggent@postgres:5432/bloggent}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      STORAGE_ROOT: /app/storage
-      PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8000}
-    volumes:
-      - ./apps/api:/app
-      - ./storage:/app/storage
-      - ./prompts:/app/prompts
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      api:
-        condition: service_started
-    command: >
-      sh -c "python -m app.prestart &&
-      celery -A app.core.celery_app.celery_app worker --loglevel=info --queues pipeline,default,training"
-
-  scheduler:
-    image: bloggent-scheduler:local
-    build:
-      context: .
-      dockerfile: infra/docker/api.Dockerfile
-    container_name: bloggent-scheduler
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://bloggent:bloggent@postgres:5432/bloggent}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      STORAGE_ROOT: /app/storage
-      PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8000}
-    volumes:
-      - ./apps/api:/app
-      - ./storage:/app/storage
-      - ./prompts:/app/prompts
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      api:
-        condition: service_started
-    command: >
-      sh -c "python -m app.prestart &&
-      celery -A app.core.celery_app.celery_app beat --loglevel=info"
-
-  web:
-    image: bloggent-web:local
-    build:
-      context: .
-      dockerfile: infra/docker/web.Dockerfile
-    container_name: bloggent-web
-    env_file:
-      - .env
-    environment:
-      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000/api/v1}
-      API_INTERNAL_URL: ${API_INTERNAL_URL:-http://api:8000/api/v1}
-    depends_on:
-      api:
-        condition: service_started
-    ports:
-      - "${WEB_PORT:-3001}:3000"
-    command: npm run dev -- --hostname 0.0.0.0 --port 3000
+volumes:
+  web_node_modules:
+  web_next_cache:

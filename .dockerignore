@@ -2,11 +2,13 @@
 .gitignore
 .env
 .env.local
+.docker-data
 **/.next
 **/node_modules
 **/__pycache__
 **/.pytest_cache
-storage/images/*
-storage/html/*
-!storage/images/.gitkeep
-!storage/html/.gitkeep
+**/.mypy_cache
+**/.ruff_cache
+**/.venv
+**/.venv-*
+storage/**

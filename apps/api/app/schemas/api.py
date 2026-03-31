@@ -332,7 +332,33 @@ class PublishQueueItemRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class ArticleRead(BaseModel):
+class PublishQueueSummaryRead(BaseModel):
+    id: int
+    article_id: int
+    blog_id: int
+    requested_mode: str
+    scheduled_for: datetime | None = None
+    not_before: datetime
+    status: str
+    attempt_count: int
+    last_error: str | None = None
+    completed_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ImageCompactRead(BaseModel):
+    id: int
+    public_url: str
+    width: int
+    height: int
+
+    model_config = {"from_attributes": True}
+
+
+class ArticleListItemRead(BaseModel):
     id: int
     job_id: int
     blog_id: int
@@ -342,17 +368,25 @@ class ArticleRead(BaseModel):
     labels: list[str]
     slug: str
     excerpt: str
+    reading_time_minutes: int
+    editorial_category_key: str | None = None
+    editorial_category_label: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    blog: BlogCompactRead | None = None
+    image: ImageCompactRead | None = None
+    blogger_post: BloggerPostRead | None = None
+    publish_queue: PublishQueueSummaryRead | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class ArticleDetailRead(ArticleListItemRead):
     html_article: str
     faq_section: list[dict]
     image_collage_prompt: str
     inline_media: list[dict] = Field(default_factory=list)
     assembled_html: str | None = None
-    reading_time_minutes: int
-    created_at: datetime
-    updated_at: datetime
-    blog: BlogCompactRead | None = None
-    image: ImageRead | None = None
-    blogger_post: BloggerPostRead | None = None
     usage_events: list[AIUsageEventRead] = Field(default_factory=list)
     usage_summary: AIUsageSummaryRead | None = None
     publish_queue: PublishQueueItemRead | None = None
@@ -360,7 +394,7 @@ class ArticleRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class JobRead(BaseModel):
+class JobListItemRead(BaseModel):
     id: int
     blog_id: int
     topic_id: int | None = None
@@ -369,25 +403,32 @@ class JobRead(BaseModel):
     publish_mode: PublishMode
     start_time: datetime | None = None
     end_time: datetime | None = None
-    error_logs: list
-    raw_prompts: dict
-    raw_responses: dict
     attempt_count: int
     max_attempts: int
     created_at: datetime
     updated_at: datetime
     blog: BlogCompactRead | None = None
     topic: TopicRead | None = None
-    article: ArticleRead | None = None
-    image: ImageRead | None = None
+    article: ArticleListItemRead | None = None
+    image: ImageCompactRead | None = None
     blogger_post: BloggerPostRead | None = None
-    audit_logs: list[AuditLogRead] = []
     publish_status: str = "pending"
     execution_status: str = "PENDING"
     telegram_delivery_status: str | None = None
     telegram_error_message: str | None = None
     telegram_error_code: int | None = None
     telegram_response_text: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class JobDetailRead(JobListItemRead):
+    error_logs: list = Field(default_factory=list)
+    raw_prompts: dict = Field(default_factory=dict)
+    raw_responses: dict = Field(default_factory=dict)
+    article: ArticleDetailRead | None = None
+    image: ImageRead | None = None
+    audit_logs: list[AuditLogRead] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
@@ -420,6 +461,55 @@ class DashboardMetrics(BaseModel):
     jobs_by_status: dict[str, int]
     processing_series: list[DashboardTimeseriesPoint]
     blog_summaries: list[DashboardBlogSummary]
+    review_queue_count: int = 0
+    high_risk_count: int = 0
+    auto_fix_applied_today: int = 0
+    learning_snapshot_age: int | None = None
+
+
+class ContentReviewActionRead(BaseModel):
+    id: int
+    action: str
+    actor: str
+    channel: str
+    result_payload: dict = Field(default_factory=dict)
+    created_at: datetime
+
+
+class ContentReviewItemRead(BaseModel):
+    id: int
+    blog_id: int
+    source_type: str
+    source_id: str
+    source_title: str
+    source_url: str | None = None
+    review_kind: str
+    content_hash: str
+    quality_score: int
+    risk_level: str
+    issues: list[dict] = Field(default_factory=list)
+    proposed_patch: dict = Field(default_factory=dict)
+    approval_status: str
+    apply_status: str
+    learning_state: str
+    source_updated_at: datetime | None = None
+    last_reviewed_at: datetime | None = None
+    last_applied_at: datetime | None = None
+    last_error: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    actions: list[ContentReviewActionRead] = Field(default_factory=list)
+
+
+class ContentOpsStatusRead(BaseModel):
+    review_queue_count: int
+    high_risk_count: int
+    auto_fix_applied_today: int
+    learning_snapshot_age: int | None = None
+    learning_paused: bool = False
+    learning_snapshot_path: str = ""
+    prompt_memory_path: str = ""
+    recent_reviews: list[ContentReviewItemRead] = Field(default_factory=list)
 
 
 class IntegratedChannelSummaryRead(BaseModel):
@@ -468,6 +558,62 @@ class CloudflarePromptBundleRead(BaseModel):
 
 class CloudflarePromptUpdate(BaseModel):
     content: str = Field(min_length=20)
+
+
+class CloudflarePromptSyncRequest(BaseModel):
+    execute: bool = True
+
+
+class CloudflarePromptSyncRead(BaseModel):
+    status: str
+    execute: bool
+    updated: int = 0
+    skipped: int = 0
+    files: list[dict] = Field(default_factory=list)
+    failures: list[dict] = Field(default_factory=list)
+
+
+class CloudflareGenerateRequest(BaseModel):
+    per_category: int = Field(default=2, ge=1, le=5)
+    category_slugs: list[str] = Field(default_factory=list)
+    status: str = Field(default="published", pattern="^(published|draft)$")
+    sync_sheet: bool = True
+
+
+class CloudflareGenerateItemRead(BaseModel):
+    status: str
+    keyword: str | None = None
+    title: str | None = None
+    post_id: str | None = None
+    slug: str | None = None
+    public_url: str | None = None
+    category_id: str | None = None
+    quality_gate: dict | None = None
+    error: str | None = None
+
+
+class CloudflareGenerateCategoryRead(BaseModel):
+    category_id: str
+    category_slug: str
+    category_name: str
+    requested: int = 0
+    created: int = 0
+    failed: int = 0
+    skipped: int = 0
+    items: list[CloudflareGenerateItemRead] = Field(default_factory=list)
+    topic_reject_breakdown: dict[str, int] = Field(default_factory=dict)
+    error: str | None = None
+
+
+class CloudflareGenerateRead(BaseModel):
+    status: str
+    created_count: int = 0
+    failed_count: int = 0
+    requested_categories: int = 0
+    per_category: int = 0
+    categories: list[CloudflareGenerateCategoryRead] = Field(default_factory=list)
+    quality_sheet_sync: dict | None = None
+    sheet_sync: dict | None = None
 
 
 class IntegratedArchiveItemRead(BaseModel):
@@ -673,6 +819,45 @@ class CloudflareR2MigrationRead(BaseModel):
     updated_count: int
     failed_count: int
     items: list[CloudflareR2MigrationItemRead] = Field(default_factory=list)
+
+
+class BloggerEditorialLabelBackfillRequest(BaseModel):
+    mode: str = Field(default="dry_run", pattern="^(dry_run|execute)$")
+    profile_keys: list[str] = Field(default_factory=lambda: ["korea_travel", "world_mystery"])
+
+
+class BloggerEditorialLabelBackfillItemRead(BaseModel):
+    article_id: int
+    blog_id: int
+    blog_name: str = ""
+    profile_key: str = ""
+    title: str
+    published_url: str = ""
+    blogger_post_id: str = ""
+    current_labels: list[str] = Field(default_factory=list)
+    target_labels: list[str] = Field(default_factory=list)
+    editorial_category_key: str | None = None
+    editorial_category_label: str | None = None
+    resolved_editorial_category_key: str | None = None
+    resolved_editorial_category_label: str | None = None
+    status: str
+    message: str
+
+
+class BloggerEditorialLabelBackfillRead(BaseModel):
+    status: str
+    mode: str
+    profile_keys: list[str] = Field(default_factory=list)
+    candidate_count: int = 0
+    processable_count: int = 0
+    skipped_count: int = 0
+    updated_count: int = 0
+    failed_count: int = 0
+    task_id: str | None = None
+    report_path: str | None = None
+    sync_results: list[dict] = Field(default_factory=list)
+    sheet_sync: dict | None = None
+    items: list[BloggerEditorialLabelBackfillItemRead] = Field(default_factory=list)
 
 
 class CloudflarePublishedPostBackfillRequest(BaseModel):
@@ -934,3 +1119,355 @@ class GoogleSheetSyncRead(BaseModel):
     mystery_rows: int
     travel_tab: str
     mystery_tab: str
+
+
+class ContentOverviewRowRead(BaseModel):
+    article_id: int
+    blog_id: int
+    profile: str
+    blog: str
+    title: str
+    url: str
+    content_category: str | None = None
+    category_key: str | None = None
+    topic_cluster: str
+    topic_angle: str
+    similarity_score: float | None = None
+    most_similar_url: str
+    seo_score: float | None = None
+    geo_score: float | None = None
+    media_state: str
+    quality_status: str
+    suggested_action: str
+    auto_fixable: bool
+    manual_review: bool
+    rewrite_attempts: int = 0
+    status: str
+    published_at: str = ""
+    updated_at: str = ""
+    last_audited_at: str
+
+
+class ContentOverviewResponse(BaseModel):
+    rows: list[ContentOverviewRowRead] = Field(default_factory=list)
+    total: int
+    page: int = 1
+    page_size: int = 50
+    profile: str | None = None
+    published_only: bool = False
+
+
+class ContentOverviewSyncRequest(BaseModel):
+    profile: str | None = None
+    published_only: bool = False
+    sync_sheet: bool = True
+
+
+class ContentOverviewSyncRead(BaseModel):
+    sheet_id: str
+    profile: str | None
+    tab: str
+    status: str
+    rows: int
+    columns: int
+
+
+class ContentOverviewRecalculateRead(BaseModel):
+    profile: str | None = None
+    published_only: bool = False
+    updated_articles: int
+    total_articles: int
+    status: str = "ok"
+
+
+class ModelPolicyRead(BaseModel):
+    large: list[str]
+    small: list[str]
+    deprecated: list[str]
+    defaults: dict[str, str]
+
+
+class ManagedChannelRead(BaseModel):
+    provider: str
+    channel_id: str
+    name: str
+    status: str
+    base_url: str | None = None
+    primary_category: str | None = None
+    purpose: str | None = None
+    posts_count: int = 0
+    categories_count: int = 0
+    prompts_count: int = 0
+    planner_supported: bool = False
+    analytics_supported: bool = False
+    prompt_flow_supported: bool = False
+
+
+class PromptFlowStepRead(BaseModel):
+    id: str
+    channel_id: str
+    provider: str
+    stage_type: str
+    stage_label: str
+    name: str
+    role_name: str | None = None
+    objective: str | None = None
+    prompt_template: str
+    provider_hint: str | None = None
+    provider_model: str | None = None
+    is_enabled: bool = True
+    is_required: bool = False
+    removable: bool = False
+    prompt_enabled: bool = True
+    editable: bool = True
+    structure_editable: bool = True
+    content_editable: bool = True
+    sort_order: int
+
+
+class PromptFlowRead(BaseModel):
+    channel_id: str
+    channel_name: str
+    provider: str
+    structure_editable: bool = True
+    content_editable: bool = True
+    available_stage_types: list[str] = Field(default_factory=list)
+    steps: list[PromptFlowStepRead] = Field(default_factory=list)
+
+
+class PromptFlowStepUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=100)
+    role_name: str | None = Field(default=None, min_length=2, max_length=255)
+    objective: str | None = None
+    prompt_template: str | None = None
+    provider_hint: str | None = None
+    provider_model: str | None = None
+    is_enabled: bool | None = None
+
+
+class PromptFlowReorderRequest(BaseModel):
+    ordered_ids: list[str] = Field(min_length=1)
+
+
+class PlannerCategoryRead(BaseModel):
+    id: int
+    key: str
+    name: str
+    weight: int
+    color: str | None = None
+    sort_order: int
+    is_active: bool
+
+
+class PlannerThemeRead(BaseModel):
+    id: int
+    key: str
+    name: str
+    weight: int
+    color: str | None = None
+    sort_order: int
+    is_active: bool
+
+
+class PlannerSlotCreate(BaseModel):
+    plan_day_id: int
+    theme_id: int
+    scheduled_for: str
+    brief_topic: str | None = None
+    brief_audience: str | None = None
+    brief_information_level: str | None = None
+    brief_extra_context: str | None = None
+
+
+class PlannerSlotUpdate(BaseModel):
+    theme_id: int | None = None
+    scheduled_for: str | None = None
+    slot_order: int | None = None
+    brief_topic: str | None = None
+    brief_audience: str | None = None
+    brief_information_level: str | None = None
+    brief_extra_context: str | None = None
+    status: str | None = None
+    error_message: str | None = None
+
+
+class PlannerSlotRead(BaseModel):
+    id: int
+    plan_day_id: int
+    theme_id: int | None = None
+    theme_key: str | None = None
+    theme_name: str | None = None
+    category_id: int | None = None
+    category_key: str | None = None
+    category_name: str | None = None
+    scheduled_for: str | None = None
+    slot_order: int
+    status: str
+    brief_topic: str | None = None
+    brief_audience: str | None = None
+    brief_information_level: str | None = None
+    brief_extra_context: str | None = None
+    article_id: int | None = None
+    job_id: int | None = None
+    error_message: str | None = None
+    last_run_at: str | None = None
+    article_title: str | None = None
+    article_seo_score: float | None = None
+    article_geo_score: float | None = None
+    article_similarity_score: float | None = None
+    article_most_similar_url: str | None = None
+    article_quality_status: str | None = None
+    article_publish_status: str | None = None
+    article_published_url: str | None = None
+
+
+class PlannerDayRead(BaseModel):
+    id: int
+    blog_id: int
+    plan_date: str
+    target_post_count: int
+    status: str
+    slot_count: int
+    theme_mix: dict[str, int]
+    category_mix: dict[str, int]
+    slots: list[PlannerSlotRead]
+
+
+class PlannerCalendarRead(BaseModel):
+    blog_id: int
+    blog_name: str
+    month: str
+    categories: list[PlannerCategoryRead] = Field(default_factory=list)
+    themes: list[PlannerThemeRead]
+    days: list[PlannerDayRead]
+
+
+class PlannerMonthPlanRequest(BaseModel):
+    blog_id: int
+    month: str
+    target_post_count: int | None = None
+    overwrite: bool = False
+
+
+class AnalyticsArticleFactRead(BaseModel):
+    id: int
+    blog_id: int
+    article_id: int | None = None
+    synced_post_id: int | None = None
+    published_at: str | None = None
+    title: str
+    theme_key: str | None = None
+    theme_name: str | None = None
+    category: str | None = None
+    seo_score: float | None = None
+    geo_score: float | None = None
+    similarity_score: float | None = None
+    most_similar_url: str | None = None
+    status: str | None = None
+    actual_url: str | None = None
+    source_type: str
+
+
+class AnalyticsThemeMonthlyStatRead(BaseModel):
+    id: int
+    blog_id: int
+    month: str
+    theme_key: str
+    theme_name: str
+    planned_posts: int
+    actual_posts: int
+    planned_share: float
+    actual_share: float
+    gap_share: float
+    avg_seo_score: float | None = None
+    avg_geo_score: float | None = None
+    avg_similarity_score: float | None = None
+    coverage_gap_score: float
+    next_month_weight_suggestion: int
+
+
+class AnalyticsBlogMonthlySummaryRead(BaseModel):
+    blog_id: int
+    blog_name: str
+    month: str
+    total_posts: int
+    avg_seo_score: float | None = None
+    avg_geo_score: float | None = None
+    avg_similarity_score: float | None = None
+    most_underused_theme_name: str | None = None
+    most_overused_theme_name: str | None = None
+    next_month_focus: str | None = None
+
+
+class AnalyticsBlogMonthlyListResponse(BaseModel):
+    month: str
+    items: list[AnalyticsBlogMonthlySummaryRead]
+
+
+class AnalyticsBlogMonthlyReportRead(BaseModel):
+    blog_id: int
+    blog_name: str
+    month: str
+    total_posts: int
+    avg_seo_score: float | None = None
+    avg_geo_score: float | None = None
+    avg_similarity_score: float | None = None
+    most_underused_theme_name: str | None = None
+    most_overused_theme_name: str | None = None
+    next_month_focus: str | None = None
+    report_summary: str | None = None
+    theme_stats: list[AnalyticsThemeMonthlyStatRead]
+    article_facts: list[AnalyticsArticleFactRead]
+
+
+class AnalyticsArticleFactListResponse(BaseModel):
+    blog_id: int
+    month: str
+    items: list[AnalyticsArticleFactRead]
+
+
+class AnalyticsThemeWeightApplyRequest(BaseModel):
+    month: str
+
+
+class AnalyticsThemeWeightApplyResponse(BaseModel):
+    blog_id: int
+    source_month: str
+    target_month: str
+    applied_weights: dict[str, int]
+
+
+class AnalyticsBackfillRead(BaseModel):
+    blog_months: int
+    generated_facts: int
+    synced_facts: int
+
+
+class AnalyticsIntegratedKpiRead(BaseModel):
+    total_posts: int
+    avg_seo_score: float | None = None
+    avg_geo_score: float | None = None
+    avg_similarity_score: float | None = None
+    most_underused_theme_name: str | None = None
+    most_overused_theme_name: str | None = None
+    recent_upload_count: int
+
+
+class AnalyticsThemeFilterOptionRead(BaseModel):
+    key: str
+    name: str
+
+
+class AnalyticsIntegratedRead(BaseModel):
+    month: str
+    range: str
+    selected_blog_id: int | None = None
+    kpis: AnalyticsIntegratedKpiRead
+    blogs: list[AnalyticsBlogMonthlySummaryRead]
+    report: AnalyticsBlogMonthlyReportRead | None = None
+    source_type: str
+    theme_key: str | None = None
+    category: str | None = None
+    status: str | None = None
+    available_themes: list[AnalyticsThemeFilterOptionRead] = []
+    available_categories: list[str] = []

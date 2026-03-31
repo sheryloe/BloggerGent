@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.entities import Article, Blog, BloggerPost, PostStatus, SyncedBloggerPost, TopicMemory
 from app.schemas.ai import TopicClassificationOutput, TopicDiscoveryItem
+from app.services.openai_usage_service import resolve_free_tier_text_model
 from app.services.providers.base import ProviderRuntimeError
 from app.services.providers.factory import get_runtime_config
 from app.services.settings_service import get_settings_map
@@ -622,7 +623,11 @@ def infer_topic_descriptor(
 
     try:
         if prefer_llm and runtime.provider_mode == "live" and runtime.openai_api_key:
-            output = _classify_with_openai(runtime.openai_api_key, runtime.openai_text_model, prompt)
+            output = _classify_with_openai(
+                runtime.openai_api_key,
+                resolve_free_tier_text_model(runtime.openai_text_model, allow_large=False),
+                prompt,
+            )
             return TopicDescriptor(
                 topic_cluster_key=_normalize_key(output.topic_cluster_key or output.topic_cluster_label, fallback="general-topic"),
                 topic_cluster_label=(output.topic_cluster_label or title).strip()[:255],

@@ -37,6 +37,8 @@ def upsert_topics(
             topic.source = source
             topic.topic_cluster_label = metadata.get("topic_cluster_label")
             topic.topic_angle_label = metadata.get("topic_angle_label")
+            topic.editorial_category_key = metadata.get("editorial_category_key")
+            topic.editorial_category_label = metadata.get("editorial_category_label")
             topic.distinct_reason = metadata.get("distinct_reason")
         else:
             topic = Topic(
@@ -48,6 +50,8 @@ def upsert_topics(
                 locale=blog.primary_language or "global",
                 topic_cluster_label=metadata.get("topic_cluster_label"),
                 topic_angle_label=metadata.get("topic_angle_label"),
+                editorial_category_key=metadata.get("editorial_category_key"),
+                editorial_category_label=metadata.get("editorial_category_label"),
                 distinct_reason=metadata.get("distinct_reason"),
             )
             db.add(topic)
