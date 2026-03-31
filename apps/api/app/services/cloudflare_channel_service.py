@@ -866,6 +866,10 @@ def _prompt_storage_keys(category_id: str, stage: str) -> dict[str, str]:
     prefix = f"cloudflare_prompt__{category_id}__{stage}"
     return {
         "content": f"{prefix}__content",
+        "name": f"{prefix}__name",
+        "objective": f"{prefix}__objective",
+        "is_enabled": f"{prefix}__is_enabled",
+        "provider_model": f"{prefix}__provider_model",
         "version": f"{prefix}__version",
         "created_at": f"{prefix}__created_at",
         "updated_at": f"{prefix}__updated_at",
@@ -990,6 +994,10 @@ def get_cloudflare_prompt_bundle(db: Session) -> dict:
         for stage in DEFAULT_PROMPT_STAGES:
             keys = _prompt_storage_keys(str(category["id"]), stage)
             content = values.get(keys["content"]) or _default_prompt_for_stage(category, stage)
+            display_name = (values.get(keys["name"]) or "").strip() or f"{category['name']} · {stage}"
+            objective = (values.get(keys["objective"]) or "").strip() or f"{category['name']} 카테고리용 프롬프트"
+            is_enabled = str(values.get(keys["is_enabled"]) or "true").strip().lower() not in {"false", "0", "off", "no"}
+            provider_model = (values.get(keys["provider_model"]) or "").strip() or None
             version = int(str(values.get(keys["version"]) or "1").strip() or "1")
             created_at = values.get(keys["created_at"]) or _utc_now_iso()
             updated_at = values.get(keys["updated_at"]) or created_at
@@ -1000,8 +1008,12 @@ def get_cloudflare_prompt_bundle(db: Session) -> dict:
                     "categorySlug": category["slug"],
                     "categoryName": category["name"],
                     "stage": stage,
+                    "name": display_name,
+                    "objective": objective,
+                    "isEnabled": is_enabled,
                     "currentVersion": version,
                     "content": content,
+                    "providerModel": provider_model,
                     "createdAt": created_at,
                     "updatedAt": updated_at,
                 }
@@ -1013,7 +1025,17 @@ def get_cloudflare_prompt_bundle(db: Session) -> dict:
     }
 
 
-def save_cloudflare_prompt(db: Session, *, category_key: str, stage: str, content: str) -> dict:
+def save_cloudflare_prompt(
+    db: Session,
+    *,
+    category_key: str,
+    stage: str,
+    content: str,
+    name: str | None = None,
+    objective: str | None = None,
+    is_enabled: bool | None = None,
+    provider_model: str | None = None,
+) -> dict:
     normalized_category_key = category_key.strip()
     normalized_stage = stage.strip().lower()
     if normalized_stage not in DEFAULT_PROMPT_STAGES:
@@ -1040,6 +1062,10 @@ def save_cloudflare_prompt(db: Session, *, category_key: str, stage: str, conten
         db,
         {
             keys["content"]: content,
+            keys["name"]: (name or "").strip(),
+            keys["objective"]: (objective or "").strip(),
+            keys["is_enabled"]: "true" if is_enabled is not False else "false",
+            keys["provider_model"]: (provider_model or "").strip(),
             keys["version"]: str(current_version + 1),
             keys["created_at"]: created_at,
             keys["updated_at"]: updated_at,
@@ -1051,8 +1077,12 @@ def save_cloudflare_prompt(db: Session, *, category_key: str, stage: str, conten
         "categorySlug": category["slug"],
         "categoryName": category["name"],
         "stage": normalized_stage,
+        "name": (name or "").strip() or f"{category['name']} · {normalized_stage}",
+        "objective": (objective or "").strip() or f"{category['name']} 카테고리용 프롬프트",
+        "isEnabled": is_enabled is not False,
         "currentVersion": current_version + 1,
         "content": content,
+        "providerModel": (provider_model or "").strip() or None,
         "createdAt": created_at,
         "updatedAt": updated_at,
     }

@@ -634,10 +634,16 @@ export function PlannerManager({ blogs }: PlannerManagerProps) {
                           </div>
 
                           <div className="mt-3 space-y-1 text-xs text-slate-500">
-                            <p>{slot.articleTitle ?? slot.briefTopic ?? "제목 미설정"}</p>
+                            <p className="line-clamp-2 break-words">{slot.articleTitle ?? slot.briefTopic ?? "제목 미설정"}</p>
                             <p>job #{slot.jobId ?? "-"} / article #{slot.articleId ?? "-"}</p>
                             {slot.articleMostSimilarUrl ? (
-                              <a href={slot.articleMostSimilarUrl} target="_blank" rel="noreferrer" className="block break-all text-indigo-600 hover:underline">
+                              <a
+                                href={slot.articleMostSimilarUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                title={slot.articleMostSimilarUrl}
+                                className="block truncate text-indigo-600 hover:underline"
+                              >
                                 가장 유사한 URL: {slot.articleMostSimilarUrl}
                               </a>
                             ) : null}
@@ -848,7 +854,7 @@ export function PlannerManager({ blogs }: PlannerManagerProps) {
           </div>
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_430px]">
+        <section className="grid gap-6 xl:grid-cols-[minmax(0,1.75fr)_440px] 2xl:grid-cols-[minmax(0,1.9fr)_460px]">
           <div className="space-y-4">
             <div className="rounded-[28px] bg-white p-5 shadow-sm">
               <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">

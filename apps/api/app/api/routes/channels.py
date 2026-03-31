@@ -107,13 +107,13 @@ def _build_cloudflare_flow(db: Session, channel_id: str) -> PromptFlowRead:
             provider="cloudflare",
             stage_type=template.get("stage", "prompt"),
             stage_label=template.get("stage", "prompt"),
-            name=f"{template.get('categoryName')} · {template.get('stage')}",
+            name=template.get("name") or f"{template.get('categoryName')} · {template.get('stage')}",
             role_name=None,
-            objective=f"{template.get('categoryName')} 카테고리용 프롬프트",
+            objective=template.get("objective") or f"{template.get('categoryName')} 카테고리용 프롬프트",
             prompt_template=template.get("content", ""),
             provider_hint="cloudflare",
-            provider_model=None,
-            is_enabled=True,
+            provider_model=template.get("providerModel"),
+            is_enabled=bool(template.get("isEnabled", True)),
             is_required=False,
             removable=False,
             prompt_enabled=True,
@@ -254,7 +254,16 @@ def update_channel_prompt_flow_step(
     category_slug, stage = step_id.split("::", 1)
     if payload.prompt_template is None:
         raise HTTPException(status_code=400, detail="Prompt content is required")
-    save_cloudflare_prompt(db, category_key=category_slug, stage=stage, content=payload.prompt_template)
+    save_cloudflare_prompt(
+        db,
+        category_key=category_slug,
+        stage=stage,
+        content=payload.prompt_template,
+        name=payload.name,
+        objective=payload.objective,
+        is_enabled=payload.is_enabled,
+        provider_model=payload.provider_model,
+    )
     return _build_cloudflare_flow(db, channel_id)
 
 

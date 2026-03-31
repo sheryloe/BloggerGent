@@ -8,6 +8,8 @@ import { ContentOverviewManager } from "@/components/dashboard/content-overview-
 import { PageModeGuideCard } from "@/components/dashboard/page-mode-guide-card";
 import { getContentOpsReviews, getContentOpsStatus, getContentOverview } from "@/lib/api";
 
+const isStaticPreview = process.env.GITHUB_ACTIONS === "true";
+
 function firstParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -68,6 +70,20 @@ export default async function ContentOpsPage({
 }: {
   searchParams?: Record<string, string | string[] | undefined>;
 }) {
+  if (isStaticPreview) {
+    return (
+      <div className="space-y-6">
+        <PageModeGuideCard
+          title="콘텐츠 운영 프리뷰"
+          purpose="GitHub Pages에서는 플래너·분석·설정 중심 프리뷰만 제공합니다."
+          whenToUse="실운영에서는 API가 연결된 대시보드에서 작업 큐와 리뷰 화면을 사용하세요."
+          dataSource="정적 프리뷰 모드"
+          caution="이 페이지는 정적 배포용 안내 화면입니다."
+        />
+      </div>
+    );
+  }
+
   const hasTab = Boolean(firstParam(searchParams?.tab));
   const tab = normalizeTab(searchParams?.tab);
 

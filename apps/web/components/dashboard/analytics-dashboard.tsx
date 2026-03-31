@@ -323,9 +323,9 @@ export function AnalyticsDashboard({ blogs, channels }: AnalyticsDashboardProps)
               <div className="mt-4 space-y-3">
                 {cloudflarePosts.slice(0, 5).map((post, index) => (
                   <div key={`${post.title}-${index}`} className="rounded-[20px] bg-slate-50 p-3">
-                    <p className="text-sm font-medium text-slate-900">{post.title}</p>
+                    <p className="line-clamp-2 text-sm font-medium text-slate-900">{post.title}</p>
                     <p className="mt-1 text-xs text-slate-500">{post.category_slug ?? "미분류"} / {post.status ?? "상태 없음"}</p>
-                    {post.published_url ? <a href={post.published_url} target="_blank" rel="noreferrer" className="mt-2 block break-all text-xs text-indigo-600 hover:underline">{post.published_url}</a> : null}
+                    {post.published_url ? <a href={post.published_url} target="_blank" rel="noreferrer" title={post.published_url} className="mt-2 block truncate text-xs text-indigo-600 hover:underline">{post.published_url}</a> : null}
                   </div>
                 ))}
               </div>
@@ -352,8 +352,8 @@ export function AnalyticsDashboard({ blogs, channels }: AnalyticsDashboardProps)
                 {selectedDayFacts.length ? selectedDayFacts.map((fact) => (
                   <article key={fact.id} className="rounded-[22px] bg-slate-50 p-4">
                     <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">{fact.title}</p>
+                      <div className="min-w-0">
+                        <p className="line-clamp-2 text-sm font-semibold text-slate-900">{fact.title}</p>
                         <p className="mt-1 text-xs text-slate-500">{fact.category ?? fact.themeName ?? '미분류'} / {fact.status ?? '상태 없음'}</p>
                       </div>
                       <span className={`inline-flex rounded-full px-3 py-1 text-[11px] font-medium ${sourceTone(fact.sourceType)}`}>{fact.sourceType === 'generated' ? '앱 생성' : '동기화'}</span>
@@ -363,7 +363,7 @@ export function AnalyticsDashboard({ blogs, channels }: AnalyticsDashboardProps)
                       <ScoreBadge score={fact.geoScore} label="GEO" />
                       <ScoreBadge score={fact.similarityScore} label="유사도" />
                     </div>
-                    {fact.actualUrl ? <a href={fact.actualUrl} target="_blank" rel="noreferrer" className="mt-3 block break-all text-xs text-indigo-600 hover:underline">{fact.actualUrl}</a> : null}
+                    {fact.actualUrl ? <a href={fact.actualUrl} target="_blank" rel="noreferrer" title={fact.actualUrl} className="mt-3 block truncate text-xs text-indigo-600 hover:underline">{fact.actualUrl}</a> : null}
                   </article>
                 )) : <EmptyBlock title="선택 날짜 데이터가 없습니다" body="월간 캔버스에서 다른 날짜를 선택하세요." />}
               </div>
@@ -489,7 +489,7 @@ export function AnalyticsDashboard({ blogs, channels }: AnalyticsDashboardProps)
           {status ? <p className="mt-3 text-sm text-indigo-600">{status}</p> : null}
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_430px]">
+        <section className="grid gap-6 xl:grid-cols-[minmax(0,1.75fr)_440px] 2xl:grid-cols-[minmax(0,1.9fr)_460px]">
           <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <MiniMetric label="총 게시" value={`${payload?.kpis.totalPosts ?? 0}건`} />
