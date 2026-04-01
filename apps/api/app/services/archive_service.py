@@ -5,8 +5,39 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.entities import Article, Blog, SyncedBloggerPost
-from app.services.storage_service import build_public_image_variants
+from app.models.entities import Article, Blog, Image, SyncedBloggerPost
+
+
+def _resolve_archive_thumbnail_url(image: Image | None) -> str | None:
+    if not image:
+        return None
+
+    metadata = image.image_metadata if isinstance(image.image_metadata, dict) else {}
+    delivery = metadata.get("delivery") if isinstance(metadata, dict) else None
+
+    if isinstance(delivery, dict):
+        cloudflare_meta = delivery.get("cloudflare")
+        if isinstance(cloudflare_meta, dict):
+            original_url = str(cloudflare_meta.get("original_url") or "").strip()
+            if original_url:
+                return original_url
+
+        cloudinary_meta = delivery.get("cloudinary")
+        if isinstance(cloudinary_meta, dict):
+            original_url = str(cloudinary_meta.get("secure_url_original") or "").strip()
+            if original_url:
+                return original_url
+
+        local_public_url = str(delivery.get("local_public_url") or "").strip()
+        if local_public_url:
+            return local_public_url
+
+        public_url = str(delivery.get("public_url") or "").strip()
+        if public_url:
+            return public_url
+
+    public_url = str(image.public_url or "").strip()
+    return public_url or None
 
 
 def _coerce_sort_datetime(value: datetime | None) -> datetime:
@@ -31,16 +62,7 @@ def _generated_archive_item(article: Article) -> dict:
         "blog_id": article.blog_id,
         "title": article.title,
         "excerpt": article.excerpt,
-        "thumbnail_url": (
-            build_public_image_variants(
-                public_url=article.image.public_url,
-                image_metadata=article.image.image_metadata,
-                width=article.image.width,
-                height=article.image.height,
-            )["thumb_src"]
-            if article.image
-            else None
-        ),
+        "thumbnail_url": _resolve_archive_thumbnail_url(article.image),
         "labels": article.labels or [],
         "published_url": blogger_post.published_url if blogger_post else None,
         "published_at": blogger_post.published_at if blogger_post else None,

@@ -1,4 +1,4 @@
-A realistic cinematic documentary cover image for "{keyword}" for the blog "{blog_name}".
+Create one final English hero image prompt for a documentary-style mystery collage for "{blog_name}".
 
 Story context:
 - Title: {article_title}
@@ -7,6 +7,9 @@ Story context:
 {article_context}
 
 Visual direction:
+- exactly 9 distinct panels in a clear 3x3 grid
+- visible white gutters between panels
+- a visually dominant center panel
 - believable real-world scene tied to the mystery
 - documentary photography style
 - eerie or solitary atmosphere
@@ -15,6 +18,7 @@ Visual direction:
 - subtle tension without fantasy excess
 - no gore
 - no text overlays
+- no logos
 - premium editorial composition
 - high realism with a 50mm lens feel
 

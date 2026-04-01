@@ -1,10 +1,10 @@
 from app.schemas.ai import ArticleGenerationOutput, FAQItem, TopicDiscoveryItem, TopicDiscoveryPayload
 from app.schemas.api import (
-    ArticleRead,
+    ArticleDetailRead,
     DashboardMetrics,
     DiscoveryRunResponse,
     JobCreate,
-    JobRead,
+    JobDetailRead,
     JobRetryResponse,
     PromptTemplateRead,
     PromptTemplateUpdate,
@@ -12,6 +12,9 @@ from app.schemas.api import (
     SettingUpdate,
     TopicRead,
 )
+
+ArticleRead = ArticleDetailRead
+JobRead = JobDetailRead
 
 __all__ = [
     "ArticleGenerationOutput",

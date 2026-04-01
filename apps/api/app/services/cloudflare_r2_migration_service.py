@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.entities import Article, LogLevel, PostStatus
+from app.services.article_service import ensure_article_editorial_labels
 from app.services.audit_service import add_log
 from app.services.html_assembler import assemble_article_html
 from app.services.providers.base import ProviderRuntimeError
@@ -14,6 +15,8 @@ from app.services.providers.factory import get_blogger_provider
 from app.services.related_posts import find_related_articles
 from app.services.settings_service import get_settings_map
 from app.services.storage_service import (
+    _resolve_cloudflare_integration_upload_configuration,
+    _resolve_cloudflare_r2_configuration,
     build_cloudflare_r2_preview_url,
     delete_cloudflare_r2_asset,
     save_html,
@@ -21,6 +24,16 @@ from app.services.storage_service import (
 )
 
 MIGRATION_STAGE = "cloudflare_r2_image_migration"
+
+
+def _resolve_cloudflare_migration_configuration(values: dict[str, str]) -> tuple[str, str, bool]:
+    account_id, bucket, access_key_id, secret_access_key, public_base_url, prefix = _resolve_cloudflare_r2_configuration(values)
+    integration_base_url, integration_token = _resolve_cloudflare_integration_upload_configuration(values)
+
+    direct_ready = bool(account_id and bucket and access_key_id and secret_access_key and public_base_url)
+    integration_ready = bool(bucket and public_base_url and integration_base_url and integration_token)
+
+    return public_base_url, prefix, (direct_ready or integration_ready)
 
 
 def _parse_remote_datetime(value: str | None):
@@ -40,11 +53,19 @@ def _article_uses_cloudflare_r2(article: Article) -> bool:
     image = article.image
     if not image:
         return False
+    rendered_html = f"{article.assembled_html or ''}\n{article.html_article or ''}"
+    image_filename = Path((image.file_path or "")).name.strip()
+    if not image_filename and (image.public_url or "").strip():
+        image_filename = Path((image.public_url or "").split("?")[0]).name.strip()
+
+    has_cloudflare_transform = "/cdn-cgi/image/" in (image.public_url or "")
+    if not has_cloudflare_transform and image_filename:
+        has_cloudflare_transform = "/cdn-cgi/image/" in rendered_html and image_filename in rendered_html
     metadata = image.image_metadata or {}
     delivery = metadata.get("delivery") if isinstance(metadata, dict) else {}
     if isinstance(delivery, dict) and str(delivery.get("provider") or "").strip().lower() == "cloudflare_r2":
-        return True
-    return "/cdn-cgi/image/" in (image.public_url or "")
+        return has_cloudflare_transform
+    return has_cloudflare_transform
 
 
 def _current_image_provider(article: Article) -> str:
@@ -204,15 +225,7 @@ def run_cloudflare_r2_image_migration(
 ) -> dict:
     candidates = _load_candidates(db, blog_ids=blog_ids, limit=limit)
     values = get_settings_map(db)
-    public_base_url = (values.get("cloudflare_r2_public_base_url") or "").strip()
-    prefix = (values.get("cloudflare_r2_prefix") or "assets/images").strip().strip("/")
-    cloudflare_ready = bool(
-        (values.get("cloudflare_account_id") or "").strip()
-        and (values.get("cloudflare_r2_bucket") or "").strip()
-        and (values.get("cloudflare_r2_access_key_id") or "").strip()
-        and (values.get("cloudflare_r2_secret_access_key") or "").strip()
-        and public_base_url
-    )
+    public_base_url, prefix, cloudflare_ready = _resolve_cloudflare_migration_configuration(values)
     execute_mode = mode == "execute"
 
     provider_cache: dict[int, tuple[bool, Any | None, str]] = {}
@@ -273,6 +286,7 @@ def run_cloudflare_r2_image_migration(
             commit_warning = ""
 
             try:
+                labels = ensure_article_editorial_labels(db, article)
                 new_public_url, upload_payload, delivery_meta = upload_binary_to_cloudflare_r2(
                     db,
                     filename=file_path.name,
@@ -293,7 +307,7 @@ def run_cloudflare_r2_image_migration(
                     post_id=blogger_post.blogger_post_id,
                     title=article.title,
                     content=assembled_html,
-                    labels=list(article.labels or []),
+                    labels=labels,
                     meta_description=article.meta_description,
                 )
                 updated_remote = True
@@ -334,7 +348,7 @@ def run_cloudflare_r2_image_migration(
                             post_id=blogger_post.blogger_post_id,
                             title=article.title,
                             content=old_remote_html,
-                            labels=list(article.labels or []),
+                            labels=labels,
                             meta_description=article.meta_description,
                         )
                     except Exception as revert_exc:  # noqa: BLE001

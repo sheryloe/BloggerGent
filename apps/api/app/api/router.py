@@ -1,15 +1,37 @@
 from fastapi import APIRouter
 
-from app.api.routes import admin, archive, articles, blogs, cloudflare, dashboard, google, jobs, prompts, settings, telegram, topics, training
+from app.api.routes import (
+    admin,
+    analytics,
+    archive,
+    articles,
+    blogs,
+    channels,
+    cloudflare,
+    content_ops,
+    dashboard,
+    google,
+    jobs,
+    planner,
+    prompts,
+    settings,
+    telegram,
+    topics,
+    training,
+)
 
 api_router = APIRouter()
 api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
 api_router.include_router(archive.router, prefix="/archive", tags=["archive"])
+api_router.include_router(channels.router)
 api_router.include_router(blogs.router, prefix="/blogs", tags=["blogs"])
 api_router.include_router(topics.router, prefix="/topics", tags=["topics"])
 api_router.include_router(jobs.router, prefix="/jobs", tags=["jobs"])
 api_router.include_router(articles.router, prefix="/articles", tags=["articles"])
+api_router.include_router(content_ops.router, prefix="/content-ops", tags=["content-ops"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
+api_router.include_router(planner.router)
+api_router.include_router(analytics.router)
 api_router.include_router(cloudflare.router, prefix="/cloudflare", tags=["cloudflare"])
 api_router.include_router(google.router, prefix="/google", tags=["google"])
 api_router.include_router(prompts.router, prefix="/prompts", tags=["prompts"])

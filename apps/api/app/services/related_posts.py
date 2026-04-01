@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+import html
 import re
 from difflib import SequenceMatcher
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import settings
 from app.models.entities import Article, BloggerPost, Image, Job, JobStatus, SyncedBloggerPost
-from app.services.storage_service import build_public_image_variants
 from app.utils.embeddings import cosine_similarity, text_to_embedding
 
 
@@ -29,9 +30,11 @@ def _normalize_text(value: str | None) -> str:
 
 
 def _urls_match(left: str | None, right: str | None) -> bool:
-    if not left or not right:
+    normalized_left = _normalize_link_key(left)
+    normalized_right = _normalize_link_key(right)
+    if not normalized_left or not normalized_right:
         return False
-    return left.rstrip("/") == right.rstrip("/")
+    return normalized_left == normalized_right
 
 
 def _titles_match(left: str | None, right: str | None) -> bool:
@@ -42,6 +45,76 @@ def _titles_match(left: str | None, right: str | None) -> bool:
     if normalized_left == normalized_right:
         return True
     return SequenceMatcher(a=normalized_left, b=normalized_right).ratio() >= 0.94
+
+
+def _is_public_related_link(link: str | None) -> bool:
+    normalized = (link or "").strip()
+    if not normalized or normalized == "#":
+        return False
+
+    lowered = normalized.lower()
+    if not (lowered.startswith("http://") or lowered.startswith("https://")):
+        return False
+    if "localhost" in lowered or "127.0.0.1" in lowered or "mock-blogger.local" in lowered:
+        return False
+
+    parsed = urlsplit(normalized)
+    if not parsed.netloc:
+        return False
+    if parsed.path.strip() in {"", "/"} and not parsed.query and not parsed.fragment:
+        return False
+    return True
+
+
+def _normalize_link_key(link: str | None) -> str:
+    if not _is_public_related_link(link):
+        return ""
+    parsed = urlsplit((link or "").strip())
+    hostname = (parsed.netloc or "").strip().lower()
+    if hostname.startswith("www."):
+        hostname = hostname[4:]
+    path = unquote(parsed.path or "/").strip() or "/"
+    path = re.sub(r"/+", "/", path)
+    if path != "/":
+        path = path.rstrip("/")
+    return f"{hostname}{path}"
+
+
+def _normalize_topic_value(value: str | None) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip().lower())
+
+
+def _same_cluster_and_angle(left: Article, right: Article) -> bool:
+    left_topic = getattr(left, "topic", None)
+    right_topic = getattr(right, "topic", None)
+    if not left_topic or not right_topic:
+        return False
+
+    left_cluster = _normalize_topic_value(left_topic.topic_cluster_label)
+    right_cluster = _normalize_topic_value(right_topic.topic_cluster_label)
+    left_angle = _normalize_topic_value(left_topic.topic_angle_label)
+    right_angle = _normalize_topic_value(right_topic.topic_angle_label)
+    if not left_cluster or not right_cluster or not left_angle or not right_angle:
+        return False
+    return left_cluster == right_cluster and left_angle == right_angle
+
+
+def _related_source_rank(payload: dict[str, Any]) -> int:
+    return 1 if str(payload.get("source") or "").strip().lower() == "generated" else 0
+
+
+def _should_replace_related_payload(candidate: dict[str, Any], current: dict[str, Any]) -> bool:
+    candidate_rank = (
+        _related_source_rank(candidate),
+        float(candidate.get("score") or 0.0),
+        str(candidate.get("published_at") or ""),
+    )
+    current_rank = (
+        _related_source_rank(current),
+        float(current.get("score") or 0.0),
+        str(current.get("published_at") or ""),
+    )
+    return candidate_rank > current_rank
 
 
 def _related_payload(
@@ -67,6 +140,36 @@ def _related_payload(
     }
 
 
+def _resolve_related_thumbnail(image: Image | None) -> str:
+    if not image:
+        return ""
+
+    metadata = image.image_metadata if isinstance(image.image_metadata, dict) else {}
+    delivery = metadata.get("delivery") if isinstance(metadata, dict) else None
+    if isinstance(delivery, dict):
+        cloudflare_meta = delivery.get("cloudflare")
+        if isinstance(cloudflare_meta, dict):
+            original_url = str(cloudflare_meta.get("original_url") or "").strip()
+            if original_url:
+                return original_url
+
+        cloudinary_meta = delivery.get("cloudinary")
+        if isinstance(cloudinary_meta, dict):
+            original_url = str(cloudinary_meta.get("secure_url_original") or "").strip()
+            if original_url:
+                return original_url
+
+        local_public_url = str(delivery.get("local_public_url") or "").strip()
+        if local_public_url:
+            return local_public_url
+
+        public_url = str(delivery.get("public_url") or "").strip()
+        if public_url:
+            return public_url
+
+    return str(image.public_url or "").strip()
+
+
 def find_related_articles(db: Session, article: Article, limit: int | None = None) -> list[dict]:
     limit = limit or settings.related_post_count
     generated_query = (
@@ -75,7 +178,7 @@ def find_related_articles(db: Session, article: Article, limit: int | None = Non
         .outerjoin(Image, Image.article_id == Article.id)
         .outerjoin(BloggerPost, BloggerPost.article_id == Article.id)
         .where(Job.status == JobStatus.COMPLETED, Article.blog_id == article.blog_id, Article.id != article.id)
-        .options(selectinload(Article.image), selectinload(Article.blogger_post))
+        .options(selectinload(Article.image), selectinload(Article.blogger_post), selectinload(Article.topic))
         .order_by(Article.created_at.desc())
     )
     synced_query = (
@@ -96,6 +199,8 @@ def find_related_articles(db: Session, article: Article, limit: int | None = Non
     ranked: list[tuple[float, dict[str, Any]]] = []
 
     for candidate in generated_candidates:
+        if _same_cluster_and_angle(article, candidate):
+            continue
         candidate_embedding = text_to_embedding(f"{candidate.title} {candidate.excerpt}")
         embedding_score = cosine_similarity(base_embedding, candidate_embedding)
         label_score = _label_similarity(article.labels or [], candidate.labels or [])
@@ -108,16 +213,7 @@ def find_related_articles(db: Session, article: Article, limit: int | None = Non
                     title=candidate.title,
                     slug=candidate.slug,
                     excerpt=candidate.excerpt,
-                    thumbnail=(
-                        build_public_image_variants(
-                            public_url=candidate.image.public_url,
-                            image_metadata=candidate.image.image_metadata,
-                            width=candidate.image.width,
-                            height=candidate.image.height,
-                        )["card_src"]
-                        if candidate.image
-                        else ""
-                    ),
+                    thumbnail=_resolve_related_thumbnail(candidate.image),
                     link=candidate.blogger_post.published_url if candidate.blogger_post else "#",
                     source="generated",
                     published_at=candidate.blogger_post.published_at if candidate.blogger_post else None,
@@ -154,8 +250,102 @@ def find_related_articles(db: Session, article: Article, limit: int | None = Non
             )
         )
 
-    ranked.sort(key=lambda item: item[0], reverse=True)
-    return [payload for _, payload in ranked[:limit]]
+    ranked.sort(
+        key=lambda item: (
+            item[0],
+            _related_source_rank(item[1]),
+            str(item[1].get("published_at") or ""),
+        ),
+        reverse=True,
+    )
+
+    selected: list[dict[str, Any]] = []
+    seen_links: dict[str, int] = {}
+    seen_titles: dict[str, int] = {}
+
+    for _, payload in ranked:
+        link_key = _normalize_link_key(payload.get("link"))
+        if not link_key:
+            continue
+
+        normalized_title = _normalize_text(payload.get("title"))
+        existing_index = seen_links.get(link_key)
+        if existing_index is None and normalized_title:
+            existing_index = seen_titles.get(normalized_title)
+
+        if existing_index is not None:
+            if _should_replace_related_payload(payload, selected[existing_index]):
+                selected[existing_index] = payload
+                seen_links[link_key] = existing_index
+                if normalized_title:
+                    seen_titles[normalized_title] = existing_index
+            continue
+
+        seen_links[link_key] = len(selected)
+        if normalized_title:
+            seen_titles[normalized_title] = len(selected)
+        selected.append(payload)
+
+    if len(selected) < limit:
+        fallback_payloads: list[dict[str, Any]] = []
+
+        for candidate in generated_candidates:
+            candidate_link = candidate.blogger_post.published_url if candidate.blogger_post else "#"
+            if _urls_match(candidate_link, current_url) or _titles_match(candidate.title, article.title):
+                continue
+            fallback_payloads.append(
+                _related_payload(
+                    score=0.0,
+                    title=candidate.title,
+                    slug=candidate.slug,
+                    excerpt=candidate.excerpt,
+                    thumbnail=_resolve_related_thumbnail(candidate.image),
+                    link=candidate_link,
+                    source="generated",
+                    published_at=candidate.blogger_post.published_at if candidate.blogger_post else None,
+                )
+            )
+
+        for candidate in synced_candidates:
+            if _urls_match(candidate.url, current_url) or _titles_match(candidate.title, article.title):
+                continue
+            fallback_payloads.append(
+                _related_payload(
+                    score=0.0,
+                    title=candidate.title,
+                    excerpt=candidate.excerpt_text,
+                    thumbnail=candidate.thumbnail_url or "",
+                    link=candidate.url or "#",
+                    source="synced",
+                    published_at=candidate.published_at,
+                )
+            )
+
+        fallback_payloads.sort(
+            key=lambda payload: (
+                _related_source_rank(payload),
+                str(payload.get("published_at") or ""),
+            ),
+            reverse=True,
+        )
+
+        for payload in fallback_payloads:
+            if len(selected) >= limit:
+                break
+            link_key = _normalize_link_key(payload.get("link"))
+            if not link_key:
+                continue
+            normalized_title = _normalize_text(payload.get("title"))
+            if link_key in seen_links:
+                continue
+            if normalized_title and normalized_title in seen_titles:
+                continue
+            seen_links[link_key] = len(selected)
+            if normalized_title:
+                seen_titles[normalized_title] = len(selected)
+            selected.append(payload)
+
+    return selected[:limit]
 
 
 def render_related_cards_html(
@@ -170,27 +360,40 @@ def render_related_cards_html(
     heading_color = "#f8fafc" if category == "mystery" else "#0f172a"
     body_color = "#e5e7eb" if category == "mystery" else "#475569"
 
-    if not related_posts:
+    filtered_posts: list[dict[str, Any]] = []
+    seen_links: set[str] = set()
+    for post in related_posts:
+        link_key = _normalize_link_key(str(post.get("link") or ""))
+        if not link_key or link_key in seen_links:
+            continue
+        seen_links.add(link_key)
+        filtered_posts.append(post)
+
+    if not filtered_posts:
         return (
             f"<section class='related-posts'><h2>{section_title}</h2>"
             "<p>Relevant posts will appear here once this blog has more published content.</p></section>"
         )
 
     cards = []
-    for post in related_posts:
+    for post in filtered_posts:
+        title = html.escape(str(post.get("title") or ""), quote=True)
+        excerpt = html.escape(str(post.get("excerpt") or ""), quote=True)
+        link = html.escape(str(post.get("link") or ""), quote=True)
+        thumbnail_url = html.escape(str(post.get("thumbnail") or ""), quote=True)
         thumbnail = (
-            f"<img src='{post['thumbnail']}' alt='{post['title']}' "
+            f"<img src='{thumbnail_url}' alt='{title}' "
             "loading='lazy' decoding='async' style='width:100%;height:120px;object-fit:cover;border-radius:14px;' />"
-            if post["thumbnail"]
+            if post.get("thumbnail")
             else ""
         )
         cards.append(
             "<a href='{link}' style='display:block;text-decoration:none;color:#1f2937;'>"
             f"<div style='border:1px solid {card_border};border-radius:18px;padding:14px;background:{card_background};backdrop-filter:blur(8px);'>"
             f"{thumbnail}"
-            f"<h3 style='font-size:18px;margin:12px 0 8px;color:{heading_color};'>{post['title']}</h3>"
-            f"<p style='font-size:14px;line-height:1.7;color:{body_color};'>{post['excerpt']}</p>"
-            "</div></a>".format(link=post["link"])
+            f"<h3 style='font-size:18px;margin:12px 0 8px;color:{heading_color};'>{title}</h3>"
+            f"<p style='font-size:14px;line-height:1.7;color:{body_color};'>{excerpt}</p>"
+            "</div></a>".format(link=link)
         )
 
     return (

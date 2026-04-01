@@ -36,3 +36,8 @@ class ArticleGenerationOutput(BaseModel):
     html_article: str = Field(min_length=200)
     faq_section: list[FAQItem] = Field(min_length=2, max_length=6)
     image_collage_prompt: str = Field(min_length=40)
+    inline_collage_prompt: str | None = None
+    infographic_prompt: str | None = None
+    trading_chart_prompt: str | None = None
+    market_chart_prompt: str | None = None
+    crypto_chart_prompt: str | None = None

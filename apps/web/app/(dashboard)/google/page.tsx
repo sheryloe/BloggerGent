@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getBlogs, getBloggerConfig, getGoogleBlogOverview, getSyncedBloggerPosts } from "@/lib/api";
 
+const isStaticPreview = process.env.GITHUB_ACTIONS === "true";
 const POSTS_PAGE_SIZE = 20;
 
 function formatNumber(value: number | undefined | null) {
@@ -97,6 +98,14 @@ export default async function GoogleDataPage({
 }: {
   searchParams?: Record<string, string | string[] | undefined>;
 }) {
+  if (isStaticPreview) {
+    return (
+      <div className="rounded-[28px] border border-slate-200 bg-white p-6 text-sm leading-6 text-slate-500 shadow-sm">
+        GitHub Pages 프리뷰에서는 Google 연동 상세 화면을 정적으로 생략합니다. 실제 운영 환경에서는 API가 연결된 대시보드에서 확인하세요.
+      </div>
+    );
+  }
+
   const [blogs, bloggerConfig] = await Promise.all([getBlogs(), getBloggerConfig()]);
   const blogPayloads = await Promise.all(
     blogs.map(async (blog) => {

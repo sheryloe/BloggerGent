@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
 from app.models.entities import AIUsageEvent, Article, AuditLog, Blog, BloggerPost, Image, Job, PostStatus, PublishMode, PublishQueueItem, Topic
-from app.schemas.api import GeneratedDataResetResponse, JobCreate, JobRead, JobRetryResponse
+from app.schemas.api import GeneratedDataResetResponse, JobCreate, JobDetailRead, JobListItemRead, JobRetryResponse
 from app.services.blog_service import get_blog, list_visible_blog_ids
 from app.services.content_guard_service import DuplicateContentError
 from app.services.job_service import create_job, load_job
@@ -19,7 +19,7 @@ from app.tasks.pipeline import PIPELINE_CONTROL_KEY, _resolve_stop_after, _seria
 router = APIRouter()
 
 
-@router.get("", response_model=list[JobRead])
+@router.get("", response_model=list[JobListItemRead])
 def list_jobs(
     limit: int = Query(default=30, le=100),
     blog_id: int | None = Query(default=None),
@@ -36,16 +36,13 @@ def list_jobs(
         .where(Job.blog_id.in_(visible_blog_ids))
         .options(
             selectinload(Job.blog),
-            selectinload(Job.topic).selectinload(Topic.blog),
+            selectinload(Job.topic),
             selectinload(Job.article).selectinload(Article.image),
             selectinload(Job.article).selectinload(Article.blogger_post),
             selectinload(Job.article).selectinload(Article.blog),
-            selectinload(Job.article).selectinload(Article.ai_usage_events),
             selectinload(Job.article).selectinload(Article.publish_queue_items),
             selectinload(Job.image),
             selectinload(Job.blogger_post),
-            selectinload(Job.ai_usage_events),
-            selectinload(Job.audit_logs),
         )
         .order_by(Job.created_at.desc())
         .limit(limit)
@@ -55,7 +52,7 @@ def list_jobs(
     return db.execute(query).scalars().unique().all()
 
 
-@router.get("/{job_id}", response_model=JobRead)
+@router.get("/{job_id}", response_model=JobDetailRead)
 def get_job(job_id: int, db: Session = Depends(get_db)) -> Job:
     job = load_job(db, job_id)
     if not job or job.blog_id not in set(list_visible_blog_ids(db)):
@@ -63,7 +60,7 @@ def get_job(job_id: int, db: Session = Depends(get_db)) -> Job:
     return job
 
 
-@router.post("", response_model=JobRead)
+@router.post("", response_model=JobDetailRead)
 def create_job_endpoint(payload: JobCreate, db: Session = Depends(get_db)) -> Job:
     topic = db.get(Topic, payload.topic_id) if payload.topic_id else None
     if payload.topic_id and not topic:

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -14,20 +14,20 @@ import type { Blog, BlogImportOptions, BloggerConfig, WorkflowStageType } from "
 type TabKey = "connections" | "basic" | "workflow" | "monitoring";
 
 const tabs: Array<{ key: TabKey; label: string }> = [
-  { key: "connections", label: "Connections" },
-  { key: "basic", label: "Basic Info" },
-  { key: "workflow", label: "Blog Workflow" },
-  { key: "monitoring", label: "Monitoring" },
+  { key: "connections", label: "연결 상태" },
+  { key: "basic", label: "기본 정보" },
+  { key: "workflow", label: "블로그 워크플로" },
+  { key: "monitoring", label: "모니터링" },
 ];
 
 const stageLabels: Record<WorkflowStageType, string> = {
-  topic_discovery: "Topic Discovery",
-  article_generation: "Writing Package",
-  image_prompt_generation: "Image Prompt Refinement",
-  related_posts: "Related Posts",
-  image_generation: "Image Generation",
-  html_assembly: "HTML Assembly",
-  publishing: "Publish Queue",
+  topic_discovery: "주제 발굴",
+  article_generation: "글쓰기 패키지",
+  image_prompt_generation: "이미지 프롬프트 정교화",
+  related_posts: "관련 글 연결",
+  image_generation: "이미지 생성",
+  html_assembly: "HTML 조립",
+  publishing: "게시 대기",
 };
 
 const optionalStages: WorkflowStageType[] = ["topic_discovery", "image_prompt_generation"];
@@ -95,7 +95,7 @@ export function BlogSettingsManager({
       return;
     }
 
-    setSaveStatus(`읽기 목표를 ${min}-${max}분으로 저장했습니다.`);
+    setSaveStatus(`읽기 시간 목표를 ${min}-${max}분으로 저장했습니다.`);
     startTransition(() => router.refresh());
   }
 
@@ -103,14 +103,14 @@ export function BlogSettingsManager({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Blog Workflow</CardTitle>
+          <CardTitle>블로그 워크플로</CardTitle>
           <CardDescription>
-            No imported blog yet. Import a Blogger blog first to see workflow settings here.
+            아직 가져온 블로그가 없습니다. 먼저 Blogger 블로그를 가져오면 여기서 워크플로 설정을 볼 수 있습니다.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-slate-600">
-          <p>Available Blogger blogs: {importOptions.available_blogs.length}</p>
-          <p>Profiles: {importOptions.profiles.map((profile) => profile.label).join(", ") || "-"}</p>
+          <p>가져올 수 있는 Blogger 블로그: {importOptions.available_blogs.length}</p>
+          <p>프로필: {importOptions.profiles.map((profile) => profile.label).join(", ") || "-"}</p>
           {bloggerConfig.warnings.map((warning) => (
             <p key={warning}>- {warning}</p>
           ))}
@@ -124,8 +124,8 @@ export function BlogSettingsManager({
       <div className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)]">
         <Card>
           <CardHeader>
-            <CardTitle>Service Blogs</CardTitle>
-            <CardDescription>Select one blog to inspect its settings and workflow.</CardDescription>
+            <CardTitle>서비스 블로그</CardTitle>
+            <CardDescription>설정과 워크플로를 확인할 블로그를 선택하세요.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {blogs.map((blog) => {
@@ -158,7 +158,7 @@ export function BlogSettingsManager({
           <Card>
             <CardHeader>
               <CardTitle>{selectedBlog.name}</CardTitle>
-              <CardDescription>This panel shows the imported blog configuration and workflow.</CardDescription>
+              <CardDescription>가져온 블로그 설정과 워크플로를 한 화면에서 확인합니다.</CardDescription>
               <div className="flex flex-wrap gap-2">
                 {tabs.map((item) => (
                   <button
@@ -181,7 +181,7 @@ export function BlogSettingsManager({
           {tab === "connections" ? (
             <Card>
               <CardHeader>
-                <CardTitle>Connections</CardTitle>
+                <CardTitle>연결 상태</CardTitle>
               </CardHeader>
               <CardContent className="grid gap-4 lg:grid-cols-3">
                 <div className="rounded-[24px] border border-ink/10 bg-white/70 p-4">
@@ -192,7 +192,7 @@ export function BlogSettingsManager({
                 <div className="rounded-[24px] border border-ink/10 bg-white/70 p-4">
                   <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Search Console</p>
                   <p className="mt-2 break-all text-sm text-ink">
-                    {selectedBlog.selected_connections.search_console?.site_url ?? "Not selected"}
+                    {selectedBlog.selected_connections.search_console?.site_url ?? "미선택"}
                   </p>
                 </div>
                 <div className="rounded-[24px] border border-ink/10 bg-white/70 p-4">
@@ -200,7 +200,7 @@ export function BlogSettingsManager({
                   <p className="mt-2 break-all text-sm text-ink">
                     {selectedBlog.selected_connections.analytics
                       ? `${selectedBlog.selected_connections.analytics.display_name} (${selectedBlog.selected_connections.analytics.property_id})`
-                      : "Not selected"}
+                      : "미선택"}
                   </p>
                 </div>
               </CardContent>
@@ -211,23 +211,23 @@ export function BlogSettingsManager({
             <div className="space-y-6">
               <Card>
                 <CardHeader>
-                  <CardTitle>Basic Info</CardTitle>
+                  <CardTitle>기본 정보</CardTitle>
                 </CardHeader>
                 <CardContent className="grid gap-4 lg:grid-cols-2">
                   <div className="rounded-[24px] border border-ink/10 bg-white/70 p-4">
-                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Language</p>
+                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">언어</p>
                     <p className="mt-2 text-sm text-ink">{selectedBlog.primary_language}</p>
                   </div>
                   <div className="rounded-[24px] border border-ink/10 bg-white/70 p-4">
-                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Category</p>
+                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">카테고리</p>
                     <p className="mt-2 text-sm text-ink">{selectedBlog.content_category}</p>
                   </div>
                   <div className="rounded-[24px] border border-ink/10 bg-white/70 p-4 lg:col-span-2">
-                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Description</p>
+                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">설명</p>
                     <p className="mt-2 text-sm leading-6 text-slate-700">{selectedBlog.description || "-"}</p>
                   </div>
                   <div className="rounded-[24px] border border-ink/10 bg-white/70 p-4 lg:col-span-2">
-                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Target Audience</p>
+                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">타깃 독자</p>
                     <p className="mt-2 text-sm leading-6 text-slate-700">{selectedBlog.target_audience || "-"}</p>
                   </div>
                 </CardContent>
@@ -235,14 +235,14 @@ export function BlogSettingsManager({
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Reading Time Target</CardTitle>
+                  <CardTitle>읽기 시간 목표</CardTitle>
                   <CardDescription>
-                    Control how long each generated article should feel to read for this blog.
+                    이 블로그에서 생성하는 글의 체감 읽기 시간을 조절합니다.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="grid gap-4 md:grid-cols-[1fr_1fr_auto]">
                   <div className="space-y-2">
-                    <Label htmlFor={`reading-min-${selectedBlog.id}`}>Minimum Minutes</Label>
+                    <Label htmlFor={`reading-min-${selectedBlog.id}`}>최소 분</Label>
                     <Input
                       id={`reading-min-${selectedBlog.id}`}
                       type="number"
@@ -253,7 +253,7 @@ export function BlogSettingsManager({
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor={`reading-max-${selectedBlog.id}`}>Maximum Minutes</Label>
+                    <Label htmlFor={`reading-max-${selectedBlog.id}`}>최대 분</Label>
                     <Input
                       id={`reading-max-${selectedBlog.id}`}
                       type="number"
@@ -265,11 +265,11 @@ export function BlogSettingsManager({
                   </div>
                   <div className="flex items-end">
                     <Button type="button" onClick={() => void saveReadingTargets()} disabled={isPending}>
-                      {isPending ? "Saving..." : "Save Target"}
+                      {isPending ? "저장 중..." : "목표 저장"}
                     </Button>
                   </div>
                   <div className="rounded-[24px] border border-dashed border-ink/15 bg-slate-50 p-4 text-sm leading-6 text-slate-600 md:col-span-3">
-                    This value is injected into the writing prompt. Recommended starting point is 6 to 8 minutes.
+                    이 값은 글쓰기 프롬프트에 그대로 주입됩니다. 시작값은 6~8분을 권장합니다.
                     {saveStatus ? <p className="mt-2 text-ink">{saveStatus}</p> : null}
                   </div>
                 </CardContent>
@@ -281,8 +281,8 @@ export function BlogSettingsManager({
             <div className="space-y-6">
               <Card>
                 <CardHeader>
-                  <CardTitle>Current Execution Path</CardTitle>
-                  <CardDescription>Manual publish flow: generate first, publish later from the article list.</CardDescription>
+                  <CardTitle>현재 실행 경로</CardTitle>
+                  <CardDescription>현재는 생성 후 글 목록에서 수동으로 발행하는 흐름입니다.</CardDescription>
                 </CardHeader>
                 <CardContent className="flex flex-wrap gap-2">
                   {workflowPath(selectedBlog).map((label) => (
@@ -295,9 +295,9 @@ export function BlogSettingsManager({
 
               <Card>
                 <CardHeader>
-                  <CardTitle>User Editable Stages</CardTitle>
+                  <CardTitle>사용자 수정 가능 단계</CardTitle>
                   <CardDescription>
-                    These are the stages where prompt text and model choice matter per blog.
+                    블로그별로 프롬프트와 모델 선택이 영향을 주는 단계입니다.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -309,13 +309,13 @@ export function BlogSettingsManager({
                           <Badge className="border border-ink/15 bg-white text-ink">{step.provider_model}</Badge>
                         ) : null}
                         <Badge className="border border-ink/15 bg-white text-ink">
-                          {step.is_enabled ? "Enabled" : "Disabled"}
+                          {step.is_enabled ? "사용" : "중지"}
                         </Badge>
                       </div>
                       <p className="mt-3 text-sm font-semibold text-ink">{step.name}</p>
                       <p className="mt-2 text-sm leading-6 text-slate-600">{step.objective || "-"}</p>
                       <div className="mt-4 space-y-2">
-                        <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Prompt</p>
+                        <p className="text-xs uppercase tracking-[0.16em] text-slate-500">프롬프트</p>
                         <Textarea
                           value={step.prompt_template}
                           readOnly
@@ -326,18 +326,18 @@ export function BlogSettingsManager({
                   ))}
 
                   <div className="rounded-[24px] border border-dashed border-ink/15 bg-slate-50 p-4 text-sm leading-6 text-slate-600">
-                    Optional stages available to add later:{" "}
+                    나중에 추가할 수 있는 선택 단계:{" "}
                     {optionalStages
                       .filter((stage) => !selectedBlog.user_visible_steps.some((step) => step.stage_type === stage))
                       .map((stage) => stageLabels[stage])
-                      .join(", ") || "None"}
+                      .join(", ") || "없음"}
                   </div>
                 </CardContent>
               </Card>
 
               <Card>
                 <CardHeader>
-                  <CardTitle>System Stages</CardTitle>
+                  <CardTitle>시스템 단계</CardTitle>
                 </CardHeader>
                 <CardContent className="grid gap-4 lg:grid-cols-3">
                   {selectedBlog.system_steps.map((step) => (
@@ -354,23 +354,23 @@ export function BlogSettingsManager({
           {tab === "monitoring" ? (
             <Card>
               <CardHeader>
-                <CardTitle>Monitoring</CardTitle>
+                <CardTitle>모니터링</CardTitle>
               </CardHeader>
               <CardContent className="grid gap-4 md:grid-cols-4">
                 <div className="rounded-[24px] border border-ink/10 bg-white/70 p-4">
-                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Jobs</p>
+                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">작업</p>
                   <p className="mt-2 text-3xl font-semibold text-ink">{selectedBlog.job_count}</p>
                 </div>
                 <div className="rounded-[24px] border border-ink/10 bg-white/70 p-4">
-                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Completed</p>
+                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">완료</p>
                   <p className="mt-2 text-3xl font-semibold text-ink">{selectedBlog.completed_jobs}</p>
                 </div>
                 <div className="rounded-[24px] border border-ink/10 bg-white/70 p-4">
-                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Failed</p>
+                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">실패</p>
                   <p className="mt-2 text-3xl font-semibold text-ink">{selectedBlog.failed_jobs}</p>
                 </div>
                 <div className="rounded-[24px] border border-ink/10 bg-white/70 p-4">
-                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Published</p>
+                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">발행</p>
                   <p className="mt-2 text-3xl font-semibold text-ink">{selectedBlog.published_posts}</p>
                 </div>
               </CardContent>

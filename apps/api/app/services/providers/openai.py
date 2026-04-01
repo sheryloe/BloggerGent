@@ -5,13 +5,14 @@ import base64
 import httpx
 
 from app.schemas.ai import ArticleGenerationOutput, TopicDiscoveryPayload
+from app.services.openai_usage_service import resolve_free_tier_text_model
 from app.services.providers.base import ProviderRuntimeError
 
 
 class OpenAITopicDiscoveryProvider:
     def __init__(self, *, api_key: str, model: str) -> None:
         self.api_key = api_key
-        self.model = model
+        self.model = resolve_free_tier_text_model(model, allow_large=True)
 
     def discover_topics(self, prompt: str) -> tuple[TopicDiscoveryPayload, dict]:
         response = httpx.post(
@@ -62,9 +63,9 @@ class OpenAITopicDiscoveryProvider:
 
 
 class OpenAIArticleProvider:
-    def __init__(self, *, api_key: str, model: str) -> None:
+    def __init__(self, *, api_key: str, model: str, allow_large: bool = False) -> None:
         self.api_key = api_key
-        self.model = model
+        self.model = resolve_free_tier_text_model(model, allow_large=allow_large)
 
     def generate_article(self, keyword: str, prompt: str) -> tuple[ArticleGenerationOutput, dict]:
         response = httpx.post(
@@ -118,53 +119,61 @@ class OpenAIImageProvider:
         self.api_key = api_key
         self.model = model
 
-    def _default_quality(self) -> str | None:
-        if self.model == "dall-e-3":
+    def _default_quality(self, model: str | None = None) -> str | None:
+        resolved_model = model or self.model
+        if resolved_model == "dall-e-3":
             return "hd"
-        if self.model.startswith("gpt-image-"):
+        if resolved_model.startswith("gpt-image-"):
             return "high"
         return None
 
-    def _default_size(self, *, is_collage: bool) -> str:
-        if self.model == "dall-e-3":
+    def _default_size(self, *, is_collage: bool, model: str | None = None) -> str:
+        resolved_model = model or self.model
+        if resolved_model == "dall-e-3":
             return "1024x1792" if is_collage else "1792x1024"
-        if self.model.startswith("gpt-image-"):
+        if resolved_model.startswith("gpt-image-"):
             return "1024x1536" if is_collage else "1536x1024"
         return "1024x1024"
 
-    def _prepare_prompt(self, prompt: str) -> tuple[str, str]:
+    def _prepare_prompt(self, prompt: str, *, model: str | None = None) -> tuple[str, str]:
         normalized_prompt = prompt.strip()
         lowered = normalized_prompt.lower()
         is_collage = "collage" in lowered or "panel" in lowered or "grid layout" in lowered
-        size = self._default_size(is_collage=is_collage)
+        size = self._default_size(is_collage=is_collage, model=model)
 
         if not is_collage:
             return normalized_prompt, size
 
         collage_prefix = (
             "Create exactly one composite editorial collage image, not one single continuous scene. "
-            "The final image must visibly contain 8 distinct rectangular photo panels arranged in a clean grid. "
-            "Each panel must be clearly separated by thin white gutters or borders so the collage reads as 8 different photos in one image. "
+            "The final image must visibly contain distinct rectangular photo panels arranged in a clean grid. "
+            "Each panel must be clearly separated by thin white gutters or borders so the collage reads as separate photos in one image. "
             "Do not blend the panels into one landscape. Do not omit the panel borders. "
-            "Make it feel like a premium travel magazine contact sheet or scrapbook cover. "
+            "Make it feel like a premium magazine contact sheet or scrapbook cover. "
         )
         collage_suffix = (
             " Important: the result is wrong if it looks like one wide scene. "
-            "It must look like 8 separate travel photographs combined into one collage poster."
+            "It must look like multiple separate photographs combined into one collage poster."
         )
         return f"{collage_prefix}{normalized_prompt}{collage_suffix}", size
 
-    def generate_image(self, prompt: str, slug: str) -> tuple[bytes, dict]:
-        prepared_prompt, size = self._prepare_prompt(prompt)
-        quality = self._default_quality()
+    def _request_image_generation(
+        self,
+        *,
+        model: str,
+        prompt: str,
+        size: str,
+        quality: str | None,
+    ) -> dict:
         payload = {
-            "model": self.model,
-            "prompt": prepared_prompt,
+            "model": model,
+            "prompt": prompt,
             "size": size,
             "response_format": "b64_json",
         }
         if quality:
             payload["quality"] = quality
+
         response = httpx.post(
             "https://api.openai.com/v1/images/generations",
             headers={"Authorization": f"Bearer {self.api_key}"},
@@ -174,22 +183,59 @@ class OpenAIImageProvider:
         if not response.is_success:
             detail = response.text
             try:
-                payload = response.json()
-                detail = payload.get("error", {}).get("message", detail)
+                response_payload = response.json()
+                detail = response_payload.get("error", {}).get("message", detail)
             except ValueError:
                 pass
             raise ProviderRuntimeError(
                 provider="openai_image",
                 status_code=response.status_code,
-                message="OpenAI 이미지 생성 요청이 실패했습니다.",
+                message="OpenAI image generation request failed.",
                 detail=detail,
             )
-        data = response.json()
-        image_b64 = data["data"][0]["b64_json"]
-        width, height = [int(part) for part in size.split("x", maxsplit=1)]
-        data["width"] = width
-        data["height"] = height
-        if quality:
-            data["quality"] = quality
-        data["normalized_prompt"] = prepared_prompt
-        return base64.b64decode(image_b64), data
+        return response.json()
+
+    def generate_image(self, prompt: str, slug: str) -> tuple[bytes, dict]:
+        requested_model = self.model
+        models_to_try = [requested_model]
+        if requested_model.startswith("gpt-image-") and requested_model != "dall-e-3":
+            models_to_try.append("dall-e-3")
+
+        last_error: ProviderRuntimeError | None = None
+        for index, model_name in enumerate(models_to_try):
+            prepared_prompt, size = self._prepare_prompt(prompt, model=model_name)
+            quality = self._default_quality(model_name)
+            try:
+                data = self._request_image_generation(
+                    model=model_name,
+                    prompt=prepared_prompt,
+                    size=size,
+                    quality=quality,
+                )
+            except ProviderRuntimeError as exc:
+                last_error = exc
+                if index < len(models_to_try) - 1:
+                    continue
+                raise
+
+            image_b64 = data["data"][0]["b64_json"]
+            width, height = [int(part) for part in size.split("x", maxsplit=1)]
+            data["width"] = width
+            data["height"] = height
+            if quality:
+                data["quality"] = quality
+            data["requested_model"] = requested_model
+            data["actual_model"] = model_name
+            data["normalized_prompt"] = prepared_prompt
+            data["slug"] = slug
+            if model_name != requested_model:
+                data["fallback_used"] = True
+            return base64.b64decode(image_b64), data
+
+        if last_error:
+            raise last_error
+        raise ProviderRuntimeError(
+            provider="openai_image",
+            status_code=502,
+            message="OpenAI image generation failed without a concrete error.",
+        )

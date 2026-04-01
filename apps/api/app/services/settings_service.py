@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass
 import re
@@ -19,6 +19,21 @@ class DefaultSetting:
 
 
 DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
+    "app_name": DefaultSetting("Bloggent", "Workspace display name"),
+    "default_blog_timezone": DefaultSetting("Asia/Seoul", "Default planner and publishing timezone"),
+    "default_publish_mode": DefaultSetting("draft", "Default publishing mode for newly created jobs"),
+    "default_writer_tone": DefaultSetting("system-operator", "Default writing tone label"),
+    "planner_default_daily_posts": DefaultSetting("3", "Default daily slot count when building a month plan"),
+    "planner_day_start_time": DefaultSetting("09:00", "Planner day start time in HH:MM"),
+    "planner_day_end_time": DefaultSetting("21:00", "Planner day end time in HH:MM"),
+    "automation_master_enabled": DefaultSetting("false", "Master gate for every automation path"),
+    "automation_scheduler_enabled": DefaultSetting("false", "Enable scheduler tick automation"),
+    "automation_publish_queue_enabled": DefaultSetting("false", "Enable publish queue automation"),
+    "automation_content_review_enabled": DefaultSetting("false", "Enable content review automation"),
+    "automation_telegram_enabled": DefaultSetting("false", "Enable Telegram polling automation"),
+    "automation_sheet_enabled": DefaultSetting("false", "Deprecated Google Sheet automation flag"),
+    "automation_cloudflare_enabled": DefaultSetting("false", "Enable Cloudflare automation"),
+    "automation_training_enabled": DefaultSetting("false", "Enable training automation"),
     "provider_mode": DefaultSetting(settings.provider_mode, "mock or live provider mode"),
     "public_image_provider": DefaultSetting(
         settings.public_image_provider,
@@ -47,6 +62,10 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     "cloudflare_r2_prefix": DefaultSetting(
         settings.cloudflare_r2_prefix,
         "Object key prefix inside the R2 bucket. Files are stored as <prefix>/<slug>.png",
+    ),
+    "cloudflare_cdn_transform_enabled": DefaultSetting(
+        str(settings.cloudflare_cdn_transform_enabled).lower(),
+        "Enable Cloudflare /cdn-cgi/image transform URLs. Keep false when transform is unavailable.",
     ),
     "github_pages_owner": DefaultSetting(settings.github_pages_owner, "GitHub Pages owner or organization"),
     "github_pages_repo": DefaultSetting(settings.github_pages_repo, "GitHub Pages repository name"),
@@ -91,6 +110,22 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     "topic_discovery_max_topics_per_run": DefaultSetting(
         str(settings.topic_discovery_max_topics_per_run),
         "Maximum number of topics queued per discovery run. 0 means unlimited.",
+    ),
+    "topic_history_lookback_days": DefaultSetting(
+        "180",
+        "Lookback window in days for topic history matching (sheet first, DB fallback).",
+    ),
+    "topic_novelty_cluster_threshold": DefaultSetting(
+        "0.85",
+        "Cluster similarity threshold for strict same-cluster duplicate risk.",
+    ),
+    "topic_novelty_angle_threshold": DefaultSetting(
+        "0.75",
+        "Angle similarity threshold for strict same-angle duplicate risk.",
+    ),
+    "topic_soft_penalty_threshold": DefaultSetting(
+        "2",
+        "Soft-penalty cutoff. Candidates at or above this value are regenerated.",
     ),
     "gemini_api_key": DefaultSetting(settings.gemini_api_key, "Gemini API key", True),
     "gemini_model": DefaultSetting(settings.gemini_model, "Gemini model for topic discovery"),
@@ -163,6 +198,10 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
         settings.google_sheet_mystery_tab,
         "Tab name used for mystery snapshot rows.",
     ),
+    "google_sheet_cloudflare_tab": DefaultSetting(
+        settings.google_sheet_cloudflare_tab,
+        "Tab name used for Cloudflare channel snapshot rows.",
+    ),
     "sheet_sync_enabled": DefaultSetting(
         str(settings.sheet_sync_enabled).lower(),
         "Enable weekly Google Sheets snapshot sync.",
@@ -184,11 +223,171 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     "schedule_time": DefaultSetting(settings.schedule_time, "Scheduler run time in HH:MM format"),
     "schedule_timezone": DefaultSetting(settings.schedule_timezone, "Scheduler timezone"),
     "last_schedule_run_on": DefaultSetting("", "Last successful scheduler run date"),
+    "travel_schedule_time": DefaultSetting(
+        settings.travel_schedule_time,
+        "Travel profile recurring schedule start time in HH:MM format.",
+    ),
+    "travel_schedule_interval_hours": DefaultSetting(
+        str(settings.travel_schedule_interval_hours),
+        "Hours between recurring travel profile runs.",
+    ),
+    "travel_topics_per_run": DefaultSetting(
+        str(settings.travel_topics_per_run),
+        "Number of travel topics queued on each recurring run.",
+    ),
+    "travel_inline_collage_enabled": DefaultSetting(
+        str(settings.travel_inline_collage_enabled).lower(),
+        "Enable travel inline body collage image generation.",
+    ),
+    "mystery_inline_collage_enabled": DefaultSetting(
+        str(settings.mystery_inline_collage_enabled).lower(),
+        "Enable mystery inline body collage image generation.",
+    ),
+    "last_schedule_run_on_travel": DefaultSetting(
+        "",
+        "Last successful recurring travel scheduler slot marker.",
+    ),
+    "mystery_schedule_time": DefaultSetting(
+        settings.mystery_schedule_time,
+        "Mystery profile recurring schedule start time in HH:MM format.",
+    ),
+    "mystery_schedule_interval_hours": DefaultSetting(
+        str(settings.mystery_schedule_interval_hours),
+        "Hours between recurring mystery profile runs.",
+    ),
+    "mystery_topics_per_run": DefaultSetting(
+        str(settings.mystery_topics_per_run),
+        "Number of mystery topics queued on each recurring run.",
+    ),
+    "quality_gate_enabled": DefaultSetting(
+        str(settings.quality_gate_enabled).lower(),
+        "Enable pre-publish quality gate for Blogger and Cloudflare generation.",
+    ),
+    "quality_gate_similarity_threshold": DefaultSetting(
+        str(settings.quality_gate_similarity_threshold),
+        "Similarity threshold (0-100) for pre-publish quality gate.",
+    ),
+    "quality_gate_min_seo_score": DefaultSetting(
+        str(settings.quality_gate_min_seo_score),
+        "Minimum SEO score (0-100) required by pre-publish quality gate.",
+    ),
+    "quality_gate_min_geo_score": DefaultSetting(
+        str(settings.quality_gate_min_geo_score),
+        "Minimum GEO score (0-100) required by pre-publish quality gate.",
+    ),
+    "last_schedule_run_on_mystery": DefaultSetting(
+        "",
+        "Last successful recurring mystery scheduler slot marker.",
+    ),
+    "travel_editorial_weights": DefaultSetting(
+        "Travel:45,Culture:30,Food:25",
+        "Weighted rotation config for travel editorial categories.",
+    ),
+    "mystery_editorial_weights": DefaultSetting(
+        "Case Files:45,Mystery Archives:30,Legends & Lore:25",
+        "Weighted rotation config for mystery editorial categories.",
+    ),
+    "travel_editorial_last_category": DefaultSetting(
+        "",
+        "Last selected travel editorial category for weighted rotation.",
+    ),
+    "travel_editorial_last_streak": DefaultSetting(
+        "0",
+        "Consecutive streak count for last selected travel editorial category.",
+    ),
+    "mystery_editorial_last_category": DefaultSetting(
+        "",
+        "Last selected mystery editorial category for weighted rotation.",
+    ),
+    "mystery_editorial_last_streak": DefaultSetting(
+        "0",
+        "Consecutive streak count for last selected mystery editorial category.",
+    ),
+    "travel_editorial_daily_counts": DefaultSetting(
+        "{}",
+        "JSON object for travel editorial daily category counts.",
+    ),
+    "mystery_editorial_daily_counts": DefaultSetting(
+        "{}",
+        "JSON object for mystery editorial daily category counts.",
+    ),
+    "cloudflare_daily_publish_enabled": DefaultSetting(
+        "true",
+        "Enable daily Cloudflare auto publishing.",
+    ),
+    "cloudflare_daily_publish_time": DefaultSetting(
+        "00:00",
+        "Cloudflare auto publishing start time in HH:MM.",
+    ),
+    "cloudflare_daily_publish_interval_hours": DefaultSetting(
+        "2",
+        "Cloudflare auto publishing interval in hours.",
+    ),
+    "cloudflare_daily_last_run_slot": DefaultSetting(
+        "",
+        "Last Cloudflare auto publishing slot marker in ISO local time.",
+    ),
+    "cloudflare_daily_last_attempted_slot": DefaultSetting(
+        "",
+        "Last attempted Cloudflare auto publishing slot marker in ISO local time.",
+    ),
+    "cloudflare_daily_publish_timezone": DefaultSetting(
+        "Asia/Seoul",
+        "Timezone for daily Cloudflare auto publishing.",
+    ),
+    "cloudflare_daily_publish_weekday_quota": DefaultSetting(
+        "9",
+        "Daily Cloudflare post quota for Monday-Saturday.",
+    ),
+    "cloudflare_daily_publish_sunday_quota": DefaultSetting(
+        "7",
+        "Daily Cloudflare post quota for Sunday.",
+    ),
+    "cloudflare_daily_last_run_on": DefaultSetting(
+        "",
+        "Last date when Cloudflare daily auto publishing completed.",
+    ),
+    "cloudflare_daily_category_counts": DefaultSetting(
+        "{}",
+        "JSON object for Cloudflare daily weighted category counts.",
+    ),
+    "cloudflare_inline_images_enabled": DefaultSetting(
+        str(settings.cloudflare_inline_images_enabled).lower(),
+        "Enable inline markdown collage images for Cloudflare posts.",
+    ),
+    "travel_blossom_cap_ratio": DefaultSetting(
+        str(settings.travel_blossom_cap_ratio),
+        "Daily cherry-blossom topic cap ratio for Korea travel channel.",
+    ),
+    "cloudflare_blossom_cap_ratio": DefaultSetting(
+        str(settings.cloudflare_blossom_cap_ratio),
+        "Daily cherry-blossom topic cap ratio for Cloudflare channel.",
+    ),
+    "travel_daily_topic_mix_counts": DefaultSetting(
+        settings.travel_daily_topic_mix_counts,
+        "JSON counter for travel daily total/blossom topic generation counts.",
+    ),
+    "cloudflare_daily_topic_mix_counts": DefaultSetting(
+        settings.cloudflare_daily_topic_mix_counts,
+        "JSON counter for Cloudflare daily total/blossom topic generation counts.",
+    ),
     "training_schedule_enabled": DefaultSetting("false", "Enable daily scheduled training session"),
     "training_schedule_time": DefaultSetting("03:00", "Daily training schedule time in HH:MM format"),
     "training_schedule_timezone": DefaultSetting("Asia/Seoul", "Timezone for daily training schedule"),
     "training_schedule_last_run_on": DefaultSetting("", "Last date when scheduled training attempted"),
     "training_use_real_engine": DefaultSetting("false", "Enable real training engine execution (simulation remains default)"),
+    "content_ops_scan_enabled": DefaultSetting("true", "Enable the 5-minute live content review scan."),
+    "content_ops_auto_fix_drafts": DefaultSetting("true", "Automatically apply safe low-risk draft fixes."),
+    "content_ops_auto_fix_published_meta": DefaultSetting(
+        "true",
+        "Automatically apply safe published meta/search-description fixes.",
+    ),
+    "content_ops_learning_paused": DefaultSetting("false", "Pause scheduled learning snapshot/training activity."),
+    "content_ops_learning_snapshot_path": DefaultSetting("", "Latest curated learning JSONL snapshot path."),
+    "content_ops_prompt_memory_path": DefaultSetting("", "Latest prompt memory snapshot path."),
+    "content_ops_learning_snapshot_updated_at": DefaultSetting("", "Last curated learning snapshot build timestamp."),
+    "content_ops_telegram_update_offset": DefaultSetting("0", "Telegram getUpdates offset for ops polling."),
+    "content_ops_sync_failure_streak": DefaultSetting("0", "Consecutive live sync failure counter."),
     "publish_daily_limit_per_blog": DefaultSetting("3", "Daily publish limit per blog"),
     "publish_min_interval_seconds": DefaultSetting(
         str(settings.publish_min_interval_seconds),

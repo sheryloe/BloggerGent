@@ -5,7 +5,13 @@ import re
 
 from app.models.entities import Article
 from app.services.related_posts import render_related_cards_html
-from app.services.storage_service import build_public_image_variants
+
+MYSTERY_COLLAGE_MARKER_PATTERNS = (
+    re.compile(r"<p>\s*4-panel investigation collage\s*</p>", re.IGNORECASE),
+    re.compile(r"<p>\s*AI-generated editorial collage\s*</p>", re.IGNORECASE),
+    re.compile(r"4-panel investigation collage", re.IGNORECASE),
+    re.compile(r"AI-generated editorial collage", re.IGNORECASE),
+)
 
 
 def _inject_inline_style(html: str, tag: str, style: str) -> str:
@@ -95,6 +101,95 @@ def _lead_summary(article: Article) -> str:
     return (article.excerpt or "").strip()
 
 
+def _strip_mystery_inline_artifacts(html_fragment: str) -> str:
+    cleaned = html_fragment
+    for pattern in MYSTERY_COLLAGE_MARKER_PATTERNS:
+        cleaned = pattern.sub("", cleaned)
+    cleaned = re.sub(r"<figure\b[^>]*>.*?</figure>", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(r"<img\b[^>]*>", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def _resolve_inline_collage_media(article: Article, *, slot_name: str) -> dict | None:
+    media_items = article.inline_media if isinstance(article.inline_media, list) else []
+    for item in media_items:
+        if not isinstance(item, dict):
+            continue
+        slot = str(item.get("slot") or "").strip().lower()
+        delivery = item.get("delivery") if isinstance(item.get("delivery"), dict) else {}
+        cloudflare_meta = delivery.get("cloudflare") if isinstance(delivery, dict) else {}
+        cloudinary_meta = delivery.get("cloudinary") if isinstance(delivery, dict) else {}
+        image_url_candidates = [
+            str(cloudflare_meta.get("original_url") or "").strip() if isinstance(cloudflare_meta, dict) else "",
+            str(cloudinary_meta.get("secure_url_original") or "").strip() if isinstance(cloudinary_meta, dict) else "",
+            str(item.get("image_url") or "").strip(),
+        ]
+        image_url = next((candidate for candidate in image_url_candidates if candidate), "")
+        if slot == slot_name.strip().lower() and image_url:
+            resolved = dict(item)
+            resolved["image_url"] = image_url
+            return resolved
+    return None
+
+
+def _insert_inline_figure(article_html: str, media_item: dict, *, title: str, marker_name: str, alt_suffix: str) -> str:
+    image_url = html.escape(str(media_item.get("image_url") or "").strip(), quote=True)
+    if not image_url:
+        return article_html
+    marker = f"<!--{marker_name}-->"
+    if marker in article_html:
+        return article_html
+    alt_text = html.escape(f"{title} {alt_suffix}", quote=True)
+    width = int(media_item.get("width") or 0)
+    height = int(media_item.get("height") or 0)
+    width_attr = f' width="{width}"' if width > 0 else ""
+    height_attr = f' height="{height}"' if height > 0 else ""
+    figure_html = (
+        f"{marker}<figure style=\"margin:30px 0 30px;\">"
+        f'<img src="{image_url}"{width_attr}{height_attr} alt="{alt_text}" loading="lazy" decoding="async" '
+        'style="width:100%;border-radius:20px;display:block;object-fit:cover;" />'
+        "</figure>"
+    )
+
+    paragraph_matches = list(re.finditer(r"</p>", article_html, flags=re.IGNORECASE))
+    if paragraph_matches:
+        insert_index = paragraph_matches[len(paragraph_matches) // 2].end()
+        return f"{article_html[:insert_index]}{figure_html}{article_html[insert_index:]}"
+    return f"{article_html}\n{figure_html}"
+
+
+def _resolve_primary_image_url(article: Article, fallback_url: str) -> str:
+    image = article.image
+    metadata = image.image_metadata if image else None
+    delivery = metadata.get("delivery") if isinstance(metadata, dict) else None
+
+    candidates: list[str] = []
+    if isinstance(delivery, dict):
+        cloudflare_meta = delivery.get("cloudflare")
+        if isinstance(cloudflare_meta, dict):
+            candidates.append(str(cloudflare_meta.get("original_url") or "").strip())
+
+        cloudinary_meta = delivery.get("cloudinary")
+        if isinstance(cloudinary_meta, dict):
+            candidates.append(str(cloudinary_meta.get("secure_url_original") or "").strip())
+
+        candidates.append(str(delivery.get("local_public_url") or "").strip())
+        candidates.append(str(delivery.get("public_url") or "").strip())
+
+    candidates.extend(
+        [
+            str(fallback_url or "").strip(),
+            str(image.public_url or "").strip() if image else "",
+        ]
+    )
+
+    for candidate in candidates:
+        if candidate:
+            return candidate
+    return ""
+
+
 def render_faq_html(
     faq_section: list[dict],
     section_title: str = "Frequently Asked Questions",
@@ -133,12 +228,34 @@ def assemble_article_html(article: Article, hero_image_url: str, related_posts: 
     related_html = render_related_cards_html(related_posts, section_title=related_title, category=category)
     article_html = re.sub(r"<p>\s*<!--RELATED_POSTS-->\s*</p>", "", article.html_article, flags=re.IGNORECASE)
     article_html = article_html.replace("<!--RELATED_POSTS-->", "")
+    if category == "mystery":
+        article_html = _strip_mystery_inline_artifacts(article_html)
     article_html = _style_article_body(
         article_html,
         accent=theme["accent"],
         heading=theme["heading"],
         body=theme["body"],
     )
+    if category == "travel":
+        travel_inline_media = _resolve_inline_collage_media(article, slot_name="travel-inline-3x2")
+        if travel_inline_media:
+            article_html = _insert_inline_figure(
+                article_html,
+                travel_inline_media,
+                title=article.title,
+                marker_name="TRAVEL_INLINE_3X2",
+                alt_suffix="supporting travel collage",
+            )
+    elif category == "mystery":
+        mystery_inline_media = _resolve_inline_collage_media(article, slot_name="mystery-inline-3x2")
+        if mystery_inline_media:
+            article_html = _insert_inline_figure(
+                article_html,
+                mystery_inline_media,
+                title=article.title,
+                marker_name="MYSTERY_INLINE_3X2",
+                alt_suffix="supporting mystery collage",
+            )
 
     faq_html = render_faq_html(
         article.faq_section or [],
@@ -152,21 +269,20 @@ def assemble_article_html(article: Article, hero_image_url: str, related_posts: 
     escaped_lead_summary = html.escape(lead_summary, quote=True)
     hidden_lead_summary = html.escape(lead_summary)
     escaped_title = html.escape(article.title, quote=True)
-    hero_variants = build_public_image_variants(
-        public_url=hero_image_url,
-        image_metadata=article.image.image_metadata if article.image else None,
-        width=article.image.width if article.image else None,
-        height=article.image.height if article.image else None,
-    )
-    escaped_hero_url = html.escape(str(hero_variants["hero_src"]), quote=True)
-    hero_srcset = str(hero_variants.get("hero_srcset") or "").strip()
-    hero_sizes = str(hero_variants.get("hero_sizes") or "").strip()
-    hero_width = hero_variants.get("width")
-    hero_height = hero_variants.get("height")
-    hero_srcset_attr = f' srcset="{html.escape(hero_srcset, quote=True)}"' if hero_srcset else ""
-    hero_sizes_attr = f' sizes="{html.escape(hero_sizes, quote=True)}"' if hero_srcset and hero_sizes else ""
-    hero_width_attr = f' width="{int(hero_width)}"' if isinstance(hero_width, int) and hero_width > 0 else ""
-    hero_height_attr = f' height="{int(hero_height)}"' if isinstance(hero_height, int) and hero_height > 0 else ""
+    hero_url = _resolve_primary_image_url(article, hero_image_url)
+    hero_figure_html = ""
+    if hero_url:
+        escaped_hero_url = html.escape(hero_url, quote=True)
+        hero_width = article.image.width if article.image else None
+        hero_height = article.image.height if article.image else None
+        hero_width_attr = f' width="{int(hero_width)}"' if isinstance(hero_width, int) and hero_width > 0 else ""
+        hero_height_attr = f' height="{int(hero_height)}"' if isinstance(hero_height, int) and hero_height > 0 else ""
+        hero_figure_html = (
+            '<figure style="margin:0 0 32px;">'
+            f'<img src="{escaped_hero_url}"{hero_width_attr}{hero_height_attr} alt="{escaped_title}" '
+            'loading="eager" decoding="async" style="width:100%;border-radius:28px;display:block;object-fit:cover;" />'
+            "</figure>"
+        )
     return f"""
 <article data-bloggent-meta-description="{escaped_lead_summary}" style="max-width:860px;margin:0 auto;padding:32px 22px 48px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:{theme['heading']};background:{theme['article_background']};border:1px solid {theme['article_border']};border-radius:{'0px' if category == 'mystery' else '32px'};box-shadow:{theme['article_shadow']};">
   <header style="margin-bottom:28px;display:flex;flex-direction:column;">
@@ -175,9 +291,7 @@ def assemble_article_html(article: Article, hero_image_url: str, related_posts: 
     <h1 style="order:2;font-size:40px;line-height:1.12;margin:0 0 14px;color:{theme['heading']};">{article.title}</h1>
   </header>
   <div id="bloggent-seo-meta" data-bloggent-meta-source="body" style="display:none!important;visibility:hidden!important;max-height:0;overflow:hidden;">{hidden_lead_summary}</div>
-  <figure style="margin:0 0 32px;">
-    <img src="{escaped_hero_url}"{hero_srcset_attr}{hero_sizes_attr}{hero_width_attr}{hero_height_attr} alt="{escaped_title}" loading="eager" decoding="async" style="width:100%;border-radius:28px;display:block;object-fit:cover;" />
-  </figure>
+  {hero_figure_html}
   <section style="font-size:17px;line-height:1.9;color:{theme['body']};">{article_html}</section>
   {faq_html}
   {related_html}

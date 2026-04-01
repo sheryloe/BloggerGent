@@ -6,8 +6,9 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.entities import Blog, BloggerPost, Job, JobStatus, PostStatus, Topic
+from app.models.entities import Blog, BloggerPost, ContentReviewAction, ContentReviewItem, Job, JobStatus, PostStatus, Topic
 from app.services.blog_service import get_blog, get_blog_summary_map, list_blogs
+from app.services.settings_service import get_settings_map
 
 
 def build_dashboard_metrics(db: Session, blog_id: int | None = None) -> dict:
@@ -77,6 +78,38 @@ def build_dashboard_metrics(db: Session, blog_id: int | None = None) -> dict:
             }
         )
 
+    review_query = select(ContentReviewItem)
+    if blog_ids:
+        review_query = review_query.where(ContentReviewItem.blog_id.in_(blog_ids))
+    review_items = db.execute(review_query).scalars().all()
+    review_queue_count = sum(
+        1
+        for item in review_items
+        if item.approval_status == "pending" or item.apply_status in {"pending", "awaiting_approval", "failed"}
+    )
+    high_risk_count = sum(1 for item in review_items if item.risk_level == "high")
+
+    auto_fix_query = select(ContentReviewAction).where(ContentReviewAction.action == "auto_apply")
+    if blog_ids:
+        auto_fix_query = auto_fix_query.join(ContentReviewItem, ContentReviewItem.id == ContentReviewAction.item_id).where(
+            ContentReviewItem.blog_id.in_(blog_ids)
+        )
+    auto_fix_actions = db.execute(auto_fix_query).scalars().all()
+    auto_fix_applied_today = sum(1 for action in auto_fix_actions if action.created_at.astimezone(timezone.utc).date() == today)
+
+    settings_map = get_settings_map(db)
+    learning_snapshot_age = None
+    learning_snapshot_updated_at = (settings_map.get("content_ops_learning_snapshot_updated_at") or "").strip()
+    if learning_snapshot_updated_at:
+        try:
+            learning_timestamp = datetime.fromisoformat(learning_snapshot_updated_at.replace("Z", "+00:00"))
+            learning_snapshot_age = max(
+                0,
+                int((now - learning_timestamp.astimezone(timezone.utc)).total_seconds() // 60),
+            )
+        except ValueError:
+            learning_snapshot_age = None
+
     return {
         "today_generated_posts": len(today_generated),
         "success_jobs": len(completed_jobs),
@@ -86,4 +119,8 @@ def build_dashboard_metrics(db: Session, blog_id: int | None = None) -> dict:
         "jobs_by_status": dict(status_counter),
         "processing_series": series,
         "blog_summaries": blog_summaries,
+        "review_queue_count": review_queue_count,
+        "high_risk_count": high_risk_count,
+        "auto_fix_applied_today": auto_fix_applied_today,
+        "learning_snapshot_age": learning_snapshot_age,
     }

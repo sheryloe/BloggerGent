@@ -1,4 +1,4 @@
-export type JobStatus =
+﻿export type JobStatus =
   | "PENDING"
   | "DISCOVERING_TOPICS"
   | "GENERATING_ARTICLE"
@@ -325,7 +325,29 @@ export interface PublishQueueItem {
   updated_at: string;
 }
 
-export interface Article {
+export interface PublishQueueSummary {
+  id: number;
+  article_id: number;
+  blog_id: number;
+  requested_mode: string;
+  scheduled_for?: string | null;
+  not_before: string;
+  status: PublishQueueStatus;
+  attempt_count: number;
+  last_error?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ImageCompact {
+  id: number;
+  public_url: string;
+  width: number;
+  height: number;
+}
+
+export interface ArticleListItem {
   id: number;
   job_id: number;
   blog_id: number;
@@ -335,21 +357,29 @@ export interface Article {
   labels: string[];
   slug: string;
   excerpt: string;
+  reading_time_minutes: number;
+  editorial_category_key?: string | null;
+  editorial_category_label?: string | null;
+  created_at: string;
+  updated_at?: string;
+  blog?: BlogCompact | null;
+  image?: ImageCompact | null;
+  blogger_post?: BloggerPost | null;
+  publish_queue?: PublishQueueSummary | null;
+}
+
+export interface ArticleDetail extends ArticleListItem {
   html_article: string;
   faq_section: Array<{ question: string; answer: string }>;
   image_collage_prompt: string;
   inline_media: Array<Record<string, unknown>>;
   assembled_html?: string | null;
-  reading_time_minutes: number;
-  created_at: string;
-  updated_at?: string;
-  blog?: BlogCompact | null;
-  image?: ImageAsset | null;
-  blogger_post?: BloggerPost | null;
   usage_events: AIUsageEvent[];
   usage_summary?: AIUsageSummary | null;
   publish_queue?: PublishQueueItem | null;
 }
+
+export type Article = ArticleDetail;
 
 export interface BlogArchiveItem {
   source: "generated" | "synced";
@@ -453,7 +483,7 @@ export interface ArchiveChannelPage {
   selected_category?: string | null;
 }
 
-export interface Job {
+export interface JobListItem {
   id: number;
   blog_id: number;
   topic_id?: number | null;
@@ -462,19 +492,15 @@ export interface Job {
   publish_mode: PublishMode;
   start_time?: string | null;
   end_time?: string | null;
-  error_logs: Array<Record<string, unknown>>;
-  raw_prompts: Record<string, unknown>;
-  raw_responses: Record<string, unknown>;
   attempt_count: number;
   max_attempts: number;
   created_at: string;
   updated_at: string;
   blog?: BlogCompact | null;
   topic?: Topic | null;
-  article?: Article | null;
-  image?: ImageAsset | null;
+  article?: ArticleListItem | null;
+  image?: ImageCompact | null;
   blogger_post?: BloggerPost | null;
-  audit_logs: AuditLog[];
   publish_status: "published" | "queued" | "scheduled" | "stopped" | "failed" | "pending" | string;
   execution_status: JobStatus | string;
   telegram_delivery_status?: "sent" | "failed" | "skipped" | string | null;
@@ -482,6 +508,17 @@ export interface Job {
   telegram_error_code?: number | null;
   telegram_response_text?: string | null;
 }
+
+export interface JobDetail extends JobListItem {
+  error_logs: Array<Record<string, unknown>>;
+  raw_prompts: Record<string, unknown>;
+  raw_responses: Record<string, unknown>;
+  article?: ArticleDetail | null;
+  image?: ImageAsset | null;
+  audit_logs: AuditLog[];
+}
+
+export type Job = JobDetail;
 
 export interface TelegramTestResult {
   delivery_status: "sent" | "failed" | "skipped" | string;
@@ -521,6 +558,170 @@ export interface DashboardMetrics {
   jobs_by_status: Record<string, number>;
   processing_series: DashboardPoint[];
   blog_summaries: DashboardBlogSummary[];
+  review_queue_count: number;
+  high_risk_count: number;
+  auto_fix_applied_today: number;
+  learning_snapshot_age?: number | null;
+}
+
+export interface OpsHealthTokenBucket {
+  used_tokens: number;
+  limit_tokens: number;
+  usage_percent: number;
+  remaining_tokens: number;
+  matched_models: string[];
+}
+
+export interface OpsHealthCloudflareReport {
+  file: string;
+  generated_at_utc: string;
+  status: string;
+  created_count: number;
+  failed_count: number;
+}
+
+export interface OpsHealthJobItem {
+  job_id: number;
+  blog_id: number;
+  blog_slug: string;
+  keyword: string;
+  ended_at_utc: string;
+}
+
+export interface OpsHealthSheetIssue {
+  tab: string;
+  columns: string[];
+}
+
+export interface OpsHealthReport {
+  generated_at_kst: string;
+  token_usage?: {
+    date_label: string;
+    window_start_utc: string;
+    window_end_utc: string;
+    large: OpsHealthTokenBucket;
+    small: OpsHealthTokenBucket;
+  } | null;
+  token_error?: string;
+  failed_jobs_last_24h: OpsHealthJobItem[];
+  latest_cloudflare_reports: OpsHealthCloudflareReport[];
+  sheet_issues?: {
+    configured: boolean;
+    sheet_id?: string;
+    duplicates: OpsHealthSheetIssue[];
+    english_columns: OpsHealthSheetIssue[];
+    error?: string;
+  };
+  overall_status: string;
+}
+
+export interface OpsHealthLatestResponse {
+  status: string;
+  file_path: string;
+  report: OpsHealthReport | null;
+  recent_files: string[];
+}
+
+export interface ContentReviewAction {
+  id: number;
+  action: string;
+  actor: string;
+  channel: string;
+  result_payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ContentReviewItem {
+  id: number;
+  blog_id: number;
+  source_type: string;
+  source_id: string;
+  source_title: string;
+  source_url?: string | null;
+  review_kind: string;
+  content_hash: string;
+  quality_score: number;
+  risk_level: string;
+  issues: Array<Record<string, unknown>>;
+  proposed_patch: Record<string, unknown>;
+  approval_status: string;
+  apply_status: string;
+  learning_state: string;
+  source_updated_at?: string | null;
+  last_reviewed_at?: string | null;
+  last_applied_at?: string | null;
+  last_error?: string | null;
+  created_at: string;
+  updated_at: string;
+  actions: ContentReviewAction[];
+}
+
+export interface ContentOverviewRow {
+  article_id: number;
+  blog_id: number;
+  profile: string;
+  blog: string;
+  title: string;
+  url: string;
+  content_category?: string | null;
+  category_key?: string | null;
+  topic_cluster: string;
+  topic_angle: string;
+  similarity_score?: number | null;
+  most_similar_url: string;
+  seo_score?: number | null;
+  geo_score?: number | null;
+  media_state: string;
+  quality_status: string;
+  suggested_action: string;
+  auto_fixable: boolean;
+  manual_review: boolean;
+  rewrite_attempts: number;
+  status: string;
+  published_at: string;
+  updated_at: string;
+  last_audited_at: string;
+}
+
+export interface ContentOverviewResponse {
+  rows: ContentOverviewRow[];
+  total: number;
+  page: number;
+  page_size: number;
+  profile: string | null;
+  published_only: boolean;
+}
+
+export interface ContentOverviewSyncPayload {
+  profile?: string | null;
+  published_only?: boolean;
+  sync_sheet?: boolean;
+}
+
+export interface ContentOverviewSyncResult {
+  sheet_id: string;
+  tab: string;
+  status: string;
+  rows: number;
+  columns: number;
+}
+
+export interface ContentOverviewRecalculateResult {
+  profile?: string | null;
+  published_only: boolean;
+  updated_articles: number;
+  total_articles: number;
+  status: string;
+}
+export interface ContentOpsStatus {
+  review_queue_count: number;
+  high_risk_count: number;
+  auto_fix_applied_today: number;
+  learning_snapshot_age?: number | null;
+  learning_paused: boolean;
+  learning_snapshot_path: string;
+  prompt_memory_path: string;
+  recent_reviews: ContentReviewItem[];
 }
 
 export interface IntegratedChannelSummary {
@@ -767,4 +968,285 @@ export interface BloggerConfig {
     publish_mode: PublishMode;
     is_active: boolean;
   }>;
+}
+
+
+
+export type BlogRead = Blog;
+export type SettingRead = SettingItem;
+export type BloggerConfigRead = BloggerConfig;
+
+export interface ModelPolicyRead {
+  large: string[];
+  small: string[];
+  deprecated: string[];
+  defaults: Record<string, string>;
+}
+
+export interface PlannerThemeRead {
+  id: number;
+  key: string;
+  name: string;
+  weight: number;
+  color: string | null;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+export interface PlannerCategoryRead {
+  id: number;
+  key: string;
+  name: string;
+  weight: number;
+  color: string | null;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+export interface PlannerSlotRead {
+  id: number;
+  planDayId: number;
+  themeId: number;
+  themeKey: string | null;
+  themeName: string | null;
+  categoryId: number | null;
+  categoryKey: string | null;
+  categoryName: string | null;
+  scheduledFor: string | null;
+  slotOrder: number;
+  status: string;
+  briefTopic: string | null;
+  briefAudience: string | null;
+  briefInformationLevel: string | null;
+  briefExtraContext: string | null;
+  articleId: number | null;
+  jobId: number | null;
+  errorMessage: string | null;
+  lastRunAt: string | null;
+  articleTitle: string | null;
+  articleSeoScore: number | null;
+  articleGeoScore: number | null;
+  articleSimilarityScore: number | null;
+  articleMostSimilarUrl: string | null;
+  articleQualityStatus: string | null;
+  articlePublishStatus: string | null;
+  articlePublishedUrl: string | null;
+}
+
+export interface PlannerDayRead {
+  id: number;
+  blogId: number;
+  planDate: string;
+  targetPostCount: number;
+  status: string;
+  slotCount: number;
+  themeMix: Record<string, number>;
+  categoryMix: Record<string, number>;
+  slots: PlannerSlotRead[];
+}
+
+export interface PlannerCalendarRead {
+  blogId: number;
+  blogName: string;
+  month: string;
+  categories: PlannerCategoryRead[];
+  themes: PlannerThemeRead[];
+  days: PlannerDayRead[];
+}
+
+export interface PlannerMonthPlanRequest {
+  blogId: number;
+  month: string;
+  targetPostCount?: number | null;
+  overwrite?: boolean;
+}
+
+export interface PlannerSlotCreateRequest {
+  planDayId: number;
+  themeId: number;
+  scheduledFor: string;
+  briefTopic: string;
+  briefAudience: string;
+  briefInformationLevel: string;
+  briefExtraContext: string;
+}
+
+export interface PlannerSlotUpdateRequest {
+  themeId?: number | null;
+  scheduledFor?: string | null;
+  slotOrder?: number | null;
+  briefTopic?: string | null;
+  briefAudience?: string | null;
+  briefInformationLevel?: string | null;
+  briefExtraContext?: string | null;
+  status?: string | null;
+  errorMessage?: string | null;
+}
+
+export interface ManagedChannelRead {
+  provider: string;
+  channelId: string;
+  name: string;
+  status: string;
+  baseUrl: string | null;
+  primaryCategory: string | null;
+  purpose: string | null;
+  postsCount: number;
+  categoriesCount: number;
+  promptsCount: number;
+  plannerSupported: boolean;
+  analyticsSupported: boolean;
+  promptFlowSupported: boolean;
+}
+
+export interface PromptFlowStepRead {
+  id: string;
+  channelId: string;
+  provider: string;
+  stageType: string;
+  stageLabel: string;
+  name: string;
+  roleName: string | null;
+  objective: string | null;
+  promptTemplate: string;
+  providerHint: string | null;
+  providerModel: string | null;
+  isEnabled: boolean;
+  isRequired: boolean;
+  removable: boolean;
+  promptEnabled: boolean;
+  editable: boolean;
+  structureEditable: boolean;
+  contentEditable: boolean;
+  sortOrder: number;
+}
+
+export interface PromptFlowRead {
+  channelId: string;
+  channelName: string;
+  provider: string;
+  structureEditable: boolean;
+  contentEditable: boolean;
+  availableStageTypes: string[];
+  steps: PromptFlowStepRead[];
+}
+
+export interface AnalyticsArticleFactRead {
+  id: number;
+  blogId: number;
+  articleId: number | null;
+  syncedPostId: number | null;
+  publishedAt: string | null;
+  title: string;
+  themeKey: string | null;
+  themeName: string | null;
+  category: string | null;
+  seoScore: number | null;
+  geoScore: number | null;
+  similarityScore: number | null;
+  mostSimilarUrl: string | null;
+  status: string | null;
+  actualUrl: string | null;
+  sourceType: string;
+}
+
+export interface AnalyticsThemeMonthlyStatRead {
+  id: number;
+  blogId: number;
+  month: string;
+  themeKey: string;
+  themeName: string;
+  plannedPosts: number;
+  actualPosts: number;
+  plannedShare: number;
+  actualShare: number;
+  gapShare: number;
+  avgSeoScore: number | null;
+  avgGeoScore: number | null;
+  avgSimilarityScore: number | null;
+  coverageGapScore: number;
+  nextMonthWeightSuggestion: number;
+}
+
+export interface AnalyticsBlogMonthlySummaryRead {
+  blogId: number;
+  blogName: string;
+  month: string;
+  totalPosts: number;
+  avgSeoScore: number | null;
+  avgGeoScore: number | null;
+  avgSimilarityScore: number | null;
+  mostUnderusedThemeName: string | null;
+  mostOverusedThemeName: string | null;
+  nextMonthFocus: string | null;
+}
+
+export interface AnalyticsBlogMonthlyListResponse {
+  month: string;
+  items: AnalyticsBlogMonthlySummaryRead[];
+}
+
+export interface AnalyticsBlogMonthlyReportRead {
+  blogId: number;
+  blogName: string;
+  month: string;
+  totalPosts: number;
+  avgSeoScore: number | null;
+  avgGeoScore: number | null;
+  avgSimilarityScore: number | null;
+  mostUnderusedThemeName: string | null;
+  mostOverusedThemeName: string | null;
+  nextMonthFocus: string | null;
+  reportSummary: string | null;
+  themeStats: AnalyticsThemeMonthlyStatRead[];
+  articleFacts: AnalyticsArticleFactRead[];
+}
+
+export interface AnalyticsArticleFactListResponse {
+  blogId: number;
+  month: string;
+  items: AnalyticsArticleFactRead[];
+}
+
+export interface AnalyticsThemeWeightApplyResponse {
+  blogId: number;
+  sourceMonth: string;
+  targetMonth: string;
+  appliedWeights: Record<string, number>;
+}
+
+export interface AnalyticsBackfillRead {
+  blogMonths: number;
+  generatedFacts: number;
+  syncedFacts: number;
+}
+
+export interface AnalyticsThemeFilterOptionRead {
+  key: string;
+  name: string;
+}
+
+export interface AnalyticsIntegratedKpiRead {
+  totalPosts: number;
+  avgSeoScore: number | null;
+  avgGeoScore: number | null;
+  avgSimilarityScore: number | null;
+  mostUnderusedThemeName: string | null;
+  mostOverusedThemeName: string | null;
+  recentUploadCount: number;
+}
+
+export interface AnalyticsIntegratedRead {
+  month: string;
+  range: string;
+  selectedBlogId: number | null;
+  kpis: AnalyticsIntegratedKpiRead;
+  blogs: AnalyticsBlogMonthlySummaryRead[];
+  report: AnalyticsBlogMonthlyReportRead | null;
+  sourceType: string;
+  themeKey: string | null;
+  category: string | null;
+  status: string | null;
+  availableThemes: AnalyticsThemeFilterOptionRead[];
+  availableCategories: string[];
 }

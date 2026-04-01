@@ -8,7 +8,7 @@ import mimetypes
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 import httpx
 from sqlalchemy.orm import Session
@@ -43,6 +43,7 @@ CLOUDFLARE_THUMB_OPTIONS: tuple[tuple[str, str], ...] = (
     ("height", "160"),
     ("quality", "70"),
 )
+TRUTHY_VALUES = {"1", "true", "yes", "on", "enabled"}
 
 
 def ensure_storage_dirs() -> None:
@@ -85,6 +86,21 @@ def _resolve_local_public_base_url(values: dict[str, str]) -> str:
     if configured:
         return _normalize_base_url(configured)
     return _normalize_base_url(settings.public_api_base_url)
+
+
+def _is_enabled_setting(raw_value: object, *, default: bool = False) -> bool:
+    if raw_value is None:
+        return default
+    if isinstance(raw_value, bool):
+        return raw_value
+    normalized = str(raw_value).strip().lower()
+    if not normalized:
+        return default
+    return normalized in TRUTHY_VALUES
+
+
+def _is_cloudflare_transform_enabled(values: Mapping[str, str]) -> bool:
+    return _is_enabled_setting(values.get("cloudflare_cdn_transform_enabled"), default=False)
 
 
 def _github_pages_base_url(values: dict[str, str]) -> str:
@@ -460,13 +476,25 @@ def delete_cloudinary_asset(
 
 
 def _resolve_cloudflare_r2_configuration(values: dict[str, str]) -> tuple[str, str, str, str, str, str]:
+    configured_public_base_url = _normalize_base_url((values.get("cloudflare_r2_public_base_url") or "").strip())
+    integration_base_url, _ = _resolve_cloudflare_integration_upload_configuration(values)
+    resolved_public_base_url = configured_public_base_url
+    if not resolved_public_base_url and integration_base_url:
+        resolved_public_base_url = _join_public_url(integration_base_url, "/assets")
     return (
         (values.get("cloudflare_account_id") or "").strip(),
         (values.get("cloudflare_r2_bucket") or "").strip(),
         (values.get("cloudflare_r2_access_key_id") or "").strip(),
         (values.get("cloudflare_r2_secret_access_key") or "").strip(),
-        _normalize_base_url(values.get("cloudflare_r2_public_base_url") or "").strip(),
+        resolved_public_base_url,
         (values.get("cloudflare_r2_prefix") or "assets/images").strip().strip("/"),
+    )
+
+
+def _resolve_cloudflare_integration_upload_configuration(values: dict[str, str]) -> tuple[str, str]:
+    return (
+        _normalize_base_url((values.get("cloudflare_blog_api_base_url") or "").strip()),
+        (values.get("cloudflare_blog_m2m_token") or "").strip(),
     )
 
 
@@ -476,6 +504,195 @@ def _cloudflare_r2_object_key(*, filename: str, prefix: str) -> str:
     if not normalized_prefix:
         return normalized_name
     return f"{normalized_prefix}/{normalized_name}"
+
+
+def _normalize_cloudflare_object_key(*, public_key: str, key: str) -> str:
+    normalized_key = unquote((key or "").strip()).lstrip("/")
+    if not normalized_key:
+        return ""
+
+    normalized_prefix = (public_key or "").strip().strip("/")
+    if not normalized_prefix:
+        return normalized_key
+    if normalized_key == normalized_prefix:
+        return normalized_key
+    if normalized_key.startswith(f"{normalized_prefix}/"):
+        return normalized_key
+    prefix_root = normalized_prefix.split("/", 1)[0].lower()
+    key_root = normalized_key.split("/", 1)[0].lower()
+    if prefix_root and key_root == prefix_root:
+        return normalized_key
+    return f"{normalized_prefix}/{normalized_key}"
+
+
+def _strip_cdn_transform_prefix(path: str) -> str:
+    candidate = (path or "").lstrip("/")
+    lowered = candidate.lower()
+    if lowered.startswith("cdn-cgi/image/"):
+        parts = candidate.split("/", 3)
+        if len(parts) >= 4:
+            return "/".join(parts[3:])
+        return ""
+
+    if lowered.startswith("cdn-cgi/imagedelivery/"):
+        parts = candidate.split("/", 3)
+        if len(parts) >= 4:
+            return "/".join(parts[3:])
+        if len(parts) >= 3:
+            return parts[-1]
+        return ""
+
+    return candidate
+
+
+def normalize_r2_url_to_key(url: str) -> str:
+    raw = str(url or "").strip()
+    if not raw:
+        return ""
+
+    parsed = urlparse(raw)
+    raw_path = (parsed.path or "").strip()
+    if not raw_path:
+        return ""
+    normalized = unquote(raw_path)
+    normalized = _strip_cdn_transform_prefix(normalized)
+    normalized = normalized.strip("/")
+    return normalized
+
+
+def cloudflare_r2_object_exists(
+    db: Session,
+    *,
+    public_key: str,
+    key: str,
+) -> bool:
+    values = get_settings_map(db)
+    account_id, bucket, access_key_id, secret_access_key, _, _ = _resolve_cloudflare_r2_configuration(values)
+    if not account_id or not bucket or not access_key_id or not secret_access_key:
+        return False
+
+    object_key = _normalize_cloudflare_object_key(public_key=public_key, key=key)
+    if not object_key:
+        return False
+
+    headers = _build_r2_authorization_headers(
+        method="HEAD",
+        account_id=account_id,
+        bucket=bucket,
+        object_key=object_key,
+        access_key_id=access_key_id,
+        secret_access_key=secret_access_key,
+        payload=b"",
+    )
+    response = httpx.head(
+        _r2_endpoint_url(account_id=account_id, bucket=bucket, object_key=object_key),
+        headers=headers,
+        timeout=60.0,
+    )
+    if response.status_code == 404:
+        return False
+    if not response.is_success:
+        raise ProviderRuntimeError(
+            provider="cloudflare_r2",
+            status_code=response.status_code,
+            message="Cloudflare R2 object existence check failed.",
+            detail=response.text,
+        )
+    return True
+
+
+def cloudflare_r2_object_size(
+    db: Session,
+    *,
+    public_key: str,
+    key: str,
+) -> int | None:
+    values = get_settings_map(db)
+    account_id, bucket, access_key_id, secret_access_key, _, _ = _resolve_cloudflare_r2_configuration(values)
+    if not account_id or not bucket or not access_key_id or not secret_access_key:
+        return None
+
+    object_key = _normalize_cloudflare_object_key(public_key=public_key, key=key)
+    if not object_key:
+        return None
+
+    headers = _build_r2_authorization_headers(
+        method="HEAD",
+        account_id=account_id,
+        bucket=bucket,
+        object_key=object_key,
+        access_key_id=access_key_id,
+        secret_access_key=secret_access_key,
+        payload=b"",
+    )
+    response = httpx.head(
+        _r2_endpoint_url(account_id=account_id, bucket=bucket, object_key=object_key),
+        headers=headers,
+        timeout=60.0,
+    )
+    if response.status_code == 404:
+        return None
+    if not response.is_success:
+        raise ProviderRuntimeError(
+            provider="cloudflare_r2",
+            status_code=response.status_code,
+            message="Cloudflare R2 object size check failed.",
+            detail=response.text,
+        )
+    length = response.headers.get("Content-Length") or response.headers.get("content-length") or ""
+    try:
+        return int(length)
+    except (TypeError, ValueError):
+        return None
+
+
+def cloudflare_r2_download_binary(
+    db: Session,
+    *,
+    public_key: str,
+    key: str,
+) -> bytes:
+    values = get_settings_map(db)
+    account_id, bucket, access_key_id, secret_access_key, _, _ = _resolve_cloudflare_r2_configuration(values)
+    if not account_id or not bucket or not access_key_id or not secret_access_key:
+        raise ProviderRuntimeError(
+            provider="cloudflare_r2",
+            status_code=422,
+            message="Cloudflare R2 download requested without credentials.",
+            detail="Set cloudflare_account_id, cloudflare_r2_bucket, cloudflare_r2_access_key_id, and cloudflare_r2_secret_access_key.",
+        )
+
+    object_key = _normalize_cloudflare_object_key(public_key=public_key, key=key)
+    if not object_key:
+        raise ProviderRuntimeError(
+            provider="cloudflare_r2",
+            status_code=422,
+            message="Cloudflare R2 object key is missing.",
+            detail="Pass a valid R2 object key.",
+        )
+
+    headers = _build_r2_authorization_headers(
+        method="GET",
+        account_id=account_id,
+        bucket=bucket,
+        object_key=object_key,
+        access_key_id=access_key_id,
+        secret_access_key=secret_access_key,
+        payload=b"",
+    )
+    response = httpx.get(
+        _r2_endpoint_url(account_id=account_id, bucket=bucket, object_key=object_key),
+        headers=headers,
+        timeout=120.0,
+    )
+    if not response.is_success:
+        raise ProviderRuntimeError(
+            provider="cloudflare_r2",
+            status_code=response.status_code,
+            message="Cloudflare R2 object download failed.",
+            detail=response.text,
+        )
+    return response.content
 
 
 def _cloudflare_r2_original_url(*, public_base_url: str, object_key: str) -> str:
@@ -533,18 +750,11 @@ def build_cloudflare_r2_delivery_metadata(
     object_key: str,
     public_base_url: str,
     etag: str = "",
+    transform_enabled: bool = True,
 ) -> dict:
     original_url = _cloudflare_r2_original_url(public_base_url=public_base_url, object_key=object_key)
-    return {
-        "provider": "cloudflare_r2",
-        "cloudflare": {
-            "bucket": bucket,
-            "object_key": object_key,
-            "public_base_url": public_base_url,
-            "original_url": original_url,
-            "etag": etag,
-        },
-        "presets": {
+    if transform_enabled:
+        presets = {
             "hero": build_cloudflare_variant_url(
                 public_base_url=public_base_url,
                 object_key=object_key,
@@ -560,13 +770,33 @@ def build_cloudflare_r2_delivery_metadata(
                 object_key=object_key,
                 options=CLOUDFLARE_THUMB_OPTIONS,
             ),
-        },
-        "srcset": {
+        }
+        srcset = {
             "hero": build_cloudflare_srcset_urls(
                 public_base_url=public_base_url,
                 object_key=object_key,
             )
+        }
+    else:
+        presets = {
+            "hero": original_url,
+            "card": original_url,
+            "thumb": original_url,
+        }
+        srcset = {"hero": {}}
+
+    return {
+        "provider": "cloudflare_r2",
+        "cloudflare": {
+            "bucket": bucket,
+            "object_key": object_key,
+            "public_base_url": public_base_url,
+            "original_url": original_url,
+            "etag": etag,
+            "transform_enabled": transform_enabled,
         },
+        "presets": presets,
+        "srcset": srcset,
     }
 
 
@@ -664,83 +894,224 @@ def _build_r2_authorization_headers(
     return headers
 
 
+def _extract_cloudflare_integration_asset(payload: Mapping[str, object] | None) -> Mapping[str, object] | None:
+    if not isinstance(payload, Mapping):
+        return None
+
+    candidates = [payload.get("asset"), payload.get("item")]
+    data_payload = payload.get("data")
+    if isinstance(data_payload, Mapping):
+        candidates.extend([data_payload.get("asset"), data_payload])
+
+    for candidate in candidates:
+        if isinstance(candidate, Mapping):
+            return candidate
+    return None
+
+
+def _cloudflare_public_base_from_url(public_url: str, object_key: str) -> str:
+    normalized_url = str(public_url or "").strip()
+    normalized_key = object_key.strip().lstrip("/")
+    if not normalized_url or not normalized_key:
+        return ""
+
+    parsed = urlparse(normalized_url)
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+
+    object_suffix = f"/{normalized_key}"
+    if parsed.path.endswith(object_suffix):
+        base_path = parsed.path[: -len(object_suffix)]
+        return f"{parsed.scheme}://{parsed.netloc}{base_path}".rstrip("/")
+    return ""
+
+
 def _upload_to_cloudflare_r2(
     *,
     values: dict[str, str],
+    object_key: str | None = None,
     filename: str,
     content: bytes,
 ) -> tuple[str, dict]:
     account_id, bucket, access_key_id, secret_access_key, public_base_url, prefix = _resolve_cloudflare_r2_configuration(values)
+    integration_base_url, integration_token = _resolve_cloudflare_integration_upload_configuration(values)
+    object_key = (
+        _normalize_cloudflare_object_key(public_key=prefix, key=object_key)
+        if object_key
+        else _cloudflare_r2_object_key(filename=filename, prefix=prefix)
+    )
+    content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
-    if not account_id or not bucket or not access_key_id or not secret_access_key:
+    if account_id and bucket and access_key_id and secret_access_key:
+        if not public_base_url:
+            raise ProviderRuntimeError(
+                provider="cloudflare_r2",
+                status_code=422,
+                message="Cloudflare R2 public base URL is missing.",
+                detail="Set cloudflare_r2_public_base_url to the img.<domain> custom domain.",
+            )
+
+        headers = _build_r2_authorization_headers(
+            method="PUT",
+            account_id=account_id,
+            bucket=bucket,
+            object_key=object_key,
+            access_key_id=access_key_id,
+            secret_access_key=secret_access_key,
+            payload=content,
+            extra_headers={
+                "Content-Type": content_type,
+                "Cache-Control": "public, max-age=31536000, immutable",
+            },
+        )
+        response = httpx.put(
+            _r2_endpoint_url(account_id=account_id, bucket=bucket, object_key=object_key),
+            content=content,
+            headers=headers,
+            timeout=120.0,
+        )
+        if not response.is_success:
+            raise ProviderRuntimeError(
+                provider="cloudflare_r2",
+                status_code=response.status_code,
+                message="Cloudflare R2 upload failed.",
+                detail=response.text,
+            )
+
+        original_url = _cloudflare_r2_original_url(public_base_url=public_base_url, object_key=object_key)
+        return original_url, {
+            "bucket": bucket,
+            "object_key": object_key,
+            "etag": str(response.headers.get("etag") or "").strip('"'),
+            "content_type": content_type,
+            "public_base_url": public_base_url,
+            "public_url": original_url,
+        }
+
+    if not integration_base_url or not integration_token:
         raise ProviderRuntimeError(
             provider="cloudflare_r2",
             status_code=422,
             message="Cloudflare R2 delivery is missing required settings.",
-            detail="Set cloudflare_account_id, cloudflare_r2_bucket, cloudflare_r2_access_key_id, and cloudflare_r2_secret_access_key.",
-        )
-    if not public_base_url:
-        raise ProviderRuntimeError(
-            provider="cloudflare_r2",
-            status_code=422,
-            message="Cloudflare R2 public base URL is missing.",
-            detail="Set cloudflare_r2_public_base_url to the img.<domain> custom domain.",
+            detail=(
+                "Set cloudflare_account_id, cloudflare_r2_bucket, cloudflare_r2_access_key_id, "
+                "and cloudflare_r2_secret_access_key, or configure cloudflare_blog_api_base_url "
+                "and cloudflare_blog_m2m_token for integration proxy uploads."
+            ),
         )
 
-    object_key = _cloudflare_r2_object_key(filename=filename, prefix=prefix)
-    content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-    headers = _build_r2_authorization_headers(
-        method="PUT",
-        account_id=account_id,
-        bucket=bucket,
-        object_key=object_key,
-        access_key_id=access_key_id,
-        secret_access_key=secret_access_key,
-        payload=content,
-        extra_headers={
-            "Content-Type": content_type,
-            "Cache-Control": "public, max-age=31536000, immutable",
+    response = httpx.post(
+        f"{integration_base_url}/api/integrations/assets",
+        headers={"Authorization": f"Bearer {integration_token}"},
+        data={
+            "postSlug": Path(filename).stem,
+            "altText": Path(filename).stem.replace("-", " "),
         },
-    )
-    response = httpx.put(
-        _r2_endpoint_url(account_id=account_id, bucket=bucket, object_key=object_key),
-        content=content,
-        headers=headers,
+        files={"file": (filename, content, content_type)},
         timeout=120.0,
     )
     if not response.is_success:
+        detail = response.text
+        try:
+            payload = response.json()
+            detail = str(payload.get("message") or payload.get("detail") or payload.get("error") or detail)
+        except ValueError:
+            pass
         raise ProviderRuntimeError(
             provider="cloudflare_r2",
             status_code=response.status_code,
-            message="Cloudflare R2 upload failed.",
-            detail=response.text,
+            message="Cloudflare integration asset upload failed.",
+            detail=detail,
         )
 
-    original_url = _cloudflare_r2_original_url(public_base_url=public_base_url, object_key=object_key)
-    return original_url, {
-        "bucket": bucket,
-        "object_key": object_key,
-        "etag": str(response.headers.get("etag") or "").strip('"'),
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise ProviderRuntimeError(
+            provider="cloudflare_r2",
+            status_code=502,
+            message="Cloudflare integration asset upload returned invalid JSON.",
+            detail=response.text,
+        ) from exc
+
+    if isinstance(payload, Mapping) and payload.get("success") is False:
+        raise ProviderRuntimeError(
+            provider="cloudflare_r2",
+            status_code=502,
+            message="Cloudflare integration asset upload failed.",
+            detail=str(payload.get("message") or payload.get("detail") or payload.get("error") or "Unknown error"),
+        )
+
+    asset_payload = _extract_cloudflare_integration_asset(payload)
+    if not isinstance(asset_payload, Mapping):
+        raise ProviderRuntimeError(
+            provider="cloudflare_r2",
+            status_code=502,
+            message="Cloudflare integration asset upload returned no asset payload.",
+            detail=str(payload),
+        )
+
+    resolved_object_key = str(asset_payload.get("objectKey") or asset_payload.get("object_key") or object_key).strip()
+    resolved_public_url = str(asset_payload.get("publicUrl") or asset_payload.get("public_url") or "").strip()
+    resolved_public_base_url = (
+        str(asset_payload.get("publicBaseUrl") or asset_payload.get("public_base_url") or "").strip()
+        or _cloudflare_public_base_from_url(resolved_public_url, resolved_object_key)
+        or public_base_url
+    )
+    if not resolved_public_url and resolved_public_base_url and resolved_object_key:
+        resolved_public_url = _cloudflare_r2_original_url(
+            public_base_url=resolved_public_base_url,
+            object_key=resolved_object_key,
+        )
+    if not resolved_public_url:
+        raise ProviderRuntimeError(
+            provider="cloudflare_r2",
+            status_code=502,
+            message="Cloudflare integration asset upload returned no public URL.",
+            detail=str(payload),
+        )
+
+    return resolved_public_url, {
+        "bucket": str(asset_payload.get("bucket") or bucket).strip(),
+        "object_key": resolved_object_key,
+        "etag": str(asset_payload.get("etag") or "").strip('"'),
         "content_type": content_type,
+        "public_base_url": resolved_public_base_url,
+        "public_url": resolved_public_url,
+        "integration_response": payload,
     }
 
 
 def upload_binary_to_cloudflare_r2(
     db: Session,
     *,
+    object_key: str | None = None,
     filename: str,
     content: bytes,
 ) -> tuple[str, dict, dict]:
     values = get_settings_map(db)
+    transform_enabled = _is_cloudflare_transform_enabled(values)
     _, bucket, _, _, public_base_url, _ = _resolve_cloudflare_r2_configuration(values)
-    _, upload_payload = _upload_to_cloudflare_r2(values=values, filename=filename, content=content)
-    delivery_meta = build_cloudflare_r2_delivery_metadata(
-        bucket=bucket,
-        object_key=upload_payload["object_key"],
-        public_base_url=public_base_url,
-        etag=str(upload_payload.get("etag") or "").strip(),
+    _, upload_payload = _upload_to_cloudflare_r2(
+        values=values,
+        object_key=object_key,
+        filename=filename,
+        content=content,
     )
-    public_url = str((delivery_meta.get("presets") or {}).get("hero") or "").strip()
+    resolved_bucket = str(upload_payload.get("bucket") or bucket).strip()
+    resolved_public_base_url = str(upload_payload.get("public_base_url") or public_base_url).strip()
+    delivery_meta = build_cloudflare_r2_delivery_metadata(
+        bucket=resolved_bucket,
+        object_key=upload_payload["object_key"],
+        public_base_url=resolved_public_base_url,
+        etag=str(upload_payload.get("etag") or "").strip(),
+        transform_enabled=transform_enabled,
+    )
+    original_url = str(((delivery_meta.get("cloudflare") or {}).get("original_url") or "")).strip()
+    if transform_enabled:
+        public_url = str((delivery_meta.get("presets") or {}).get("hero") or upload_payload.get("public_url") or "").strip()
+    else:
+        public_url = original_url or str(upload_payload.get("public_url") or "").strip()
     return public_url, upload_payload, delivery_meta
 
 
@@ -924,6 +1295,15 @@ def build_public_image_variants(
         cloudflare_meta = cloudflare_meta if isinstance(cloudflare_meta, dict) else {}
         public_base_url = str(cloudflare_meta.get("public_base_url") or "").strip()
         object_key = str(cloudflare_meta.get("object_key") or "").strip()
+        original_url = str(cloudflare_meta.get("original_url") or "").strip()
+        transform_enabled = _is_enabled_setting(cloudflare_meta.get("transform_enabled"), default=True)
+        if not transform_enabled:
+            resolved_url = original_url or public_url
+            variants["hero_src"] = resolved_url
+            variants["card_src"] = resolved_url
+            variants["thumb_src"] = resolved_url
+            variants["hero_srcset"] = ""
+            return variants
 
         presets = delivery.get("presets") if isinstance(delivery, dict) else {}
         presets = presets if isinstance(presets, dict) else {}

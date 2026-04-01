@@ -17,10 +17,10 @@ def get_runtime_config(db: Session) -> RuntimeProviderConfig:
     return RuntimeProviderConfig(
         provider_mode=values.get("provider_mode", "mock"),
         openai_api_key=values.get("openai_api_key", ""),
-        openai_text_model=values.get("openai_text_model", "gpt-4.1-mini"),
-        openai_image_model=values.get("openai_image_model", "dall-e-3"),
+        openai_text_model=values.get("openai_text_model", "gpt-4.1-mini-2025-04-14"),
+        openai_image_model=values.get("openai_image_model", "gpt-image-1"),
         topic_discovery_provider=values.get("topic_discovery_provider", "openai"),
-        topic_discovery_model=values.get("topic_discovery_model", values.get("openai_text_model", "gpt-4.1-mini")),
+        topic_discovery_model=values.get("topic_discovery_model", values.get("openai_text_model", "gpt-4.1-2025-04-14")),
         gemini_api_key=values.get("gemini_api_key", ""),
         gemini_model=values.get("gemini_model", "gemini-2.5-flash"),
         blogger_access_token=values.get("blogger_access_token", ""),
@@ -51,10 +51,14 @@ def get_topic_provider(db: Session, provider_hint: str | None = None, model_over
     return MockTopicDiscoveryProvider()
 
 
-def get_article_provider(db: Session, model_override: str | None = None):
+def get_article_provider(db: Session, model_override: str | None = None, *, allow_large: bool = False):
     runtime = get_runtime_config(db)
     if runtime.provider_mode == "live" and runtime.openai_api_key:
-        return OpenAIArticleProvider(api_key=runtime.openai_api_key, model=model_override or runtime.openai_text_model)
+        return OpenAIArticleProvider(
+            api_key=runtime.openai_api_key,
+            model=model_override or runtime.openai_text_model,
+            allow_large=allow_large,
+        )
     return MockArticleProvider()
 
 

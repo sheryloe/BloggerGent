@@ -9,8 +9,9 @@ from sqlalchemy.orm import Session, selectinload
 from app.db.session import get_db
 from app.models.entities import Article
 from app.schemas.api import (
+    ArticleDetailRead,
+    ArticleListItemRead,
     ArticlePublishRequest,
-    ArticleRead,
     ArticleSearchDescriptionSyncRead,
     ArticleSeoMetaRead,
 )
@@ -61,7 +62,6 @@ def _article_query(limit: int | None = None):
             selectinload(Article.blog),
             selectinload(Article.image),
             selectinload(Article.blogger_post),
-            selectinload(Article.ai_usage_events),
             selectinload(Article.publish_queue_items),
         )
         .order_by(Article.created_at.desc())
@@ -71,7 +71,7 @@ def _article_query(limit: int | None = None):
     return query
 
 
-@router.get("", response_model=list[ArticleRead])
+@router.get("", response_model=list[ArticleListItemRead])
 def list_articles(
     limit: int = Query(default=20, le=100),
     blog_id: int | None = Query(default=None),
@@ -89,7 +89,7 @@ def list_articles(
     return db.execute(query).scalars().unique().all()
 
 
-@router.get("/{article_id}", response_model=ArticleRead)
+@router.get("/{article_id}", response_model=ArticleDetailRead)
 def get_article(article_id: int, db: Session = Depends(get_db)) -> Article:
     article = load_article_for_publish(db, article_id)
     if not article or article.blog_id not in set(list_visible_blog_ids(db)):
@@ -97,7 +97,7 @@ def get_article(article_id: int, db: Session = Depends(get_db)) -> Article:
     return article
 
 
-@router.post("/{article_id}/publish", response_model=ArticleRead)
+@router.post("/{article_id}/publish", response_model=ArticleDetailRead)
 def publish_article(
     article_id: int,
     payload: ArticlePublishRequest | None = Body(default=None),

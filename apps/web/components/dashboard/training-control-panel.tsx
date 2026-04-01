@@ -18,25 +18,25 @@ function formatSeconds(value?: number | null) {
   const hours = Math.floor(value / 3600);
   const minutes = Math.floor((value % 3600) / 60);
   const seconds = value % 60;
-  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
-  if (minutes > 0) return `${minutes}m ${seconds}s`;
-  return `${seconds}s`;
+  if (hours > 0) return `${hours}시간 ${minutes}분 ${seconds}초`;
+  if (minutes > 0) return `${minutes}분 ${seconds}초`;
+  return `${seconds}초`;
 }
 
 function stateLabel(state: string) {
   switch (state) {
     case "running":
-      return "Running";
+      return "실행 중";
     case "queued":
-      return "Queued";
+      return "대기 중";
     case "paused":
-      return "Paused";
+      return "일시정지";
     case "completed":
-      return "Completed";
+      return "완료";
     case "failed":
-      return "Failed";
+      return "실패";
     default:
-      return "Idle";
+      return "유휴";
   }
 }
 
@@ -88,7 +88,7 @@ export function TrainingControlPanel({ initialStatus, providerMode }: Props) {
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const detail = typeof body?.detail === "string" ? body.detail : `Request failed (${response.status})`;
+      const detail = typeof body?.detail === "string" ? body.detail : `요청 실패 (${response.status})`;
       throw new Error(detail);
     }
     setStatus(body as TrainingStatus);
@@ -102,7 +102,7 @@ export function TrainingControlPanel({ initialStatus, providerMode }: Props) {
         session_hours: Number(sessionHours),
         save_every_minutes: Number(saveEveryMinutes),
       })
-        .then(() => setMessage("Training started."))
+        .then(() => setMessage("학습을 시작했습니다."))
         .catch((error: Error) => setMessage(error.message));
     });
   }
@@ -111,7 +111,7 @@ export function TrainingControlPanel({ initialStatus, providerMode }: Props) {
     setMessage("");
     startTransition(() => {
       void applyAction("/training/pause", "POST")
-        .then(() => setMessage("Pause requested."))
+        .then(() => setMessage("일시정지를 요청했습니다."))
         .catch((error: Error) => setMessage(error.message));
     });
   }
@@ -123,7 +123,7 @@ export function TrainingControlPanel({ initialStatus, providerMode }: Props) {
         session_hours: Number(sessionHours),
         save_every_minutes: Number(saveEveryMinutes),
       })
-        .then(() => setMessage("Training resumed from latest checkpoint."))
+        .then(() => setMessage("최신 체크포인트에서 학습을 재개했습니다."))
         .catch((error: Error) => setMessage(error.message));
     });
   }
@@ -136,7 +136,7 @@ export function TrainingControlPanel({ initialStatus, providerMode }: Props) {
         time: scheduleTime,
         timezone: scheduleTimezone,
       })
-        .then(() => setMessage("Schedule saved."))
+        .then(() => setMessage("일일 스케줄을 저장했습니다."))
         .catch((error: Error) => setMessage(error.message));
     });
   }
@@ -147,19 +147,19 @@ export function TrainingControlPanel({ initialStatus, providerMode }: Props) {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Training Session</CardTitle>
-          <CardDescription>4-hour session mode with periodic checkpoint save and resume support.</CardDescription>
+          <CardTitle>학습 세션</CardTitle>
+          <CardDescription>기본 4시간 세션으로 동작하며 체크포인트 저장/재개를 지원합니다.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
           <div className="flex flex-wrap items-center gap-2">
             <Badge className={stateTone(status.state)}>{stateLabel(status.state)}</Badge>
-            <Badge className="border border-ink/15 bg-white text-ink">Provider mode: {providerMode || "unknown"}</Badge>
-            <Badge className="border border-ink/15 bg-white text-ink">Model: {status.model_name || "not set"}</Badge>
+            <Badge className="border border-ink/15 bg-white text-ink">Provider 모드: {providerMode || "unknown"}</Badge>
+            <Badge className="border border-ink/15 bg-white text-ink">모델: {status.model_name || "미설정"}</Badge>
           </div>
 
           <div>
             <div className="mb-2 flex items-center justify-between text-sm text-slate-600">
-              <span>Progress</span>
+              <span>진행률</span>
               <span>
                 {status.current_step} / {status.total_steps || 0} ({progress}%)
               </span>
@@ -171,22 +171,22 @@ export function TrainingControlPanel({ initialStatus, providerMode }: Props) {
 
           <div className="grid gap-3 md:grid-cols-3">
             <div className="rounded-[20px] border border-ink/10 bg-white/70 p-3 text-sm">
-              <p className="text-slate-500">Elapsed</p>
+              <p className="text-slate-500">경과 시간</p>
               <p className="mt-1 font-semibold text-ink">{formatSeconds(status.elapsed_seconds)}</p>
             </div>
             <div className="rounded-[20px] border border-ink/10 bg-white/70 p-3 text-sm">
-              <p className="text-slate-500">ETA</p>
+              <p className="text-slate-500">예상 남은 시간</p>
               <p className="mt-1 font-semibold text-ink">{formatSeconds(status.eta_seconds)}</p>
             </div>
             <div className="rounded-[20px] border border-ink/10 bg-white/70 p-3 text-sm">
-              <p className="text-slate-500">Dataset items</p>
+              <p className="text-slate-500">데이터셋 항목 수</p>
               <p className="mt-1 font-semibold text-ink">{status.dataset_item_count}</p>
             </div>
           </div>
 
           <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto_auto]">
             <div className="space-y-2">
-              <Label htmlFor="session_hours">Session Hours</Label>
+              <Label htmlFor="session_hours">세션 시간(시간)</Label>
               <Input
                 id="session_hours"
                 type="number"
@@ -198,7 +198,7 @@ export function TrainingControlPanel({ initialStatus, providerMode }: Props) {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="save_every_minutes">Save Every (minutes)</Label>
+              <Label htmlFor="save_every_minutes">저장 주기(분)</Label>
               <Input
                 id="save_every_minutes"
                 type="number"
@@ -210,24 +210,24 @@ export function TrainingControlPanel({ initialStatus, providerMode }: Props) {
             </div>
             <div className="flex items-end">
               <Button type="button" onClick={onStart} disabled={isPending || isActive}>
-                Start
+                시작
               </Button>
             </div>
             <div className="flex items-end gap-2">
               <Button type="button" variant="outline" onClick={onResume} disabled={isPending || isActive}>
-                Resume
+                재개
               </Button>
               <Button type="button" variant="outline" onClick={onPause} disabled={isPending || !isActive}>
-                Pause
+                일시정지
               </Button>
             </div>
           </div>
 
           <div className="rounded-[20px] border border-dashed border-ink/15 bg-slate-50 p-3 text-sm text-slate-600">
-            <p>Data scope: {status.data_scope}</p>
-            <p className="mt-1 break-all">Last checkpoint: {status.last_checkpoint || "-"}</p>
-            <p className="mt-1">Next schedule: {status.next_scheduled_at || "-"}</p>
-            {status.last_error ? <p className="mt-2 text-rose-700">Last error: {status.last_error}</p> : null}
+            <p>데이터 범위: {status.data_scope}</p>
+            <p className="mt-1 break-all">마지막 체크포인트: {status.last_checkpoint || "-"}</p>
+            <p className="mt-1">다음 스케줄: {status.next_scheduled_at || "-"}</p>
+            {status.last_error ? <p className="mt-2 text-rose-700">최근 오류: {status.last_error}</p> : null}
             {message ? <p className="mt-2 text-ink">{message}</p> : null}
           </div>
         </CardContent>
@@ -235,28 +235,28 @@ export function TrainingControlPanel({ initialStatus, providerMode }: Props) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Scheduled Training</CardTitle>
-          <CardDescription>Automatic daily start at the configured local time.</CardDescription>
+          <CardTitle>일일 학습 스케줄</CardTitle>
+          <CardDescription>설정한 시간에 매일 자동 시작합니다.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-[180px_160px_1fr_auto]">
           <div className="space-y-2">
-            <Label htmlFor="schedule_enabled">Enabled</Label>
+            <Label htmlFor="schedule_enabled">활성화</Label>
             <select
               id="schedule_enabled"
               className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm"
               value={scheduleEnabled}
               onChange={(event) => setScheduleEnabled(event.target.value)}
             >
-              <option value="false">Disabled</option>
-              <option value="true">Enabled</option>
+              <option value="false">비활성</option>
+              <option value="true">활성</option>
             </select>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="schedule_time">Time (HH:MM)</Label>
+            <Label htmlFor="schedule_time">시간 (HH:MM)</Label>
             <Input id="schedule_time" value={scheduleTime} onChange={(event) => setScheduleTime(event.target.value)} />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="schedule_timezone">Timezone</Label>
+            <Label htmlFor="schedule_timezone">시간대</Label>
             <Input
               id="schedule_timezone"
               value={scheduleTimezone}
@@ -265,7 +265,7 @@ export function TrainingControlPanel({ initialStatus, providerMode }: Props) {
           </div>
           <div className="flex items-end">
             <Button type="button" onClick={onSaveSchedule} disabled={isPending}>
-              Save Schedule
+              스케줄 저장
             </Button>
           </div>
         </CardContent>
@@ -273,7 +273,7 @@ export function TrainingControlPanel({ initialStatus, providerMode }: Props) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Recent Logs</CardTitle>
+          <CardTitle>최근 로그</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="max-h-[320px] space-y-2 overflow-y-auto rounded-[20px] border border-ink/10 bg-white/70 p-3">
@@ -287,7 +287,7 @@ export function TrainingControlPanel({ initialStatus, providerMode }: Props) {
                   </p>
                 ))
             ) : (
-              <p className="text-sm text-slate-500">No logs yet.</p>
+              <p className="text-sm text-slate-500">아직 로그가 없습니다.</p>
             )}
           </div>
         </CardContent>
@@ -295,4 +295,3 @@ export function TrainingControlPanel({ initialStatus, providerMode }: Props) {
     </div>
   );
 }
-

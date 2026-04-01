@@ -4,7 +4,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0010_usage_queue_and_reading_targets"
+revision = "0010_usage_queue_targets"
 down_revision = "0009_topic_guard_and_scheduling"
 branch_labels = None
 depends_on = None

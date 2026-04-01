@@ -1,0 +1,54 @@
+﻿"use client";
+
+import { usePathname } from "next/navigation";
+
+import { PageModeGuideCard } from "@/components/dashboard/page-mode-guide-card";
+
+const guideByPath: Record<string, { title: string; purpose: string; whenToUse: string; dataSource: string; caution: string }> = {
+  "/guide": {
+    title: "가이드",
+    purpose: "실운영 전 준비 항목과 연결 순서를 정리해 둡니다.",
+    whenToUse: "초기 세팅, 권한 점검, 이미지 전달 구조를 다시 확인할 때 들어옵니다.",
+    dataSource: "현재 저장된 설정값, Blogger 연결 상태, Google 연동 상태를 사용합니다.",
+    caution: "가이드는 설명 페이지입니다. 실제 값 변경은 설정 페이지에서만 수행하세요.",
+  },
+  "/google": {
+    title: "구글 데이터",
+    purpose: "Blogger, Search Console, GA4 상태와 동기화 결과를 블로그별로 확인합니다.",
+    whenToUse: "구글 연동이 정상인지, 기존 게시글 동기화가 끝났는지 점검할 때 들어옵니다.",
+    dataSource: "Blogger API, Search Console, GA4, 로컬 동기화 데이터베이스를 사용합니다.",
+    caution: "이 화면은 분석과 동기화 확인용입니다. 실제 콘텐츠 수정은 콘텐츠 운영 탭에서 처리하세요.",
+  },
+  "/ops-health": {
+    title: "운영 점검",
+    purpose: "무료토큰, 최근 실패 작업, 시트 헤더 이상, 클라우드플레어 배치 결과를 한 번에 점검합니다.",
+    whenToUse: "배치 실행 전후, 장애 확인, 운영 상태 보고 전에 먼저 들어옵니다.",
+    dataSource: "ops-health 리포트(JSON/MD), OpenAI 사용량 API, 최근 실패 작업/시트 메타데이터를 사용합니다.",
+    caution: "이 화면은 점검/가시화용입니다. 실제 재시도·수정 작업은 콘텐츠 운영이나 스크립트 실행으로 처리하세요.",
+  },
+  "/settings": {
+    title: "설정",
+    purpose: "전역 공급자, Google OAuth, 블로그 연결, 프롬프트 템플릿을 관리합니다.",
+    whenToUse: "API 키, OAuth, 발행 흐름, 워크플로 템플릿을 바꿔야 할 때 들어옵니다.",
+    dataSource: "설정 테이블, Blogger 연결 상태, 블로그 워크플로 설정을 사용합니다.",
+    caution: "여기서 바꾼 값은 실제 생성과 발행에 바로 영향을 줍니다. 운영 중에는 변경 범위를 최소화하세요.",
+  },
+  "/training": {
+    title: "학습 진행",
+    purpose: "학습 세션 상태, 체크포인트, 자동 스케줄을 관리합니다.",
+    whenToUse: "학습을 수동 시작하거나, 일시정지/재개하거나, 스케줄 상태를 점검할 때 들어옵니다.",
+    dataSource: "학습 상태 API와 저장된 전역 설정값을 사용합니다.",
+    caution: "학습 제어는 실제 백그라운드 작업을 시작하거나 멈춥니다. 세션 시간과 저장 주기를 같이 확인하세요.",
+  },
+};
+
+export function DashboardRouteGuide() {
+  const pathname = usePathname();
+  const guide = guideByPath[pathname];
+
+  if (!guide) {
+    return null;
+  }
+
+  return <PageModeGuideCard {...guide} />;
+}

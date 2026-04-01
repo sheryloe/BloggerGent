@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -13,6 +13,7 @@ from app.services.blogger_editor_service import (
     is_blogger_playwright_enabled,
     sync_article_search_description,
 )
+from app.services.article_service import ensure_article_editorial_labels
 from app.services.html_assembler import assemble_article_html
 from app.services.providers.factory import get_blogger_provider
 from app.services.related_posts import find_related_articles
@@ -123,6 +124,9 @@ def upsert_article_blogger_post(
 
     db.commit()
     db.refresh(blogger_post)
+    from app.services.analytics_service import upsert_article_fact
+
+    upsert_article_fact(db, article.id)
     return blogger_post
 
 
@@ -204,6 +208,7 @@ def enqueue_publish_request(
     if get_active_publish_queue_item(article):
         raise ValueError("A publish request is already queued for this article.")
 
+    labels = ensure_article_editorial_labels(db, article)
     requested_time = scheduled_for or datetime.now(timezone.utc)
     not_before = _next_available_publish_time(db, blog_id=article.blog_id, requested_time=requested_time)
     validate_candidate_topic(
@@ -211,7 +216,7 @@ def enqueue_publish_request(
         blog_id=article.blog_id,
         title=article.title,
         excerpt=article.excerpt,
-        labels=list(article.labels or []),
+        labels=labels,
         content_html=article.assembled_html or article.html_article,
         target_datetime=not_before,
     )
@@ -265,13 +270,14 @@ def perform_publish_now(db: Session, *, article: Article, queue_item: PublishQue
     if not article.blog or not (article.blog.blogger_blog_id or "").strip():
         raise ValueError("Blogger blog is not connected for this article")
 
+    labels = ensure_article_editorial_labels(db, article)
     target_publish_datetime = datetime.now(timezone.utc)
     validate_candidate_topic(
         db,
         blog_id=article.blog_id,
         title=article.title,
         excerpt=article.excerpt,
-        labels=list(article.labels or []),
+        labels=labels,
         content_html=article.assembled_html or article.html_article,
         target_datetime=target_publish_datetime,
     )
@@ -297,7 +303,7 @@ def perform_publish_now(db: Session, *, article: Article, queue_item: PublishQue
             post_id=existing_post.blogger_post_id,
             title=article.title,
             content=assembled_html,
-            labels=article.labels,
+            labels=labels,
             meta_description=article.meta_description,
         )
         if existing_post.is_draft and hasattr(provider, "publish_draft"):
@@ -311,7 +317,7 @@ def perform_publish_now(db: Session, *, article: Article, queue_item: PublishQue
         summary, raw_payload = provider.publish(
             title=article.title,
             content=assembled_html or article.html_article,
-            labels=article.labels,
+            labels=labels,
             meta_description=article.meta_description,
             slug=article.slug,
             publish_mode=PublishMode.PUBLISH,
@@ -339,6 +345,9 @@ def perform_publish_now(db: Session, *, article: Article, queue_item: PublishQue
         raise ValueError("Article not found after publishing")
 
     _finalize_search_description_sync(db, refreshed)
+    from app.services.content_ops_service import review_article_publish_state
+
+    review_article_publish_state(db, refreshed.id, trigger="publish_queue")
 
     if queue_item:
         queue_item.status = "completed"

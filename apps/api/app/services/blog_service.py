@@ -11,8 +11,10 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import settings
 from app.models.entities import Blog, BlogAgentConfig, BloggerPost, Job, JobStatus, PostStatus, PublishMode, Topic, WorkflowStageType
+from app.services.audit_service import add_log
+from app.services.openai_usage_service import FREE_TIER_DEFAULT_LARGE_TEXT_MODEL, FREE_TIER_DEFAULT_SMALL_TEXT_MODEL
 from app.services.prompt_service import render_prompt_template
-from app.services.settings_service import get_settings_map
+from app.services.settings_service import get_settings_map, upsert_settings
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,7 +117,7 @@ STAGE_DEFINITIONS: dict[WorkflowStageType, WorkflowStageDefinition] = {
         is_required=False,
         removable=True,
         provider_hint="openai_text",
-        provider_model="gpt-4.1-mini",
+        provider_model="gpt-4.1-2025-04-14",
         default_name="주제 발굴 에이전트",
         default_role_name="Trend Discovery Agent",
         default_objective="국가와 독자층에 맞는 검색 수요 주제를 찾아 작업 대기열을 채웁니다.",
@@ -127,7 +129,7 @@ STAGE_DEFINITIONS: dict[WorkflowStageType, WorkflowStageDefinition] = {
         is_required=True,
         removable=False,
         provider_hint="openai_text",
-        provider_model="gpt-4.1-mini",
+        provider_model="gpt-4.1-2025-04-14",
         default_name="글쓰기 패키지 에이전트",
         default_role_name="SEO Writing Package Agent",
         default_objective="제목, 검색 설명, 라벨, 슬러그, 본문, FAQ, 기본 이미지 프롬프트를 한 번에 생성합니다.",
@@ -139,7 +141,7 @@ STAGE_DEFINITIONS: dict[WorkflowStageType, WorkflowStageDefinition] = {
         is_required=False,
         removable=True,
         provider_hint="openai_text",
-        provider_model="gpt-4.1-mini",
+        provider_model="gpt-4.1-mini-2025-04-14",
         default_name="이미지 프롬프트 정교화 에이전트",
         default_role_name="Image Prompt Refinement Agent",
         default_objective="글쓰기 패키지 결과에 포함된 기본 이미지 프롬프트를 더 세밀한 장면 지시로 다듬습니다.",
@@ -163,7 +165,7 @@ STAGE_DEFINITIONS: dict[WorkflowStageType, WorkflowStageDefinition] = {
         is_required=True,
         removable=False,
         provider_hint="openai_image",
-        provider_model="dall-e-3",
+        provider_model="gpt-image-1",
         default_name="이미지 생성 시스템 단계",
         default_role_name="System Image Generation Step",
         default_objective="이미지 프롬프트를 기반으로 대표 이미지를 생성합니다.",
@@ -196,7 +198,13 @@ STAGE_DEFINITIONS: dict[WorkflowStageType, WorkflowStageDefinition] = {
 
 
 def _prompt_path(file_name: str) -> Path:
-    return Path(settings.prompt_root) / file_name
+    primary = Path(settings.prompt_root) / file_name
+    if primary.exists():
+        return primary
+    fallback = Path(__file__).resolve().parents[4] / "prompts" / file_name
+    if fallback.exists():
+        return fallback
+    return primary
 
 
 def _load_prompt_file(file_name: str | None) -> str:
@@ -226,7 +234,7 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="외국인에게 인기 있는 한국 여행 검색 수요 주제를 찾습니다.",
                 prompt_file="travel_topic_discovery.md",
                 provider_hint="openai_text",
-                provider_model="gpt-4.1-mini",
+                provider_model="gpt-4.1-2025-04-14",
                 is_enabled=True,
                 sort_order=10,
             ),
@@ -237,7 +245,7 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="여행/축제/행사형 제목, 검색 설명, 태그, 본문, FAQ, 이미지 프롬프트를 한 번에 생성합니다.",
                 prompt_file="travel_article_generation.md",
                 provider_hint="openai_text",
-                provider_model="gpt-4.1-mini",
+                provider_model="gpt-4.1-2025-04-14",
                 is_enabled=True,
                 sort_order=20,
             ),
@@ -245,11 +253,11 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 stage_type=WorkflowStageType.IMAGE_PROMPT_GENERATION,
                 name="여행 이미지 프롬프트 정교화 에이전트",
                 role_name="Korea Travel Visual Director",
-                objective="여행 주제에 맞는 8컷 콜라주 대표 이미지 프롬프트를 더 정교하게 다듬습니다.",
+                objective="여행 주제에 맞는 3x3 패널 hero 대표 이미지 프롬프트를 더 정교하게 다듬습니다.",
                 prompt_file="travel_collage_prompt.md",
                 provider_hint="openai_text",
-                provider_model="gpt-4.1-mini",
-                is_enabled=False,
+                provider_model="gpt-4.1-mini-2025-04-14",
+                is_enabled=True,
                 sort_order=30,
             ),
             WorkflowStepBlueprint(
@@ -270,7 +278,7 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="여행 대표 이미지를 생성합니다.",
                 prompt_file=None,
                 provider_hint="openai_image",
-                provider_model="dall-e-3",
+                provider_model="gpt-image-1",
                 is_enabled=True,
                 sort_order=50,
             ),
@@ -318,7 +326,7 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="글로벌 검색 수요가 높은 세계 미스터리 주제를 찾습니다.",
                 prompt_file="mystery_topic_discovery.md",
                 provider_hint="openai_text",
-                provider_model="gpt-4.1-mini",
+                provider_model="gpt-4.1-2025-04-14",
                 is_enabled=True,
                 sort_order=10,
             ),
@@ -329,7 +337,7 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="제목, 검색 설명, 태그, 본문, FAQ, 이미지 프롬프트까지 포함한 미스터리 글쓰기 패키지를 생성합니다.",
                 prompt_file="mystery_article_generation.md",
                 provider_hint="openai_text",
-                provider_model="gpt-4.1-mini",
+                provider_model="gpt-4.1-2025-04-14",
                 is_enabled=True,
                 sort_order=20,
             ),
@@ -337,11 +345,11 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 stage_type=WorkflowStageType.IMAGE_PROMPT_GENERATION,
                 name="미스터리 이미지 프롬프트 정교화 에이전트",
                 role_name="Documentary cover prompt designer",
-                objective="사건 분위기에 맞는 다큐 스타일 이미지 프롬프트를 더 정교하게 다듬습니다.",
+                objective="사건 분위기에 맞는 3x3 다큐 스타일 hero 이미지 프롬프트를 더 정교하게 다듬습니다.",
                 prompt_file="mystery_collage_prompt.md",
                 provider_hint="openai_text",
-                provider_model="gpt-4.1-mini",
-                is_enabled=False,
+                provider_model="gpt-4.1-mini-2025-04-14",
+                is_enabled=True,
                 sort_order=30,
             ),
             WorkflowStepBlueprint(
@@ -362,7 +370,7 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="대표 이미지를 생성합니다.",
                 prompt_file=None,
                 provider_hint="openai_image",
-                provider_model="dall-e-3",
+                provider_model="gpt-image-1",
                 is_enabled=True,
                 sort_order=50,
             ),
@@ -407,7 +415,7 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="블로그 주제에 맞는 검색 수요 키워드를 발굴합니다.",
                 prompt_file="topic_discovery.md",
                 provider_hint="openai_text",
-                provider_model="gpt-4.1-mini",
+                provider_model="gpt-4.1-2025-04-14",
                 is_enabled=True,
                 sort_order=10,
             ),
@@ -418,7 +426,7 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="선택한 블로그 주제에 맞는 제목, 검색 설명, 본문, FAQ, 이미지 프롬프트를 생성합니다.",
                 prompt_file="article_generation.md",
                 provider_hint="openai_text",
-                provider_model="gpt-4.1-mini",
+                provider_model="gpt-4.1-2025-04-14",
                 is_enabled=True,
                 sort_order=20,
             ),
@@ -429,7 +437,7 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="본문 기반 대표 이미지 프롬프트를 추가로 정교화합니다.",
                 prompt_file="collage_prompt.md",
                 provider_hint="openai_text",
-                provider_model="gpt-4.1-mini",
+                provider_model="gpt-4.1-mini-2025-04-14",
                 is_enabled=False,
                 sort_order=30,
             ),
@@ -451,7 +459,7 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="대표 이미지를 생성합니다.",
                 prompt_file=None,
                 provider_hint="openai_image",
-                provider_model="dall-e-3",
+                provider_model="gpt-image-1",
                 is_enabled=True,
                 sort_order=50,
             ),
@@ -875,6 +883,121 @@ def ensure_all_blog_workflows(db: Session) -> None:
     blogs = db.execute(select(Blog).options(selectinload(Blog.agent_configs))).scalars().unique().all()
     for blog in blogs:
         ensure_blog_workflow_steps(db, blog)
+
+
+def enforce_free_tier_model_policy(db: Session) -> dict[str, object]:
+    settings_map = get_settings_map(db)
+    desired_settings = {
+        "openai_text_model": FREE_TIER_DEFAULT_SMALL_TEXT_MODEL,
+        "topic_discovery_model": FREE_TIER_DEFAULT_LARGE_TEXT_MODEL,
+        "article_generation_model": FREE_TIER_DEFAULT_LARGE_TEXT_MODEL,
+    }
+    settings_updates = {
+        key: value
+        for key, value in desired_settings.items()
+        if str(settings_map.get(key) or "").strip() != value
+    }
+    if settings_updates:
+        upsert_settings(db, settings_updates)
+
+    blogs = db.execute(select(Blog).options(selectinload(Blog.agent_configs))).scalars().unique().all()
+    workflow_updates: list[dict[str, object]] = []
+    openai_hints = {"openai", "openai_text"}
+    for blog in blogs:
+        for step in blog.agent_configs:
+            provider_hint = str(step.provider_hint or "").strip().lower()
+            if step.stage_type in {WorkflowStageType.TOPIC_DISCOVERY, WorkflowStageType.ARTICLE_GENERATION}:
+                if provider_hint not in openai_hints:
+                    continue
+                expected_model = FREE_TIER_DEFAULT_LARGE_TEXT_MODEL
+            elif step.stage_type == WorkflowStageType.IMAGE_PROMPT_GENERATION:
+                if provider_hint not in openai_hints:
+                    continue
+                expected_model = FREE_TIER_DEFAULT_SMALL_TEXT_MODEL
+            else:
+                continue
+
+            if str(step.provider_model or "").strip() == expected_model:
+                continue
+
+            previous_model = str(step.provider_model or "").strip()
+            step.provider_model = expected_model
+            db.add(step)
+            workflow_updates.append(
+                {
+                    "blog_id": blog.id,
+                    "stage_type": step.stage_type.value,
+                    "previous_model": previous_model,
+                    "updated_model": expected_model,
+                }
+            )
+
+    if workflow_updates:
+        db.commit()
+
+    if settings_updates or workflow_updates:
+        add_log(
+            db,
+            job=None,
+            stage="free_tier_policy_sync",
+            message="Synchronized free-tier model policy for settings and workflows.",
+            payload={
+                "settings_updates": settings_updates,
+                "workflow_updates": workflow_updates,
+                "large_model": FREE_TIER_DEFAULT_LARGE_TEXT_MODEL,
+                "small_model": FREE_TIER_DEFAULT_SMALL_TEXT_MODEL,
+            },
+        )
+    return {
+        "settings_updates": settings_updates,
+        "workflow_updates": workflow_updates,
+    }
+
+
+def sync_stage_prompts_from_profile_files(
+    db: Session,
+    *,
+    blog: Blog,
+    stage_types: tuple[WorkflowStageType, ...] = (
+        WorkflowStageType.ARTICLE_GENERATION,
+        WorkflowStageType.IMAGE_PROMPT_GENERATION,
+    ),
+) -> list[dict[str, str]]:
+    profile_key = _resolve_profile_key(blog)
+    blueprint_map = _workflow_blueprint_map(profile_key)
+    updates: list[dict[str, str]] = []
+
+    for stage_type in stage_types:
+        step = get_workflow_step(blog, stage_type)
+        blueprint = blueprint_map.get(stage_type)
+        if not step or not blueprint or not blueprint.prompt_file:
+            continue
+        prompt_from_file = _load_prompt_file(blueprint.prompt_file)
+        if (step.prompt_template or "").strip() == prompt_from_file.strip():
+            continue
+
+        step.prompt_template = prompt_from_file
+        db.add(step)
+        updates.append(
+            {
+                "stage_type": stage_type.value,
+                "agent_key": step.agent_key,
+                "prompt_file": blueprint.prompt_file,
+            }
+        )
+
+    if updates:
+        db.commit()
+        refreshed = get_blog(db, blog.id) or blog
+        add_log(
+            db,
+            job=None,
+            stage="workflow_prompt_sync",
+            message=f"Synchronized workflow prompts from files for blog '{refreshed.name}'.",
+            payload={"blog_id": refreshed.id, "profile_key": profile_key, "updates": updates},
+        )
+        return updates
+    return []
 
 
 def ensure_unique_blog_slug(db: Session, name: str, current_blog_id: int | None = None) -> str:

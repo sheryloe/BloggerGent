@@ -110,10 +110,13 @@ def filter_duplicate_topic_items(
     *,
     blog_id: int,
     items: list[TopicDiscoveryItem],
+    metadata_by_keyword: dict[str, dict[str, str]] | None = None,
 ) -> tuple[list[TopicDiscoveryItem], list[dict[str, str]]]:
     kept: list[TopicDiscoveryItem] = []
     skipped: list[dict[str, str]] = []
     accepted_keywords: list[str] = []
+    accepted_cluster_angles: set[tuple[str, str]] = set()
+    metadata_by_keyword = metadata_by_keyword or {}
 
     for item in items:
         intra_match = next((keyword for keyword in accepted_keywords if _is_similar(item.keyword, keyword)), None)
@@ -126,7 +129,28 @@ def filter_duplicate_topic_items(
             )
             continue
 
-        existing_match = find_duplicate_match(db, blog_id=blog_id, candidate=item.keyword)
+        metadata = metadata_by_keyword.get(item.keyword, {})
+        cluster_key = _normalize(metadata.get("topic_cluster_key") or metadata.get("topic_cluster_label"))
+        angle_key = _normalize(metadata.get("topic_angle_key") or metadata.get("topic_angle_label"))
+        cluster_angle_pair = (cluster_key, angle_key)
+        if cluster_key and angle_key and cluster_angle_pair in accepted_cluster_angles:
+            skipped.append(
+                {
+                    "keyword": item.keyword,
+                    "reason": (
+                        "Another topic with the same main cluster and angle is already accepted in this batch. "
+                        "Keep materially different angles only."
+                    ),
+                }
+            )
+            continue
+
+        existing_match = find_duplicate_match(
+            db,
+            blog_id=blog_id,
+            candidate=item.keyword,
+            include_topics=False,
+        )
         if existing_match:
             skipped.append(
                 {
@@ -138,6 +162,8 @@ def filter_duplicate_topic_items(
 
         kept.append(item)
         accepted_keywords.append(item.keyword)
+        if cluster_key and angle_key:
+            accepted_cluster_angles.add(cluster_angle_pair)
 
     return kept, skipped
 
