@@ -133,6 +133,20 @@ def _key_extension(key: str) -> str:
     return ""
 
 
+def _candidate_object_keys(key: str, public_base_url: str) -> list[str]:
+    normalized = (key or "").strip().lstrip("/")
+    if not normalized:
+        return []
+
+    candidates: list[str] = [normalized]
+    base_path = (urlparse(public_base_url).path or "").strip("/")
+    if base_path and normalized.startswith(f"{base_path}/"):
+        stripped = normalized[len(base_path) + 1 :].lstrip("/")
+        if stripped and stripped not in candidates:
+            candidates.append(stripped)
+    return candidates
+
+
 def _swap_extension(url: str, old_ext: str, new_ext: str) -> str:
     parsed = urlparse(url)
     path = parsed.path or ""
@@ -477,12 +491,14 @@ def main() -> int:
 
         exists_cache: dict[str, bool] = {}
         size_cache: dict[str, int | None] = {}
+        key_resolution: dict[str, str] = {}
+        webp_resolution: dict[str, str] = {}
 
         def _exists(key: str) -> bool:
             if key in exists_cache:
                 return exists_cache[key]
             try:
-                exists_cache[key] = cloudflare_r2_object_exists(db, public_key=public_key, key=key)
+                exists_cache[key] = cloudflare_r2_object_exists(db, public_key="", key=key)
             except Exception as exc:
                 exists_cache[key] = False
                 errors.append(f"exists_failed:{key}:{exc}")
@@ -492,18 +508,35 @@ def main() -> int:
             if key in size_cache:
                 return size_cache[key]
             try:
-                size_cache[key] = cloudflare_r2_object_size(db, public_key=public_key, key=key)
+                size_cache[key] = cloudflare_r2_object_size(db, public_key="", key=key)
             except Exception as exc:
                 size_cache[key] = None
                 errors.append(f"size_failed:{key}:{exc}")
             return size_cache[key]
 
+        def _first_existing_key(candidates: list[str]) -> str:
+            for candidate in candidates:
+                if _exists(candidate):
+                    return candidate
+            return ""
+
         png_plan: dict[str, dict[str, Any]] = {}
         png_size_cache: dict[str, int] = {}
         for png_key in sorted(public_png_keys):
-            webp_key = png_key[:-4] + ".webp"
-            png_exists = _exists(png_key)
-            webp_exists = _exists(webp_key) if png_exists else _exists(webp_key)
+            png_candidates = _candidate_object_keys(png_key, public_base_url=public_base_url)
+            if not png_candidates:
+                png_candidates = [png_key]
+            webp_candidates = [candidate[:-4] + ".webp" for candidate in png_candidates]
+
+            existing_png_key = _first_existing_key(png_candidates)
+            existing_webp_key = _first_existing_key(webp_candidates)
+            png_exists = bool(existing_png_key)
+            webp_exists = bool(existing_webp_key)
+            effective_png_key = existing_png_key or png_candidates[0]
+            effective_webp_key = existing_webp_key or webp_candidates[0]
+            key_resolution[png_key] = effective_png_key
+            webp_resolution[png_key] = effective_webp_key
+
             if not png_exists:
                 action = "missing_png"
             elif webp_exists:
@@ -513,7 +546,9 @@ def main() -> int:
                 summary["png_convert_planned"] += 1
             png_plan[png_key] = {
                 "png_key": png_key,
-                "webp_key": webp_key,
+                "webp_key": effective_webp_key,
+                "effective_png_key": effective_png_key,
+                "effective_webp_key": effective_webp_key,
                 "png_exists": png_exists,
                 "webp_exists": webp_exists,
                 "action": action,
@@ -522,11 +557,15 @@ def main() -> int:
         webp_only_png_deletes: list[str] = []
         if args.delete_png:
             for webp_key in sorted(public_webp_keys):
-                png_key = webp_key[:-5] + ".png"
-                if png_key in public_png_keys:
-                    continue
-                if _exists(png_key):
-                    webp_only_png_deletes.append(png_key)
+                webp_candidates = _candidate_object_keys(webp_key, public_base_url=public_base_url)
+                png_candidates = [candidate[:-5] + ".png" for candidate in webp_candidates if candidate.lower().endswith(".webp")]
+                for png_key in png_candidates:
+                    if png_key in public_png_keys:
+                        continue
+                    if _exists(png_key):
+                        if png_key not in webp_only_png_deletes:
+                            webp_only_png_deletes.append(png_key)
+                        break
         summary["webp_only_png_delete_planned"] = len(webp_only_png_deletes)
 
         orphan_deletes: list[str] = []
@@ -550,7 +589,8 @@ def main() -> int:
 
         for png_key, plan in png_plan.items():
             action = plan["action"]
-            webp_key = plan["webp_key"]
+            effective_png_key = plan["effective_png_key"]
+            webp_key = plan["effective_webp_key"]
             if action == "missing_png":
                 if plan["webp_exists"]:
                     webp_available.add(webp_key)
@@ -559,7 +599,7 @@ def main() -> int:
                         "action": "png_missing",
                         "source": "r2",
                         "post_id": "",
-                        "key": png_key,
+                        "key": effective_png_key,
                         "url": "",
                         "status": "skipped",
                         "detail": "webp_exists" if plan["webp_exists"] else "webp_missing",
@@ -579,7 +619,7 @@ def main() -> int:
                         "action": "png_to_webp",
                         "source": "r2",
                         "post_id": "",
-                        "key": png_key,
+                        "key": effective_png_key,
                         "url": "",
                         "status": "planned",
                         "detail": "convert",
@@ -588,7 +628,7 @@ def main() -> int:
                 continue
 
             try:
-                png_bytes = cloudflare_r2_download_binary(db, public_key=public_key, key=png_key)
+                png_bytes = cloudflare_r2_download_binary(db, public_key="", key=effective_png_key)
                 png_size_cache[png_key] = len(png_bytes)
                 webp_bytes = _webp_bytes_from_png(png_bytes, quality=int(args.quality))
                 upload_binary_to_cloudflare_r2(
@@ -605,7 +645,7 @@ def main() -> int:
                         "action": "png_to_webp",
                         "source": "r2",
                         "post_id": "",
-                        "key": png_key,
+                        "key": effective_png_key,
                         "url": "",
                         "status": "ok",
                         "detail": "converted",
@@ -631,7 +671,7 @@ def main() -> int:
         for url, key in url_to_key.items():
             if _key_extension(key) != "png":
                 continue
-            webp_key = key[:-4] + ".webp"
+            webp_key = webp_resolution.get(key, key[:-4] + ".webp")
             if webp_key not in webp_available:
                 continue
             replacements[url] = _swap_png_to_webp(url)
@@ -914,20 +954,29 @@ def main() -> int:
             content_overrides=applied_content_overrides,
         )
 
-        deletable_png_candidates: dict[str, str] = {}
+        deletable_png_candidates: dict[str, dict[str, str]] = {}
         if args.delete_png:
             for png_key, plan in png_plan.items():
                 if not plan["png_exists"]:
                     continue
-                webp_key = plan["webp_key"]
+                webp_key = plan["effective_webp_key"]
                 if webp_key not in webp_available:
                     continue
                 item_indices = png_key_to_items.get(png_key, set())
                 if item_indices and not all(item_update_ok.get(idx, False) for idx in item_indices):
                     continue
-                deletable_png_candidates[png_key] = "after_update"
+                deletable_png_candidates[png_key] = {
+                    "reason": "after_update",
+                    "delete_key": plan["effective_png_key"],
+                }
             for png_key in webp_only_png_deletes:
-                deletable_png_candidates.setdefault(png_key, "webp_only")
+                deletable_png_candidates.setdefault(
+                    png_key,
+                    {
+                        "reason": "webp_only",
+                        "delete_key": png_key,
+                    },
+                )
 
         skipped_ref_png_keys = sorted(key for key in deletable_png_candidates if key in remaining_png_keys)
         summary["png_skipped_ref_exists"] = len(skipped_ref_png_keys)
@@ -940,7 +989,7 @@ def main() -> int:
                     "key": png_key,
                     "url": "",
                     "status": "skipped",
-                    "detail": f"ref_exists:{deletable_png_candidates.get(png_key, '')}",
+                    "detail": f"ref_exists:{deletable_png_candidates.get(png_key, {}).get('reason', '')}",
                 }
             )
 
@@ -948,7 +997,9 @@ def main() -> int:
         summary["png_delete_planned"] = len(deletable_png_keys)
 
         for png_key in deletable_png_keys:
-            reason = deletable_png_candidates.get(png_key, "after_update")
+            meta = deletable_png_candidates.get(png_key, {})
+            reason = meta.get("reason", "after_update")
+            delete_key = meta.get("delete_key", png_key)
             if dry_run:
                 summary["png_deleted"] += 1
                 action_rows.append(
@@ -956,7 +1007,7 @@ def main() -> int:
                         "action": "png_delete",
                         "source": "r2",
                         "post_id": "",
-                        "key": png_key,
+                        "key": delete_key,
                         "url": "",
                         "status": "planned",
                         "detail": reason,
@@ -964,10 +1015,10 @@ def main() -> int:
                 )
                 continue
             try:
-                size_value = png_size_cache.get(png_key)
+                size_value = png_size_cache.get(delete_key)
                 if size_value is None:
-                    size_value = _size(png_key)
-                delete_cloudflare_r2_asset(db, object_key=png_key)
+                    size_value = _size(delete_key)
+                delete_cloudflare_r2_asset(db, object_key=delete_key)
                 if size_value:
                     summary["bytes_deleted"] += int(size_value)
                 summary["png_deleted"] += 1
@@ -976,7 +1027,7 @@ def main() -> int:
                         "action": "png_delete",
                         "source": "r2",
                         "post_id": "",
-                        "key": png_key,
+                        "key": delete_key,
                         "url": "",
                         "status": "ok",
                         "detail": reason,
@@ -984,13 +1035,13 @@ def main() -> int:
                 )
             except Exception as exc:
                 summary["failures"] += 1
-                errors.append(f"png_delete_failed:{png_key}:{exc}")
+                errors.append(f"png_delete_failed:{delete_key}:{exc}")
                 action_rows.append(
                     {
                         "action": "png_delete",
                         "source": "r2",
                         "post_id": "",
-                        "key": png_key,
+                        "key": delete_key,
                         "url": "",
                         "status": "failed",
                         "detail": str(exc),

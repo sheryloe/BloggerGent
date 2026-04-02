@@ -1,0 +1,180 @@
+from __future__ import annotations
+
+from datetime import date, datetime
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+
+from app.core.config import settings as app_settings
+from app.db.base import Base
+from app.models.entities import Blog, BlogTheme, ContentPlanDay, ContentPlanSlot, PublishMode, WorkflowStageType
+from app.services import planner_service
+from app.services.blog_service import stage_supports_prompt
+from app.services.settings_service import get_settings_map, upsert_settings
+
+
+@pytest.fixture()
+def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Session:
+    monkeypatch.setattr(app_settings, "storage_root", str(tmp_path / "storage"))
+    monkeypatch.setattr(app_settings, "settings_encryption_secret", "test-secret")
+
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
+    Base.metadata.create_all(engine)
+
+    session = SessionLocal()
+    get_settings_map(session)
+    try:
+        yield session
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def _seed_blog(db: Session, *, blog_id: int, name: str, slug: str, profile_key: str) -> Blog:
+    blog = Blog(
+        id=blog_id,
+        name=name,
+        slug=slug,
+        content_category="custom",
+        primary_language="ko",
+        profile_key=profile_key,
+        publish_mode=PublishMode.DRAFT,
+        is_active=True,
+    )
+    db.add(blog)
+    db.commit()
+    db.refresh(blog)
+    return blog
+
+
+def test_blogger_travel_categories_follow_editorial_weights(db: Session) -> None:
+    blog = _seed_blog(db, blog_id=34, name="Travel", slug="travel", profile_key="korea_travel")
+    upsert_settings(db, {"travel_editorial_weights": "Travel:50,Culture:30,Food:20"})
+
+    categories = planner_service.list_categories(db, channel_id=f"blogger:{blog.id}")
+
+    assert [item.key for item in categories] == ["travel", "culture", "food"]
+    assert [item.weight for item in categories] == [50, 30, 20]
+
+
+def test_blogger_mystery_categories_use_real_profile(db: Session) -> None:
+    blog = _seed_blog(db, blog_id=35, name="Mystery", slug="mystery", profile_key="world_mystery")
+
+    categories = planner_service.list_categories(db, channel_id=f"blogger:{blog.id}")
+
+    assert [item.key for item in categories] == ["case-files", "mystery-archives", "legends-lore"]
+
+
+def test_cloudflare_categories_use_leaf_category_weights(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(planner_service, "get_cloudflare_overview", lambda _db: {"channel_id": "dongriarchive", "channel_name": "Dongri Archive"})
+    monkeypatch.setattr(
+        planner_service,
+        "list_cloudflare_categories",
+        lambda _db: [
+            {"id": "travel", "slug": "여행과-기록", "name": "여행과 기록", "isLeaf": True},
+            {"id": "culture", "slug": "문화와-공간", "name": "문화와 공간", "isLeaf": True},
+            {"id": "root", "slug": "root", "name": "Root", "isLeaf": False},
+        ],
+    )
+
+    categories = planner_service.list_categories(db, channel_id="cloudflare:dongriarchive")
+
+    assert [item.key for item in categories] == ["여행과-기록", "문화와-공간"]
+    assert [item.weight for item in categories] == [10, 12]
+
+
+def test_month_plan_accepts_legacy_blog_id_alias(db: Session) -> None:
+    blog = _seed_blog(db, blog_id=34, name="Travel", slug="travel", profile_key="korea_travel")
+
+    calendar = planner_service.create_month_plan(db, channel_id=None, blog_id=blog.id, month="2026-04", overwrite=True)
+
+    assert calendar.channel_id == f"blogger:{blog.id}"
+    assert calendar.blog_id == blog.id
+    assert calendar.days
+
+
+def test_get_calendar_normalizes_legacy_theme_slots(db: Session) -> None:
+    blog = _seed_blog(db, blog_id=34, name="Travel", slug="travel", profile_key="korea_travel")
+    legacy_theme = BlogTheme(
+        blog_id=blog.id,
+        key="insight",
+        name="Insight",
+        weight=100,
+        color="#2563eb",
+        sort_order=1,
+        is_active=True,
+    )
+    db.add(legacy_theme)
+    db.flush()
+
+    plan_day = ContentPlanDay(
+        channel_id=f"blogger:{blog.id}",
+        blog_id=blog.id,
+        plan_date=date(2026, 4, 1),
+        target_post_count=1,
+        status="planned",
+    )
+    db.add(plan_day)
+    db.flush()
+
+    db.add(
+        ContentPlanSlot(
+            plan_day_id=plan_day.id,
+            theme_id=legacy_theme.id,
+            category_key="insight",
+            category_name="Insight",
+            category_color="#2563eb",
+            scheduled_for=datetime(2026, 4, 1, 9, 0, 0),
+            slot_order=1,
+            status="planned",
+            result_payload={},
+        )
+    )
+    db.commit()
+
+    calendar = planner_service.get_calendar(db, channel_id=f"blogger:{blog.id}", month="2026-04")
+
+    assert calendar.days[0].slots[0].category_key == "travel"
+    assert calendar.days[0].slots[0].category_name == "Travel"
+
+
+def test_slot_create_update_and_generate_use_category_key(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    blog = _seed_blog(db, blog_id=34, name="Travel", slug="travel", profile_key="korea_travel")
+    calendar = planner_service.create_month_plan(db, channel_id=f"blogger:{blog.id}", blog_id=None, month="2026-04", overwrite=True)
+    plan_day = calendar.days[0]
+
+    created = planner_service.create_slot(
+        db,
+        planner_service.PlannerSlotCreate(
+            plan_day_id=plan_day.id,
+            category_key="culture",
+            scheduled_for=f"{plan_day.plan_date}T10:00:00",
+            brief_topic="서울 전시 일정",
+            brief_audience="주말에 볼거리를 찾는 독자",
+        ),
+    )
+    assert created.category_key == "culture"
+
+    updated = planner_service.update_slot(
+        db,
+        created.id,
+        planner_service.PlannerSlotUpdate(category_key="food", brief_topic="성수 브런치 추천"),
+    )
+    assert updated.category_key == "food"
+
+    monkeypatch.setattr(planner_service, "create_job", lambda *args, **kwargs: SimpleNamespace(id=99))
+    monkeypatch.setattr(planner_service.run_job, "delay", lambda *_args: None)
+
+    generated = planner_service.run_slot_generation(db, updated.id)
+
+    assert generated.job_id == 99
+    assert generated.category_key == "food"
+    assert generated.status == "queued"
+
+
+def test_publishing_stage_stays_non_prompt() -> None:
+    assert stage_supports_prompt(WorkflowStageType.PUBLISHING) is False

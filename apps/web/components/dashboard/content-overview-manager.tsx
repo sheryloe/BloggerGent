@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -67,6 +67,12 @@ function scoreTone(score: number) {
   return "border-rose-200 bg-rose-500/10 text-rose-700";
 }
 
+function similarityTone(score: number) {
+  if (score >= 75) return "border-rose-200 bg-rose-500/10 text-rose-700";
+  if (score >= 55) return "border-amber-200 bg-amber-500/10 text-amber-700";
+  return "border-emerald-200 bg-emerald-500/10 text-emerald-700";
+}
+
 function actionTone(value: string) {
   if (value.includes("rewrite") || value.includes("duplicate") || value.includes("review")) {
     return "bg-amber-500/10 text-amber-700";
@@ -75,6 +81,13 @@ function actionTone(value: string) {
     return "bg-sky-500/10 text-sky-700";
   }
   return "bg-emerald-500/10 text-emerald-700";
+}
+
+function reviewTone(row: Pick<ContentOverviewRow, "auto_fixable" | "manual_review" | "quality_status">) {
+  if (row.manual_review) return "bg-amber-500/10 text-amber-700";
+  if (row.auto_fixable) return "bg-sky-500/10 text-sky-700";
+  if ((row.quality_status ?? "").toLowerCase().includes("ok")) return "bg-emerald-500/10 text-emerald-700";
+  return "bg-slate-500/10 text-slate-700";
 }
 
 export function ContentOverviewManager({
@@ -101,6 +114,7 @@ export function ContentOverviewManager({
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState("");
   const [loading, startTransition] = useTransition();
+  const [expandedArticleId, setExpandedArticleId] = useState<number | null>(null);
   const initializedRef = useRef(false);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -274,66 +288,108 @@ export function ContentOverviewManager({
           <CardTitle>시트 기반 품질 검토</CardTitle>
         </CardHeader>
         <CardContent className="overflow-x-auto">
-          <div className="min-w-[1280px]">
-            <Table>
+          <div className="min-w-[920px]">
+            <Table className="table-fixed">
               <TableHeader>
                 <TableRow>
                   <TableHead>제목</TableHead>
-                  <TableHead>본문 URL</TableHead>
-                  <TableHead>프로필</TableHead>
-                  <TableHead>카테고리</TableHead>
-                  <TableHead>카테고리 키</TableHead>
-                  <TableHead>주제 클러스터</TableHead>
-                  <TableHead>주제 각도</TableHead>
-                  <TableHead>유사율</TableHead>
-                  <TableHead>SEO</TableHead>
-                  <TableHead>GEO</TableHead>
-                  <TableHead>미디어 상태</TableHead>
-                  <TableHead>품질 상태</TableHead>
-                  <TableHead>권장 조치</TableHead>
-                  <TableHead>재작성</TableHead>
-                  <TableHead>마지막 점검</TableHead>
+                  <TableHead className="w-[120px]">품질</TableHead>
+                  <TableHead className="w-[90px]">SEO</TableHead>
+                  <TableHead className="w-[90px]">GEO</TableHead>
+                  <TableHead className="w-[90px]">유사율</TableHead>
+                  <TableHead className="w-[260px]">권장</TableHead>
+                  <TableHead className="w-[120px]">링크</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {rows.map((row) => (
-                  <TableRow key={row.article_id}>
-                    <TableCell className="max-w-[260px]">
-                      <p className="line-clamp-2 font-medium text-slate-900">{row.title}</p>
-                    </TableCell>
-                    <TableCell className="max-w-[220px]">
-                      {row.url ? (
-                        <a href={row.url} target="_blank" rel="noreferrer" className="text-blue-700 underline underline-offset-4">
-                          {row.url}
-                        </a>
-                      ) : (
-                        "-"
-                      )}
-                    </TableCell>
-                    <TableCell>{row.profile}</TableCell>
-                    <TableCell>{row.content_category || "-"}</TableCell>
-                    <TableCell>{row.category_key || "-"}</TableCell>
-                    <TableCell>{row.topic_cluster || "-"}</TableCell>
-                    <TableCell>{row.topic_angle || "-"}</TableCell>
-                    <TableCell>
-                      <Badge className={actionTone(row.suggested_action)}>{formatScore(row.similarity_score)}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={scoreTone(clampScore(row.seo_score))}>{formatScore(row.seo_score)}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={scoreTone(clampScore(row.geo_score))}>{formatScore(row.geo_score)}</Badge>
-                    </TableCell>
-                    <TableCell>{row.media_state || "-"}</TableCell>
-                    <TableCell>{row.quality_status || "-"}</TableCell>
-                    <TableCell className="max-w-[220px] text-xs text-slate-600">{row.suggested_action || "-"}</TableCell>
-                    <TableCell>{row.rewrite_attempts}</TableCell>
-                    <TableCell>{formatDate(row.last_audited_at)}</TableCell>
-                  </TableRow>
+                  <Fragment key={row.article_id}>
+                    <TableRow key={row.article_id}>
+                      <TableCell className="align-top">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <button
+                              type="button"
+                              onClick={() => setExpandedArticleId((prev) => (prev === row.article_id ? null : row.article_id))}
+                              className="block w-full text-left"
+                            >
+                              <p className="line-clamp-2 font-medium text-slate-900">{row.title}</p>
+                            </button>
+                            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                              <span className="rounded-full bg-slate-100 px-3 py-1">{row.blog}</span>
+                              <span className="rounded-full bg-slate-100 px-3 py-1">{row.profile}</span>
+                              <span className="rounded-full bg-slate-100 px-3 py-1">{row.status}</span>
+                              <span className="rounded-full bg-slate-100 px-3 py-1">업데이트 {formatDate(row.updated_at)}</span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setExpandedArticleId((prev) => (prev === row.article_id ? null : row.article_id))}
+                            className="shrink-0 rounded-2xl bg-slate-100 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-200"
+                          >
+                            {expandedArticleId === row.article_id ? "접기" : "상세"}
+                          </button>
+                        </div>
+                      </TableCell>
+                      <TableCell className="align-top">
+                        <Badge className={reviewTone(row)}>{row.quality_status || "미정"}</Badge>
+                      </TableCell>
+                      <TableCell className="align-top">
+                        <Badge className={scoreTone(clampScore(row.seo_score))}>{formatScore(row.seo_score)}</Badge>
+                      </TableCell>
+                      <TableCell className="align-top">
+                        <Badge className={scoreTone(clampScore(row.geo_score))}>{formatScore(row.geo_score)}</Badge>
+                      </TableCell>
+                      <TableCell className="align-top">
+                        <Badge className={similarityTone(clampScore(row.similarity_score))}>{formatScore(row.similarity_score)}</Badge>
+                      </TableCell>
+                      <TableCell className="align-top">
+                        {row.suggested_action ? (
+                          <div className="space-y-2">
+                            <Badge className={actionTone(row.suggested_action)}>{row.auto_fixable ? "자동 수정 가능" : row.manual_review ? "수동 검토" : "확인"}</Badge>
+                            <p className="line-clamp-2 text-xs leading-5 text-slate-600">{row.suggested_action}</p>
+                          </div>
+                        ) : (
+                          "-"
+                        )}
+                      </TableCell>
+                      <TableCell className="align-top">
+                        {row.url ? (
+                          <a
+                            href={row.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center justify-center rounded-2xl bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+                          >
+                            사이트가기
+                          </a>
+                        ) : (
+                          "-"
+                        )}
+                      </TableCell>
+                    </TableRow>
+
+                    {expandedArticleId === row.article_id ? (
+                      <TableRow key={`${row.article_id}-details`}>
+                        <TableCell colSpan={7} className="bg-slate-50/60">
+                          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                            <DetailLine label="카테고리" value={row.content_category || "-"} />
+                            <DetailLine label="카테고리 키" value={row.category_key || "-"} />
+                            <DetailLine label="주제 클러스터" value={row.topic_cluster || "-"} />
+                            <DetailLine label="주제 각도" value={row.topic_angle || "-"} />
+                            <DetailLine label="미디어 상태" value={row.media_state || "-"} />
+                            <DetailLine label="재작성" value={String(row.rewrite_attempts ?? 0)} />
+                            <DetailLine label="마지막 점검" value={formatDate(row.last_audited_at)} />
+                            <DetailLine label="가장 유사한 URL" value={row.most_similar_url || "-"} href={row.most_similar_url || undefined} />
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
+                  </Fragment>
                 ))}
                 {rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={15} className="py-8 text-center text-slate-500">
+                    <TableCell colSpan={7} className="py-8 text-center text-slate-500">
                       현재 필터에 해당하는 글이 없습니다.
                     </TableCell>
                   </TableRow>
@@ -368,4 +424,17 @@ export function ContentOverviewManager({
   );
 }
 
-
+function DetailLine({ label, value, href }: { label: string; value: string; href?: string }) {
+  return (
+    <div className="rounded-[22px] bg-white p-4 shadow-sm">
+      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">{label}</p>
+      {href && href !== "-" ? (
+        <a href={href} target="_blank" rel="noreferrer" className="mt-2 block break-words text-sm font-medium text-indigo-600 hover:underline">
+          {value}
+        </a>
+      ) : (
+        <p className="mt-2 break-words text-sm font-medium text-slate-900">{value}</p>
+      )}
+    </div>
+  );
+}

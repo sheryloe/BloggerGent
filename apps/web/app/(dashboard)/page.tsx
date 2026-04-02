@@ -74,7 +74,7 @@ export default async function DashboardHomePage() {
                     <p className="font-semibold text-slate-900">{channel.name}</p>
                     <p className="mt-1 text-sm text-slate-500">{channel.provider} · {channel.primaryCategory ?? "카테고리 미설정"}</p>
                   </div>
-                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${channel.plannerSupported ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                  <span className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold sm:px-3 sm:text-xs ${channel.plannerSupported ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
                     {channel.plannerSupported ? "플래너 지원" : "계획 미지원"}
                   </span>
                 </div>

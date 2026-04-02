@@ -1250,17 +1250,6 @@ class PromptFlowReorderRequest(BaseModel):
 
 
 class PlannerCategoryRead(BaseModel):
-    id: int
-    key: str
-    name: str
-    weight: int
-    color: str | None = None
-    sort_order: int
-    is_active: bool
-
-
-class PlannerThemeRead(BaseModel):
-    id: int
     key: str
     name: str
     weight: int
@@ -1271,7 +1260,7 @@ class PlannerThemeRead(BaseModel):
 
 class PlannerSlotCreate(BaseModel):
     plan_day_id: int
-    theme_id: int
+    category_key: str = Field(min_length=1, max_length=100)
     scheduled_for: str
     brief_topic: str | None = None
     brief_audience: str | None = None
@@ -1280,7 +1269,7 @@ class PlannerSlotCreate(BaseModel):
 
 
 class PlannerSlotUpdate(BaseModel):
-    theme_id: int | None = None
+    category_key: str | None = Field(default=None, min_length=1, max_length=100)
     scheduled_for: str | None = None
     slot_order: int | None = None
     brief_topic: str | None = None
@@ -1294,12 +1283,14 @@ class PlannerSlotUpdate(BaseModel):
 class PlannerSlotRead(BaseModel):
     id: int
     plan_day_id: int
+    channel_id: str
+    publish_mode: str | None = None
     theme_id: int | None = None
     theme_key: str | None = None
     theme_name: str | None = None
-    category_id: int | None = None
     category_key: str | None = None
     category_name: str | None = None
+    category_color: str | None = None
     scheduled_for: str | None = None
     slot_order: int
     status: str
@@ -1319,31 +1310,37 @@ class PlannerSlotRead(BaseModel):
     article_quality_status: str | None = None
     article_publish_status: str | None = None
     article_published_url: str | None = None
+    result_title: str | None = None
+    result_url: str | None = None
+    result_status: str | None = None
+    quality_gate_status: str | None = None
 
 
 class PlannerDayRead(BaseModel):
     id: int
-    blog_id: int
+    channel_id: str
+    blog_id: int | None = None
     plan_date: str
     target_post_count: int
     status: str
     slot_count: int
-    theme_mix: dict[str, int]
     category_mix: dict[str, int]
     slots: list[PlannerSlotRead]
 
 
 class PlannerCalendarRead(BaseModel):
-    blog_id: int
-    blog_name: str
+    channel_id: str
+    channel_name: str
+    channel_provider: str
+    blog_id: int | None = None
     month: str
     categories: list[PlannerCategoryRead] = Field(default_factory=list)
-    themes: list[PlannerThemeRead]
     days: list[PlannerDayRead]
 
 
 class PlannerMonthPlanRequest(BaseModel):
-    blog_id: int
+    channel_id: str | None = None
+    blog_id: int | None = Field(default=None, ge=1)
     month: str
     target_post_count: int | None = None
     overwrite: bool = False

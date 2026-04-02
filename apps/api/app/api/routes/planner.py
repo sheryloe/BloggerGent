@@ -27,37 +27,58 @@ router = APIRouter(prefix="/planner", tags=["planner"])
 
 @router.get("/calendar", response_model=PlannerCalendarRead)
 def read_calendar(
-    blog_id: int = Query(..., ge=1),
+    channel_id: str | None = Query(default=None),
+    blog_id: int | None = Query(default=None, ge=1),
     month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
     db: Session = Depends(get_db),
 ) -> PlannerCalendarRead:
-    return get_calendar(db, blog_id=blog_id, month=month)
+    try:
+        return get_calendar(db, channel_id=channel_id, blog_id=blog_id, month=month)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.get("/categories", response_model=list[PlannerCategoryRead])
-def read_categories(blog_id: int = Query(..., ge=1), db: Session = Depends(get_db)) -> list[PlannerCategoryRead]:
-    return list_categories(db, blog_id=blog_id)
+def read_categories(
+    channel_id: str | None = Query(default=None),
+    blog_id: int | None = Query(default=None, ge=1),
+    db: Session = Depends(get_db),
+) -> list[PlannerCategoryRead]:
+    try:
+        return list_categories(db, channel_id=channel_id, blog_id=blog_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.post("/month-plan", response_model=PlannerCalendarRead, status_code=status.HTTP_201_CREATED)
 def build_month_plan(payload: PlannerMonthPlanRequest, db: Session = Depends(get_db)) -> PlannerCalendarRead:
-    return create_month_plan(
-        db,
-        blog_id=payload.blog_id,
-        month=payload.month,
-        target_post_count=payload.target_post_count,
-        overwrite=payload.overwrite,
-    )
+    try:
+        return create_month_plan(
+            db,
+            channel_id=payload.channel_id,
+            blog_id=payload.blog_id,
+            month=payload.month,
+            target_post_count=payload.target_post_count,
+            overwrite=payload.overwrite,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.post("/slots", response_model=PlannerSlotRead, status_code=status.HTTP_201_CREATED)
 def create_planner_slot(payload: PlannerSlotCreate, db: Session = Depends(get_db)) -> PlannerSlotRead:
-    return create_slot(db, payload)
+    try:
+        return create_slot(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.patch("/slots/{slot_id}", response_model=PlannerSlotRead)
 def update_planner_slot(slot_id: int, payload: PlannerSlotUpdate, db: Session = Depends(get_db)) -> PlannerSlotRead:
-    return update_slot(db, slot_id=slot_id, payload=payload)
+    try:
+        return update_slot(db, slot_id=slot_id, payload=payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.post("/slots/{slot_id}/generate", response_model=PlannerSlotRead)

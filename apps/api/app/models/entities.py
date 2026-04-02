@@ -589,15 +589,16 @@ class BlogTheme(TimestampMixin, Base):
 
 class ContentPlanDay(TimestampMixin, Base):
     __tablename__ = "content_plan_days"
-    __table_args__ = (sa.UniqueConstraint("blog_id", "plan_date", name="uq_content_plan_days_blog_date"),)
+    __table_args__ = (sa.UniqueConstraint("channel_id", "plan_date", name="uq_content_plan_days_channel_date"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    blog_id: Mapped[int] = mapped_column(sa.ForeignKey("blogs.id", ondelete="CASCADE"), nullable=False, index=True)
+    channel_id: Mapped[str] = mapped_column(sa.String(100), nullable=False, index=True)
+    blog_id: Mapped[int | None] = mapped_column(sa.ForeignKey("blogs.id", ondelete="CASCADE"), nullable=True, index=True)
     plan_date: Mapped[date] = mapped_column(sa.Date, nullable=False, index=True)
     target_post_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(sa.String(50), nullable=False, default="planned")
 
-    blog: Mapped[Blog] = relationship("Blog")
+    blog: Mapped[Blog | None] = relationship("Blog")
     slots: Mapped[list[ContentPlanSlot]] = relationship(
         "ContentPlanSlot",
         back_populates="plan_day",
@@ -612,6 +613,9 @@ class ContentPlanSlot(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     plan_day_id: Mapped[int] = mapped_column(sa.ForeignKey("content_plan_days.id", ondelete="CASCADE"), nullable=False, index=True)
     theme_id: Mapped[int | None] = mapped_column(sa.ForeignKey("blog_themes.id", ondelete="SET NULL"), nullable=True, index=True)
+    category_key: Mapped[str | None] = mapped_column(sa.String(100), nullable=True, index=True)
+    category_name: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    category_color: Mapped[str | None] = mapped_column(sa.String(32), nullable=True)
     scheduled_for: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
     slot_order: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=1)
     status: Mapped[str] = mapped_column(sa.String(50), nullable=False, default="planned")
@@ -623,6 +627,7 @@ class ContentPlanSlot(TimestampMixin, Base):
     job_id: Mapped[int | None] = mapped_column(sa.ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True, index=True)
     error_message: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     last_run_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    result_payload: Mapped[dict] = mapped_column(sa.JSON, nullable=False, default=dict)
 
     plan_day: Mapped[ContentPlanDay] = relationship("ContentPlanDay", back_populates="slots")
     theme: Mapped[BlogTheme | None] = relationship("BlogTheme")

@@ -402,6 +402,136 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     ),
 }
 
+SETTING_DESCRIPTION_OVERRIDES_KO: dict[str, str] = {
+    "app_name": "워크스페이스 표시 이름",
+    "default_blog_timezone": "플래너와 발행에 쓰는 기본 시간대",
+    "default_publish_mode": "새 작업에 적용할 기본 발행 모드",
+    "default_writer_tone": "기본 작성 톤 라벨",
+    "admin_auth_enabled": "API와 대시보드에 관리자 인증을 적용할지 결정",
+    "admin_auth_username": "관리자 인증이 켜져 있을 때 사용할 기본 사용자명",
+    "planner_default_daily_posts": "월간 계획 생성 시 기본 일일 슬롯 수",
+    "planner_day_start_time": "플래너 자동 배치 시작 시각(HH:MM)",
+    "planner_day_end_time": "플래너 자동 배치 종료 시각(HH:MM)",
+    "automation_master_enabled": "모든 자동화 경로의 최상위 마스터 스위치",
+    "automation_scheduler_enabled": "스케줄러 자동 실행 사용",
+    "automation_publish_queue_enabled": "발행 큐 자동 처리 사용",
+    "automation_content_review_enabled": "콘텐츠 검토 자동화 사용",
+    "automation_telegram_enabled": "텔레그램 운영 자동화 사용",
+    "automation_sheet_enabled": "시트 자동화 사용(구형)",
+    "automation_cloudflare_enabled": "Cloudflare 자동화 사용",
+    "automation_training_enabled": "학습 자동화 사용",
+    "provider_mode": "공급자 실행 모드(mock/live)",
+    "public_image_provider": "대표 이미지 공개 전달 방식",
+    "public_asset_base_url": "로컬 자산 공개 시 사용할 기준 URL",
+    "cloudflare_account_id": "Cloudflare 계정 ID",
+    "cloudflare_r2_bucket": "Cloudflare R2 버킷 이름",
+    "cloudflare_r2_access_key_id": "Cloudflare R2 액세스 키 ID",
+    "cloudflare_r2_secret_access_key": "Cloudflare R2 시크릿 액세스 키",
+    "cloudflare_r2_public_base_url": "Cloudflare R2 공개 자산 기본 URL",
+    "cloudflare_r2_prefix": "Cloudflare R2 내부 경로 접두사",
+    "cloudflare_cdn_transform_enabled": "Cloudflare 이미지 변환 URL 사용 여부",
+    "cloudinary_cloud_name": "Cloudinary 클라우드 이름",
+    "cloudinary_api_key": "Cloudinary API 키",
+    "cloudinary_api_secret": "Cloudinary API 시크릿",
+    "cloudinary_folder": "Cloudinary 업로드 폴더",
+    "github_pages_owner": "GitHub Pages 소유자 또는 조직명",
+    "github_pages_repo": "GitHub Pages 저장소 이름",
+    "github_pages_branch": "GitHub Pages 업로드 브랜치",
+    "github_pages_token": "GitHub Pages 업로드 토큰",
+    "github_pages_base_url": "GitHub Pages 기준 URL",
+    "github_pages_assets_dir": "GitHub Pages 자산 업로드 디렉터리",
+    "openai_text_model": "기본 OpenAI 텍스트 모델",
+    "openai_large_text_model": "장문 생성에 쓰는 주력 OpenAI 텍스트 모델",
+    "openai_small_text_model": "검토·분석·보정에 쓰는 OpenAI 소형 텍스트 모델",
+    "article_generation_model": "본문 생성에 사용할 기본 OpenAI 모델",
+    "image_prompt_generation_model": "이미지 프롬프트 정제에 쓰는 텍스트 모델",
+    "revision_pass_model": "최종 수정 패스 모델",
+    "post_review_model": "게시 검토 모델",
+    "openai_image_model": "기본 OpenAI 이미지 모델",
+    "openai_request_saver_mode": "추가 요청을 줄이는 절약 모드 사용 여부",
+    "openai_api_key": "OpenAI API 키",
+    "openai_admin_api_key": "OpenAI Admin API 키",
+    "gemini_api_key": "Gemini API 키",
+    "gemini_model": "Gemini 기본 모델",
+    "topic_discovery_provider": "토픽 발굴 공급자",
+    "topic_discovery_model": "OpenAI 토픽 발굴 모델",
+    "topic_discovery_max_topics_per_run": "토픽 발굴 1회 최대 생성 수",
+    "cloudflare_channel_enabled": "Cloudflare 채널 연동 사용 여부",
+    "cloudflare_blog_api_base_url": "Cloudflare 연동 API 기준 주소",
+    "cloudflare_blog_m2m_token": "Cloudflare 연동용 Bearer 토큰",
+    "blogger_client_name": "Blogger OAuth 앱 이름",
+    "blogger_client_id": "Blogger OAuth 클라이언트 ID",
+    "blogger_client_secret": "Blogger OAuth 클라이언트 시크릿",
+    "blogger_redirect_uri": "Blogger OAuth 리디렉션 URI",
+    "blogger_playwright_enabled": "Blogger Playwright 자동화 사용 여부",
+    "blogger_playwright_auto_sync": "발행 후 Blogger 메타 자동 동기화 사용 여부",
+    "blogger_playwright_cdp_url": "Blogger Playwright 원격 디버깅 URL",
+    "blogger_playwright_account_index": "Blogger 편집기 계정 인덱스",
+    "google_sheet_url": "운영 스냅샷 동기화용 Google Sheets URL",
+    "google_sheet_id": "Google Sheets URL에서 추출한 문서 ID",
+    "google_sheet_travel_tab": "여행 채널 스냅샷 탭 이름",
+    "google_sheet_mystery_tab": "미스터리 채널 스냅샷 탭 이름",
+    "google_sheet_cloudflare_tab": "Cloudflare 채널 스냅샷 탭 이름",
+    "schedule_enabled": "전역 자동 스케줄러 사용",
+    "schedule_time": "전역 스케줄러 실행 시각(HH:MM)",
+    "schedule_timezone": "전역 스케줄러 시간대",
+    "travel_schedule_time": "여행 채널 반복 시작 시각(HH:MM)",
+    "travel_schedule_interval_hours": "여행 채널 반복 간격(시간)",
+    "travel_topics_per_run": "여행 채널 회차당 생성 주제 수",
+    "mystery_schedule_time": "미스터리 채널 반복 시작 시각(HH:MM)",
+    "mystery_schedule_interval_hours": "미스터리 채널 반복 간격(시간)",
+    "mystery_topics_per_run": "미스터리 채널 회차당 생성 주제 수",
+    "topics_per_run": "기본 반복 실행당 생성 주제 수",
+    "sheet_sync_enabled": "주간 Google Sheets 동기화 사용 여부",
+    "sheet_sync_day": "주간 Google Sheets 동기화 요일",
+    "sheet_sync_time": "주간 Google Sheets 동기화 시각(HH:MM)",
+    "quality_gate_enabled": "발행 전 품질 게이트 사용",
+    "quality_gate_similarity_threshold": "품질 게이트 유사도 기준(0-100)",
+    "quality_gate_min_seo_score": "품질 게이트 최소 SEO 점수(0-100)",
+    "quality_gate_min_geo_score": "품질 게이트 최소 GEO 점수(0-100)",
+    "similarity_threshold": "기본 유사도 임계치",
+    "topic_history_lookback_days": "토픽 히스토리 조회 기간(일)",
+    "topic_novelty_cluster_threshold": "클러스터 신규성 임계치",
+    "topic_novelty_angle_threshold": "앵글 신규성 임계치",
+    "topic_soft_penalty_threshold": "소프트 패널티 임계치",
+    "travel_editorial_weights": "여행 카테고리 가중치 회전 설정",
+    "mystery_editorial_weights": "미스터리 카테고리 가중치 회전 설정",
+    "cloudflare_daily_publish_enabled": "Cloudflare 일간 자동 발행 사용",
+    "cloudflare_daily_publish_time": "Cloudflare 자동 발행 시작 시각(HH:MM)",
+    "cloudflare_daily_publish_interval_hours": "Cloudflare 자동 발행 간격(시간)",
+    "cloudflare_daily_publish_timezone": "Cloudflare 자동 발행 시간대",
+    "cloudflare_daily_publish_weekday_quota": "월~토 Cloudflare 하루 발행 수",
+    "cloudflare_daily_publish_sunday_quota": "일요일 Cloudflare 하루 발행 수",
+    "travel_blossom_cap_ratio": "여행 채널 벚꽃 주제 상한 비율",
+    "cloudflare_blossom_cap_ratio": "Cloudflare 채널 벚꽃 주제 상한 비율",
+    "cloudflare_inline_images_enabled": "Cloudflare 본문 인라인 이미지 사용",
+    "travel_inline_collage_enabled": "여행 본문 인라인 콜라주 사용",
+    "mystery_inline_collage_enabled": "미스터리 본문 인라인 콜라주 사용",
+    "wikimedia_image_count": "Wikimedia 이미지 최대 수",
+    "training_schedule_enabled": "일간 학습 스케줄 사용",
+    "training_schedule_time": "학습 스케줄 실행 시각(HH:MM)",
+    "training_schedule_timezone": "학습 스케줄 시간대",
+    "training_use_real_engine": "시뮬레이션 대신 실제 학습 엔진을 실행할지 결정",
+    "content_ops_scan_enabled": "5분 주기 라이브 콘텐츠 검토 스캔 사용",
+    "content_ops_auto_fix_drafts": "안전한 초안 자동 수정 사용",
+    "content_ops_auto_fix_published_meta": "안전한 발행 글 메타 자동 수정 사용",
+    "content_ops_learning_paused": "학습/스냅샷 자동화를 일시 중지",
+    "publish_daily_limit_per_blog": "블로그별 하루 발행 제한 수",
+    "publish_min_interval_seconds": "같은 블로그 발행 최소 간격(초)",
+    "publish_interval_minutes": "기존 발행 간격 별칭(분)",
+    "backlog_publish_interval_minutes": "백로그 발행 간격 별칭(분)",
+    "first_publish_delay_minutes": "첫 발행 지연 시간(분)",
+    "scheduled_batch_interval_minutes": "배치 슬롯 간격(분)",
+    "same_cluster_cooldown_hours": "동일 클러스터 반복 쿨다운(시간)",
+    "same_angle_cooldown_days": "동일 앵글 반복 쿨다운(일)",
+    "topic_guard_enabled": "토픽 메모리 기반 중복 방지 사용",
+    "travel_research_mode": "여행 채널 사실 확인 모드",
+}
+
+for key, description in SETTING_DESCRIPTION_OVERRIDES_KO.items():
+    if key in DEFAULT_SETTINGS:
+        DEFAULT_SETTINGS[key].description = description
+
 GOOGLE_SHEET_ID_PATTERN = re.compile(r"/spreadsheets/d/([a-zA-Z0-9-_]+)")
 
 
@@ -442,6 +572,11 @@ def ensure_default_settings(db: Session) -> None:
             )
         )
         changed = True
+    for key, description in SETTING_DESCRIPTION_OVERRIDES_KO.items():
+        item = existing.get(key)
+        if item and item.description != description:
+            item.description = description
+            changed = True
     if changed:
         db.commit()
 
@@ -469,12 +604,12 @@ def upsert_settings(db: Session, values: dict[str, str]) -> list[Setting]:
                 continue
             existing[key].value = encrypt_secret_value(value) if existing[key].is_secret else value
             continue
-        meta = DEFAULT_SETTINGS.get(key, DefaultSetting("", "User-defined setting"))
+        meta = DEFAULT_SETTINGS.get(key, DefaultSetting("", SETTING_DESCRIPTION_OVERRIDES_KO.get(key, "User-defined setting")))
         db.add(
             Setting(
                 key=key,
                 value=encrypt_secret_value(value) if meta.is_secret else value,
-                description=meta.description,
+                description=SETTING_DESCRIPTION_OVERRIDES_KO.get(key, meta.description),
                 is_secret=meta.is_secret,
             )
         )

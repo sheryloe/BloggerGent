@@ -489,7 +489,7 @@ export function AnalyticsDashboard({ blogs, channels }: AnalyticsDashboardProps)
           {status ? <p className="mt-3 text-sm text-indigo-600">{status}</p> : null}
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[minmax(0,1.75fr)_440px] 2xl:grid-cols-[minmax(0,1.9fr)_460px]">
+        <section className="grid gap-6 xl:grid-cols-[minmax(760px,1.6fr)_minmax(380px,0.9fr)] 2xl:grid-cols-[minmax(860px,1.7fr)_minmax(420px,0.95fr)]">
           <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <MiniMetric label="총 게시" value={`${payload?.kpis.totalPosts ?? 0}건`} />
@@ -510,25 +510,27 @@ export function AnalyticsDashboard({ blogs, channels }: AnalyticsDashboardProps)
               {selectedChannel?.provider === "cloudflare" ? (
                 <div className="mt-5 rounded-[24px] bg-slate-50 p-8 text-center text-sm leading-6 text-slate-500">Cloudflare 채널은 현재 월간 일자 캔버스를 제공하지 않습니다. 우측 전용 요약 패널에서 최근 게시와 채널 상태를 확인하세요.</div>
               ) : (
-                <>
-                  <div className="mt-5 grid grid-cols-7 gap-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">{['월', '화', '수', '목', '금', '토', '일'].map((label) => <div key={label} className="px-2">{label}</div>)}</div>
-                  <div className="mt-3 grid grid-cols-7 gap-3">
-                    {monthCells.map((cell, index) => cell ? (
-                      <button key={cell.dateKey} type="button" onClick={() => setQuery({ selectedDate: cell.dateKey, detailTab: 'day' })} className={`min-h-[180px] rounded-[26px] p-4 text-left transition ${cell.dateKey === selectedDate ? 'bg-indigo-50 ring-2 ring-indigo-200' : 'bg-slate-50 hover:bg-slate-100'}`}>
-                        <div className="flex items-start justify-between gap-3"><p className="text-lg font-semibold text-slate-900">{cell.dayNumber}</p><ViewChip label={`${cell.facts.length}건`} /></div>
-                        <p className="mt-2 text-xs text-slate-500">앱 생성 {cell.facts.filter((item) => item.sourceType === 'generated').length} / 동기화 {cell.facts.filter((item) => item.sourceType === 'synced').length}</p>
-                        <div className="mt-4 flex flex-wrap gap-2">{cell.facts.slice(0, 2).map((item) => <span key={item.id} className="rounded-full bg-white px-3 py-1 text-[11px] text-slate-600">{item.category ?? item.themeName ?? '미분류'}</span>)}</div>
-                        <div className="mt-4 h-2 overflow-hidden rounded-full bg-white"><div className="h-full rounded-full bg-indigo-500" style={{ width: `${Math.min(100, Math.max(12, (dailyAverageSeo(cell.facts) ?? 0)))}%` }} /></div>
-                        <p className="mt-2 text-xs text-slate-500">평균 SEO {numberText(dailyAverageSeo(cell.facts))}</p>
-                      </button>
-                    ) : <div key={`empty-${index}`} className="min-h-[180px] rounded-[26px] bg-transparent" />)}
+                <div className="mt-5 overflow-x-auto">
+                  <div className="min-w-[820px]">
+                    <div className="grid grid-cols-7 gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400 xl:gap-3">{['월', '화', '수', '목', '금', '토', '일'].map((label) => <div key={label} className="px-2">{label}</div>)}</div>
+                    <div className="mt-3 grid grid-cols-7 gap-2 xl:gap-3">
+                      {monthCells.map((cell, index) => cell ? (
+                        <button key={cell.dateKey} type="button" onClick={() => setQuery({ selectedDate: cell.dateKey, detailTab: 'day' })} className={`min-h-[160px] rounded-[26px] p-4 text-left transition xl:min-h-[180px] ${cell.dateKey === selectedDate ? 'bg-indigo-50 ring-2 ring-indigo-200' : 'bg-slate-50 hover:bg-slate-100'}`}>
+                          <div className="flex items-start justify-between gap-3"><p className="text-lg font-semibold text-slate-900">{cell.dayNumber}</p><ViewChip label={`${cell.facts.length}건`} /></div>
+                          <p className="mt-2 text-xs text-slate-500">앱 생성 {cell.facts.filter((item) => item.sourceType === 'generated').length} / 동기화 {cell.facts.filter((item) => item.sourceType === 'synced').length}</p>
+                          <div className="mt-4 flex flex-wrap gap-2">{cell.facts.slice(0, 2).map((item) => <span key={item.id} className="rounded-full bg-white px-3 py-1 text-[11px] text-slate-600">{item.category ?? item.themeName ?? '미분류'}</span>)}</div>
+                          <div className="mt-4 h-2 overflow-hidden rounded-full bg-white"><div className="h-full rounded-full bg-indigo-500" style={{ width: `${Math.min(100, Math.max(12, (dailyAverageSeo(cell.facts) ?? 0)))}%` }} /></div>
+                          <p className="mt-2 text-xs text-slate-500">평균 SEO {numberText(dailyAverageSeo(cell.facts))}</p>
+                        </button>
+                      ) : <div key={`empty-${index}`} className="min-h-[160px] rounded-[26px] bg-transparent xl:min-h-[180px]" />)}
+                    </div>
                   </div>
-                </>
+                </div>
               )}
             </section>
           </div>
 
-          <div>{detailPanel}</div>
+          <div className="xl:sticky xl:top-6 xl:self-start">{detailPanel}</div>
         </section>
       </div>
     </div>

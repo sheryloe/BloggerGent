@@ -2295,6 +2295,7 @@ def generate_cloudflare_posts(
     per_category: int = 2,
     category_slugs: list[str] | None = None,
     category_plan: dict[str, int] | None = None,
+    manual_topic_plan: dict[str, list[dict[str, Any]]] | None = None,
     status: str = "published",
 ) -> dict:
     normalized_per_category = max(1, min(int(per_category), 5))
@@ -2317,6 +2318,29 @@ def generate_cloudflare_posts(
             for item in categories
             if normalized_plan.get(str(item.get("slug") or "").strip(), normalized_plan.get(str(item.get("id") or "").strip(), 0)) > 0
         ]
+    normalized_manual_topic_plan: dict[str, list[dict[str, Any]]] = {}
+    if manual_topic_plan:
+        for raw_key, raw_items in manual_topic_plan.items():
+            key = str(raw_key or "").strip()
+            if not key or not isinstance(raw_items, list):
+                continue
+            normalized_items: list[dict[str, Any]] = []
+            for raw_item in raw_items:
+                if not isinstance(raw_item, dict):
+                    continue
+                keyword = str(raw_item.get("keyword") or raw_item.get("title") or "").strip()
+                if not keyword:
+                    continue
+                normalized_items.append({
+                    "keyword": keyword,
+                    "audience": str(raw_item.get("audience") or "").strip(),
+                    "information_level": str(raw_item.get("information_level") or "").strip(),
+                    "extra_context": str(raw_item.get("extra_context") or "").strip(),
+                    "category_name": str(raw_item.get("category_name") or "").strip(),
+                    "scheduled_for": str(raw_item.get("scheduled_for") or "").strip(),
+                })
+            if normalized_items:
+                normalized_manual_topic_plan[key] = normalized_items
     if not categories:
         return {
             "status": "skipped",
@@ -2456,12 +2480,49 @@ def generate_cloudflare_posts(
         reject_breakdown: dict[str, int] = {}
         topic_attempt_logs: list[dict[str, Any]] = []
         selected_topic_novelty: dict[str, dict[str, Any]] = {}
+        selected_topic_briefs: dict[str, dict[str, Any]] = {}
         max_topic_attempts = max(MAX_TOPIC_REGEN_ATTEMPTS_PER_CATEGORY, requested_for_category * 4)
         topic_discovery_error = ""
         active_topic_provider_hint = topic_provider_order[0]
         fallback_topic_provider_hint = topic_provider_order[1] if len(topic_provider_order) > 1 else None
         consecutive_category_mismatch_attempts = 0
         active_topic_prompt_template = topic_prompt_template
+        manual_topic_entries = normalized_manual_topic_plan.get(category_slug) or normalized_manual_topic_plan.get(category_id) or []
+        if manual_topic_entries:
+            selected_on_manual = 0
+            rejected_on_manual = 0
+            for item in manual_topic_entries:
+                keyword = str(item.get("keyword") or "").strip()
+                if not keyword:
+                    continue
+                attempted_keywords.append(keyword)
+                if _topic_matches_any(keyword, selected_topics) or _topic_matches_any(keyword, all_titles) or _topic_matches_any(keyword, all_slugs):
+                    rejected_on_manual += 1
+                    reject_breakdown["manual_duplicate"] = reject_breakdown.get("manual_duplicate", 0) + 1
+                    continue
+                selected_topics.append(keyword)
+                selected_topic_briefs[keyword] = item
+                _increment_topic_mix_counter(
+                    daily_mix_counter,
+                    is_blossom=_is_blossom_topic_keyword(keyword),
+                )
+                selected_on_manual += 1
+                if len(selected_topics) >= requested_for_category:
+                    break
+            topic_attempt_logs.append(
+                {
+                    "attempt": 1,
+                    "provider": "planner_manual",
+                    "requested_topics": requested_for_category,
+                    "discovered_topics": len(manual_topic_entries),
+                    "selected_on_attempt": selected_on_manual,
+                    "selected_total": len(selected_topics),
+                    "rejected_on_attempt": rejected_on_manual,
+                    "reject_breakdown": dict(reject_breakdown),
+                    "attempt_reject_breakdown": {"manual_duplicate": rejected_on_manual} if rejected_on_manual else {},
+                    "topic_history_source": "planner_manual",
+                }
+            )
 
         for attempt_index in range(max_topic_attempts):
             remaining_topics = requested_for_category - len(selected_topics)
@@ -2685,13 +2746,26 @@ def generate_cloudflare_posts(
         items: list[dict[str, Any]] = []
         for keyword in selected_topics:
             topic_novelty = selected_topic_novelty.get(keyword, {})
+            planner_brief = selected_topic_briefs.get(keyword, {})
+            planner_brief_block = ""
+            if planner_brief:
+                planner_lines = [
+                    "\n\n[Planner brief]",
+                    f"- Topic: {keyword}",
+                    f"- Audience: {planner_brief.get('audience') or ''}",
+                ]
+                if planner_brief.get("information_level"):
+                    planner_lines.append(f"- Information level: {planner_brief.get('information_level')}")
+                if planner_brief.get("extra_context"):
+                    planner_lines.append(f"- Extra context: {planner_brief.get('extra_context')}")
+                planner_brief_block = "\n".join(planner_lines)
             try:
                 article_prompt = _render_prompt_template(
                     article_prompt_template,
                     current_date=current_date,
                     keyword=keyword,
                     topic_count=requested_for_category,
-                ) + category_gate + _article_output_contract()
+                ) + category_gate + planner_brief_block + _article_output_contract()
                 article_prompt = _append_no_inline_image_rule(article_prompt)
                 article_model = article_requested_model
                 if runtime.provider_mode == "live":
@@ -2814,7 +2888,7 @@ def generate_cloudflare_posts(
                     current_date=current_date,
                     keyword=keyword,
                     topic_count=requested_for_category,
-                ) + category_gate
+                ) + category_gate + planner_brief_block
                 image_prompt_base = _append_hero_only_visual_rule(image_prompt_base)
                 prompt_model = prompt_requested_model
                 if runtime.provider_mode == "live":

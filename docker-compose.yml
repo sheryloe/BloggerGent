@@ -74,6 +74,7 @@ services:
       - "${API_PORT:-8000}:8000"
     command: >
       sh -c "python -m app.prestart &&
+      alembic upgrade head &&
       uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app"
 
   web:
@@ -102,6 +103,7 @@ services:
 
   bootstrap:
     <<: *api-common
+    container_name: bloggent-bootstrap
     profiles: ["bootstrap"]
     depends_on:
       postgres:
@@ -127,6 +129,7 @@ services:
         condition: service_started
     command: >
       sh -c "python -m app.prestart &&
+      alembic upgrade head &&
       celery -A app.core.celery_app.celery_app worker --loglevel=info --queues pipeline,default,training"
 
   scheduler:
@@ -142,6 +145,7 @@ services:
         condition: service_started
     command: >
       sh -c "python -m app.prestart &&
+      alembic upgrade head &&
       celery -A app.core.celery_app.celery_app beat --loglevel=info"
 
   minio:

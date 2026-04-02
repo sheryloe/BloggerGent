@@ -983,18 +983,7 @@ export interface ModelPolicyRead {
   defaults: Record<string, string>;
 }
 
-export interface PlannerThemeRead {
-  id: number;
-  key: string;
-  name: string;
-  weight: number;
-  color: string | null;
-  sortOrder: number;
-  isActive: boolean;
-}
-
 export interface PlannerCategoryRead {
-  id: number;
   key: string;
   name: string;
   weight: number;
@@ -1006,12 +995,14 @@ export interface PlannerCategoryRead {
 export interface PlannerSlotRead {
   id: number;
   planDayId: number;
-  themeId: number;
+  channelId: string;
+  publishMode: string | null;
+  themeId: number | null;
   themeKey: string | null;
   themeName: string | null;
-  categoryId: number | null;
   categoryKey: string | null;
   categoryName: string | null;
+  categoryColor: string | null;
   scheduledFor: string | null;
   slotOrder: number;
   status: string;
@@ -1031,31 +1022,36 @@ export interface PlannerSlotRead {
   articleQualityStatus: string | null;
   articlePublishStatus: string | null;
   articlePublishedUrl: string | null;
+  resultTitle: string | null;
+  resultUrl: string | null;
+  resultStatus: string | null;
+  qualityGateStatus: string | null;
 }
 
 export interface PlannerDayRead {
   id: number;
-  blogId: number;
+  channelId: string;
+  blogId: number | null;
   planDate: string;
   targetPostCount: number;
   status: string;
   slotCount: number;
-  themeMix: Record<string, number>;
   categoryMix: Record<string, number>;
   slots: PlannerSlotRead[];
 }
 
 export interface PlannerCalendarRead {
-  blogId: number;
-  blogName: string;
+  channelId: string;
+  channelName: string;
+  channelProvider: string;
+  blogId: number | null;
   month: string;
   categories: PlannerCategoryRead[];
-  themes: PlannerThemeRead[];
   days: PlannerDayRead[];
 }
 
 export interface PlannerMonthPlanRequest {
-  blogId: number;
+  channelId: string;
   month: string;
   targetPostCount?: number | null;
   overwrite?: boolean;
@@ -1063,16 +1059,16 @@ export interface PlannerMonthPlanRequest {
 
 export interface PlannerSlotCreateRequest {
   planDayId: number;
-  themeId: number;
+  categoryKey: string;
   scheduledFor: string;
   briefTopic: string;
   briefAudience: string;
-  briefInformationLevel: string;
-  briefExtraContext: string;
+  briefInformationLevel?: string;
+  briefExtraContext?: string;
 }
 
 export interface PlannerSlotUpdateRequest {
-  themeId?: number | null;
+  categoryKey?: string | null;
   scheduledFor?: string | null;
   slotOrder?: number | null;
   briefTopic?: string | null;

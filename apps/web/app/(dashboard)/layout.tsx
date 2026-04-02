@@ -1,6 +1,8 @@
-﻿import nextDynamic from "next/dynamic";
+import nextDynamic from "next/dynamic";
 
 import { DashboardShell } from "@/components/dashboard/dashboard-shell";
+
+export const dynamic = process.env.GITHUB_ACTIONS === "true" ? "auto" : "force-dynamic";
 
 const OpenAIFreeUsageWidget = nextDynamic(
   () => import("@/components/dashboard/openai-free-usage-widget").then((module) => module.OpenAIFreeUsageWidget),

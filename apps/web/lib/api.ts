@@ -35,7 +35,6 @@
   ModelPolicyRead,
   PlannerCalendarRead,
   PlannerCategoryRead,
-  PlannerThemeRead,
   PlannerMonthPlanRequest,
   PromptFlowRead,
   PlannerSlotCreateRequest,
@@ -219,7 +218,7 @@ export async function getArchiveChannelPage(channelKey: string, page = 1, pageSi
 }
 
 export async function getSettings() {
-  return apiFetch<SettingItem[]>("/settings");
+  return apiFetch<SettingItem[]>("/settings", { revalidate: false });
 }
 
 export async function getTrainingStatus() {
@@ -322,23 +321,8 @@ export async function getBlogSeoMeta(blogId: number) {
 }
 
 
-
-
-function mapPlannerTheme(item: any): PlannerThemeRead {
-  return {
-    id: item.id,
-    key: item.key,
-    name: item.name,
-    weight: item.weight,
-    color: item.color ?? null,
-    sortOrder: item.sort_order,
-    isActive: item.is_active,
-  };
-}
-
 function mapPlannerCategory(item: any): PlannerCategoryRead {
   return {
-    id: item.id,
     key: item.key,
     name: item.name,
     weight: item.weight,
@@ -352,12 +336,14 @@ function mapPlannerSlot(item: any): PlannerSlotRead {
   return {
     id: item.id,
     planDayId: item.plan_day_id,
-    themeId: item.theme_id,
+    channelId: item.channel_id,
+    publishMode: item.publish_mode ?? null,
+    themeId: item.theme_id ?? null,
     themeKey: item.theme_key ?? null,
     themeName: item.theme_name ?? null,
-    categoryId: item.category_id ?? item.theme_id ?? null,
     categoryKey: item.category_key ?? item.theme_key ?? null,
     categoryName: item.category_name ?? item.theme_name ?? null,
+    categoryColor: item.category_color ?? null,
     scheduledFor: item.scheduled_for ?? null,
     slotOrder: item.slot_order,
     status: item.status,
@@ -377,25 +363,30 @@ function mapPlannerSlot(item: any): PlannerSlotRead {
     articleQualityStatus: item.article_quality_status ?? null,
     articlePublishStatus: item.article_publish_status ?? null,
     articlePublishedUrl: item.article_published_url ?? null,
+    resultTitle: item.result_title ?? null,
+    resultUrl: item.result_url ?? null,
+    resultStatus: item.result_status ?? null,
+    qualityGateStatus: item.quality_gate_status ?? null,
   };
 }
 
 function mapPlannerCalendar(payload: any): PlannerCalendarRead {
   return {
-    blogId: payload.blog_id,
-    blogName: payload.blog_name,
+    channelId: payload.channel_id,
+    channelName: payload.channel_name,
+    channelProvider: payload.channel_provider,
+    blogId: payload.blog_id ?? null,
     month: payload.month,
-    categories: (payload.categories ?? payload.themes ?? []).map(mapPlannerCategory),
-    themes: (payload.themes ?? []).map(mapPlannerTheme),
+    categories: (payload.categories ?? []).map(mapPlannerCategory),
     days: (payload.days ?? []).map((day: any) => ({
       id: day.id,
-      blogId: day.blog_id,
+      channelId: day.channel_id,
+      blogId: day.blog_id ?? null,
       planDate: day.plan_date,
       targetPostCount: day.target_post_count,
       status: day.status,
       slotCount: day.slot_count,
-      themeMix: day.theme_mix ?? {},
-      categoryMix: day.category_mix ?? day.theme_mix ?? {},
+      categoryMix: day.category_mix ?? {},
       slots: (day.slots ?? []).map(mapPlannerSlot),
     })),
   };
@@ -577,8 +568,10 @@ export async function deleteChannelPromptFlowStep(channelId: string, stepId: str
   return mapPromptFlow(payload);
 }
 
-export async function getPlannerCalendar(blogId: number, month: string) {
-  const payload = await apiFetch<any>(`/planner/calendar?blog_id=${blogId}&month=${month}`);
+export async function getPlannerCalendar(channelId: string, month: string) {
+  const payload = await apiFetch<any>(`/planner/calendar?channel_id=${encodeURIComponent(channelId)}&month=${month}`, {
+    revalidate: false,
+  });
   return mapPlannerCalendar(payload);
 }
 
@@ -586,7 +579,7 @@ export async function buildPlannerMonthPlan(payload: PlannerMonthPlanRequest) {
   const response = await apiFetch<any>("/planner/month-plan", {
     method: "POST",
     body: JSON.stringify({
-      blog_id: payload.blogId,
+      channel_id: payload.channelId,
       month: payload.month,
       target_post_count: payload.targetPostCount ?? null,
       overwrite: payload.overwrite,
@@ -600,12 +593,12 @@ export async function createPlannerSlot(payload: PlannerSlotCreateRequest) {
     method: "POST",
     body: JSON.stringify({
       plan_day_id: payload.planDayId,
-      theme_id: payload.themeId,
+      category_key: payload.categoryKey,
       scheduled_for: payload.scheduledFor,
       brief_topic: payload.briefTopic,
       brief_audience: payload.briefAudience,
-      brief_information_level: payload.briefInformationLevel,
-      brief_extra_context: payload.briefExtraContext,
+      brief_information_level: payload.briefInformationLevel ?? null,
+      brief_extra_context: payload.briefExtraContext ?? null,
     }),
   });
   return mapPlannerSlot(response);
@@ -615,7 +608,7 @@ export async function updatePlannerSlot(slotId: number, payload: PlannerSlotUpda
   const response = await apiFetch<any>(`/planner/slots/${slotId}`, {
     method: "PATCH",
     body: JSON.stringify({
-      theme_id: payload.themeId,
+      category_key: payload.categoryKey,
       scheduled_for: payload.scheduledFor,
       slot_order: payload.slotOrder,
       brief_topic: payload.briefTopic,
