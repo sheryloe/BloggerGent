@@ -1,10 +1,59 @@
 from __future__ import annotations
 
+import enum
 from datetime import datetime
 
 from pydantic import BaseModel, Field
 
 from app.models.entities import JobStatus, LogLevel, PostStatus, PublishMode, WorkflowStageType
+
+ChannelProvider = str
+ManagedChannelStatus = str
+
+
+class ContentItemType(str, enum.Enum):
+    BLOG_ARTICLE = "blog_article"
+    YOUTUBE_VIDEO = "youtube_video"
+    INSTAGRAM_IMAGE = "instagram_image"
+    INSTAGRAM_REEL = "instagram_reel"
+    ARTICLE = "article"  # legacy compatibility
+    BRIEF = "brief"  # legacy compatibility
+    ASSET = "asset"  # legacy compatibility
+
+
+class ContentItemStatus(str, enum.Enum):
+    DRAFT = "draft"
+    QUEUED = "queued"
+    REVIEW = "review"
+    APPROVED = "approved"
+    SCHEDULED = "scheduled"
+    PUBLISHED = "published"
+    FAILED = "failed"
+    BLOCKED = "blocked"
+
+
+class AgentRuntimeKind(str, enum.Enum):
+    CLAUDE_CLI = "claude_cli"
+    CODEX_CLI = "codex_cli"
+    GEMINI_CLI = "gemini_cli"
+    OPENAI = "openai"  # legacy compatibility
+    INTERNAL = "internal"  # legacy compatibility
+
+
+class AgentWorkerStatus(str, enum.Enum):
+    IDLE = "idle"
+    BUSY = "busy"
+    RUNNING = "running"
+    PAUSED = "paused"
+    ERROR = "error"
+
+
+class AgentRunStatus(str, enum.Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELED = "canceled"
 
 
 class BlogAgentConfigRead(BaseModel):
@@ -1188,10 +1237,10 @@ class ModelPolicyRead(BaseModel):
 
 
 class ManagedChannelRead(BaseModel):
-    provider: str
+    provider: ChannelProvider | str
     channel_id: str
     name: str
-    status: str
+    status: ManagedChannelStatus | str
     base_url: str | None = None
     primary_category: str | None = None
     purpose: str | None = None
@@ -1201,6 +1250,286 @@ class ManagedChannelRead(BaseModel):
     planner_supported: bool = False
     analytics_supported: bool = False
     prompt_flow_supported: bool = False
+    capabilities: list[str] = Field(default_factory=list)
+    oauth_state: str = "disconnected"
+    quota_state: dict[str, float | int | str | bool | None] = Field(default_factory=dict)
+    agent_pack_summary: list[dict[str, str | int | bool | None]] = Field(default_factory=list)
+    live_worker_count: int = 0
+    pending_items: int = 0
+    failed_items: int = 0
+    linked_blog_id: int | None = None
+    credential_state: "PlatformCredentialRead | None" = None
+
+
+class PlatformCredentialRead(BaseModel):
+    id: int
+    managed_channel_id: int | None = None
+    channel_id: str | None = None
+    provider: ChannelProvider | str
+    credential_key: str
+    subject: str | None = None
+    scopes: list[str] = Field(default_factory=list)
+    access_token_configured: bool = False
+    refresh_token_configured: bool = False
+    expires_at: datetime | None = None
+    token_type: str = "Bearer"
+    is_valid: bool = False
+    last_error: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class PlatformCredentialUpsert(BaseModel):
+    channel_id: str = Field(min_length=3)
+    provider: ChannelProvider | str
+    subject: str | None = None
+    display_name: str | None = None
+    credential_key: str | None = None
+    access_token: str = ""
+    refresh_token: str = ""
+    scopes: list[str] = Field(default_factory=list)
+    expires_at: datetime | None = None
+    token_type: str = "Bearer"
+    refresh_metadata: dict = Field(default_factory=dict)
+    is_valid: bool = True
+    last_error: str | None = None
+
+
+class PlatformIntegrationRead(BaseModel):
+    provider: ChannelProvider | str
+    channel_id: str
+    display_name: str
+    oauth_state: str
+    status: str
+    scope_count: int = 0
+    expires_at: datetime | None = None
+    is_valid: bool = False
+    last_error: str | None = None
+
+
+class PublicationRecordRead(BaseModel):
+    id: int
+    provider: ChannelProvider | str
+    remote_id: str | None = None
+    remote_url: str | None = None
+    publish_status: str
+    scheduled_for: datetime | None = None
+    published_at: datetime | None = None
+    response_payload: dict = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class MetricFactRead(BaseModel):
+    id: int
+    managed_channel_id: int
+    content_item_id: int | None = None
+    provider: ChannelProvider | str
+    metric_scope: str
+    metric_name: str
+    value: float
+    normalized_score: float | None = None
+    dimension_key: str | None = None
+    dimension_value: str | None = None
+    snapshot_at: datetime
+    payload: dict = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class ContentItemRead(BaseModel):
+    id: int
+    managed_channel_id: int
+    channel_id: str
+    provider: ChannelProvider | str
+    blog_id: int | None = None
+    job_id: int | None = None
+    source_article_id: int | None = None
+    content_type: ContentItemType | str
+    lifecycle_status: ContentItemStatus | str
+    title: str
+    description: str = ""
+    body_text: str = ""
+    asset_manifest: dict = Field(default_factory=dict)
+    brief_payload: dict = Field(default_factory=dict)
+    review_notes: list = Field(default_factory=list)
+    approval_status: str = "pending"
+    scheduled_for: datetime | None = None
+    last_feedback: str | None = None
+    last_score: dict = Field(default_factory=dict)
+    created_by_agent: str | None = None
+    latest_publication: PublicationRecordRead | None = None
+    metric_count: int = 0
+    run_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class ContentItemCreate(BaseModel):
+    channel_id: str = Field(min_length=3)
+    content_type: ContentItemType | str
+    title: str = Field(min_length=1, max_length=500)
+    description: str = ""
+    body_text: str = ""
+    asset_manifest: dict = Field(default_factory=dict)
+    brief_payload: dict = Field(default_factory=dict)
+    scheduled_for: datetime | None = None
+    created_by_agent: str | None = None
+    job_id: int | None = Field(default=None, ge=1)
+    source_article_id: int | None = Field(default=None, ge=1)
+
+
+class ContentItemUpdate(BaseModel):
+    lifecycle_status: ContentItemStatus | str | None = None
+    title: str | None = Field(default=None, max_length=500)
+    description: str | None = None
+    body_text: str | None = None
+    approval_status: str | None = None
+    asset_manifest: dict | None = None
+    brief_payload: dict | None = None
+    review_notes: list | None = None
+    scheduled_for: datetime | None = None
+    last_feedback: str | None = None
+    last_score: dict | None = None
+
+
+class ContentItemReviewRequest(BaseModel):
+    review_notes: list = Field(default_factory=list)
+    last_feedback: str | None = None
+
+
+class AgentWorkerRead(BaseModel):
+    id: int
+    managed_channel_id: int | None = None
+    channel_id: str | None = None
+    worker_key: str
+    runtime_kind: AgentRuntimeKind | str
+    display_name: str
+    role_name: str
+    queue_name: str
+    concurrency_limit: int
+    status: AgentWorkerStatus | str
+    config_payload: dict = Field(default_factory=dict)
+    last_heartbeat_at: datetime | None = None
+    last_error: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AgentWorkerCreate(BaseModel):
+    channel_id: str | None = None
+    worker_key: str = Field(min_length=3, max_length=120)
+    display_name: str = Field(min_length=2, max_length=255)
+    role_name: str = Field(min_length=2, max_length=120)
+    runtime_kind: AgentRuntimeKind | str
+    queue_name: str = Field(min_length=3, max_length=120)
+    concurrency_limit: int = Field(default=1, ge=1, le=20)
+    status: AgentWorkerStatus | str = AgentWorkerStatus.IDLE
+    config_payload: dict = Field(default_factory=dict)
+
+
+class AgentWorkerUpdate(BaseModel):
+    status: AgentWorkerStatus | str | None = None
+    concurrency_limit: int | None = Field(default=None, ge=1, le=20)
+    config_payload: dict | None = None
+    last_heartbeat_at: datetime | None = None
+    last_error: str | None = None
+
+
+class AgentRunRead(BaseModel):
+    id: int
+    managed_channel_id: int | None = None
+    channel_id: str | None = None
+    content_item_id: int | None = None
+    worker_id: int | None = None
+    run_key: str
+    runtime_kind: AgentRuntimeKind | str
+    assigned_role: str
+    provider_model: str | None = None
+    status: AgentRunStatus | str
+    priority: int
+    timeout_seconds: int
+    retry_count: int
+    max_retries: int
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    prompt_snapshot: str = ""
+    response_snapshot: str = ""
+    log_lines: list = Field(default_factory=list)
+    error_message: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AgentRunCreate(BaseModel):
+    channel_id: str | None = None
+    content_item_id: int | None = Field(default=None, ge=1)
+    worker_id: int | None = Field(default=None, ge=1)
+    run_key: str = Field(min_length=3, max_length=120)
+    runtime_kind: AgentRuntimeKind | str
+    assigned_role: str = Field(min_length=2, max_length=120)
+    provider_model: str | None = None
+    priority: int = Field(default=50, ge=0, le=100)
+    timeout_seconds: int = Field(default=900, ge=30, le=3600)
+    prompt_snapshot: str = ""
+    status: AgentRunStatus | str = AgentRunStatus.QUEUED
+
+
+class AgentRunUpdate(BaseModel):
+    status: AgentRunStatus | str | None = None
+    retry_count: int | None = Field(default=None, ge=0, le=20)
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    response_snapshot: str | None = None
+    log_lines: list | None = None
+    error_message: str | None = None
+
+
+class AgentRuntimeHealthRead(BaseModel):
+    worker_count: int
+    run_count: int
+    worker_status: dict = Field(default_factory=dict)
+    run_status: dict = Field(default_factory=dict)
+    last_run_at: datetime | None = None
+    runtime_kinds: list[str] = Field(default_factory=list)
+    healthy: bool = False
+    generated_at: datetime
+
+
+class MissionControlAlertRead(BaseModel):
+    key: str
+    level: str
+    title: str
+    message: str
+
+
+class MissionControlRead(BaseModel):
+    workspace_label: str
+    channels: list[ManagedChannelRead] = Field(default_factory=list)
+    workers: list[AgentWorkerRead] = Field(default_factory=list)
+    runs: list[AgentRunRead] = Field(default_factory=list)
+    recent_content: list[ContentItemRead] = Field(default_factory=list)
+    runtime_health: AgentRuntimeHealthRead
+    alerts: list[MissionControlAlertRead] = Field(default_factory=list)
+
+
+class WorkspaceIntegrationOverviewRead(BaseModel):
+    channels: list[ManagedChannelRead] = Field(default_factory=list)
+    integrations: list[PlatformIntegrationRead] = Field(default_factory=list)
+    credentials: list[PlatformCredentialRead] = Field(default_factory=list)
+
+
+class WorkspaceRuntimeOverviewRead(BaseModel):
+    profiles: list[dict] = Field(default_factory=list)
+    workers: list[AgentWorkerRead] = Field(default_factory=list)
+    runs: list[AgentRunRead] = Field(default_factory=list)
+    runtime_health: AgentRuntimeHealthRead | None = None
+
+
+class WorkspaceOverviewRead(BaseModel):
+    channels: list[ManagedChannelRead] = Field(default_factory=list)
+    content_items: list[ContentItemRead] = Field(default_factory=list)
+    runtime: WorkspaceRuntimeOverviewRead
 
 
 class PromptFlowStepRead(BaseModel):
@@ -1363,6 +1692,13 @@ class AnalyticsArticleFactRead(BaseModel):
     status: str | None = None
     actual_url: str | None = None
     source_type: str
+    ctr: float | None = None
+    index_status: str = "unknown"
+    index_coverage_state: str | None = None
+    last_crawl_time: str | None = None
+    last_notify_time: str | None = None
+    next_eligible_at: str | None = None
+    index_last_checked_at: str | None = None
 
 
 class AnalyticsThemeMonthlyStatRead(BaseModel):
@@ -1417,10 +1753,40 @@ class AnalyticsBlogMonthlyReportRead(BaseModel):
     article_facts: list[AnalyticsArticleFactRead]
 
 
+class AnalyticsDailySummaryRead(BaseModel):
+    date: str
+    total_posts: int
+    generated_posts: int
+    synced_posts: int
+    avg_seo: float | None = None
+    avg_geo: float | None = None
+
+
+class AnalyticsDailySummaryListResponse(BaseModel):
+    blog_id: int
+    month: str
+    items: list[AnalyticsDailySummaryRead] = Field(default_factory=list)
+
+
 class AnalyticsArticleFactListResponse(BaseModel):
     blog_id: int
     month: str
-    items: list[AnalyticsArticleFactRead]
+    total: int = 0
+    page: int = 1
+    page_size: int = 50
+    items: list[AnalyticsArticleFactRead] = Field(default_factory=list)
+
+
+class AnalyticsIndexingRequest(BaseModel):
+    blog_id: int = Field(ge=1)
+    url: str = Field(min_length=1, max_length=1000)
+    force: bool = False
+
+
+class AnalyticsIndexingRefreshRequest(BaseModel):
+    blog_id: int = Field(ge=1)
+    urls: list[str] | None = None
+    limit: int = Field(default=50, ge=1, le=500)
 
 
 class AnalyticsThemeWeightApplyRequest(BaseModel):
@@ -1466,5 +1832,5 @@ class AnalyticsIntegratedRead(BaseModel):
     theme_key: str | None = None
     category: str | None = None
     status: str | None = None
-    available_themes: list[AnalyticsThemeFilterOptionRead] = []
-    available_categories: list[str] = []
+    available_themes: list[AnalyticsThemeFilterOptionRead] = Field(default_factory=list)
+    available_categories: list[str] = Field(default_factory=list)
