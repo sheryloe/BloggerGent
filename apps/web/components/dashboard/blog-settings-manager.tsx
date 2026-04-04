@@ -28,6 +28,13 @@ const stageLabels: Record<WorkflowStageType, string> = {
   image_generation: "이미지 생성",
   html_assembly: "HTML 조립",
   publishing: "게시 대기",
+  video_metadata_generation: "영상 메타데이터 생성",
+  thumbnail_generation: "썸네일 생성",
+  reel_packaging: "릴스 패키징",
+  platform_publish: "플랫폼 게시",
+  performance_review: "성과 리뷰",
+  seo_rewrite: "SEO 리라이트",
+  indexing_check: "색인 점검",
 };
 
 const optionalStages: WorkflowStageType[] = ["topic_discovery", "image_prompt_generation"];

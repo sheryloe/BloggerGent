@@ -290,7 +290,7 @@ export function getSettingsTabItems(tab: Exclude<SettingsTab, "channels" | "pipe
         if (hasFragment(item.key, ["model", "api_key"])) {
           return false;
         }
-        return !hasPrefix(item.key, ["blogger_client_", "blogger_refresh_", "blogger_access_", "blogger_token_", "blogger_oauth_", "blogger_playwright_", "cloudflare_blog_", "cloudflare_account_"]);
+        return !hasPrefix(item.key, ["blogger_client_", "blogger_refresh_", "blogger_access_", "blogger_token_", "blogger_oauth_", "blogger_playwright_", "instagram_", "meta_graph_", "youtube_", "cloudflare_blog_", "cloudflare_account_"]);
       });
     case "models":
       return settings.filter((item) => hasFragment(item.key, ["model"]) || ["provider_mode", "openai_request_saver_mode", "topic_discovery_provider", "topic_discovery_max_topics_per_run", "gemini_daily_request_limit", "gemini_requests_per_minute_limit"].includes(item.key));
@@ -301,7 +301,7 @@ export function getSettingsTabItems(tab: Exclude<SettingsTab, "channels" | "pipe
     case "publishing":
       return settings.filter((item) => hasPrefix(item.key, ["publish_", "quality_gate_", "blogger_playwright_", "cloudflare_daily_"]) || ["pipeline_stop_after", "cloudflare_inline_images_enabled", "travel_inline_collage_enabled", "mystery_inline_collage_enabled"].includes(item.key));
     case "integrations":
-      return settings.filter((item) => hasPrefix(item.key, ["openai_", "gemini_", "blogger_client_", "blogger_redirect_uri", "blogger_refresh_", "blogger_access_", "blogger_token_", "blogger_oauth_", "google_sheet_", "sheet_sync_", "telegram_", "github_pages_", "cloudinary_", "cloudflare_blog_", "cloudflare_account_", "cloudflare_r2_", "public_image_provider", "public_asset_base_url", "cloudflare_channel_"]) || item.key === "last_sheet_sync_on");
+      return settings.filter((item) => hasPrefix(item.key, ["openai_", "gemini_", "blogger_client_", "blogger_redirect_uri", "blogger_refresh_", "blogger_access_", "blogger_token_", "blogger_oauth_", "instagram_", "meta_graph_", "youtube_", "google_sheet_", "sheet_sync_", "telegram_", "github_pages_", "cloudinary_", "cloudflare_blog_", "cloudflare_account_", "cloudflare_r2_", "public_image_provider", "public_asset_base_url", "cloudflare_channel_"]) || item.key === "last_sheet_sync_on");
   }
 }
 

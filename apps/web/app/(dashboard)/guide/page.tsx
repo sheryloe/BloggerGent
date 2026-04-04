@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getBloggerConfig, getBlogs } from "@/lib/api";
+import type { BloggerConfig } from "@/lib/types";
 
 const requiredInputs = [
   { title: "OpenAI API 키", level: "필수", description: "실제 본문 생성과 이미지 생성에 필요합니다.", example: "sk-..." },
@@ -38,8 +39,34 @@ const publishSteps = [
   "시간 지정 발행은 예약 큐에 넣고 worker가 순차 처리하게 둡니다.",
 ];
 
+const fallbackBloggerConfig: BloggerConfig = {
+  client_name: "",
+  client_id_configured: false,
+  client_secret_configured: false,
+  access_token_configured: false,
+  refresh_token_configured: false,
+  redirect_uri: "",
+  default_publish_mode: "draft",
+  connected: false,
+  remote_loaded: false,
+  authorization_url: null,
+  authorization_error: null,
+  connection_error: null,
+  oauth_scopes: [],
+  granted_scopes: [],
+  available_blogs: [],
+  profiles: [],
+  imported_blogger_blog_ids: [],
+  search_console_sites: [],
+  analytics_properties: [],
+  warnings: ["GitHub Pages/정적 빌드에서는 Google API를 연결하지 않고 가이드 화면을 렌더링합니다."],
+  blogs: [],
+};
+
 export default async function GuidePage() {
-  const [blogs, bloggerConfig] = await Promise.all([getBlogs(), getBloggerConfig()]);
+  const [blogsResult, bloggerConfigResult] = await Promise.allSettled([getBlogs(), getBloggerConfig(true)]);
+  const blogs = blogsResult.status === "fulfilled" ? blogsResult.value : [];
+  const bloggerConfig = bloggerConfigResult.status === "fulfilled" ? bloggerConfigResult.value : fallbackBloggerConfig;
 
   return (
     <div className="space-y-6">

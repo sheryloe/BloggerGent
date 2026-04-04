@@ -106,7 +106,7 @@ export default async function GoogleDataPage({
     );
   }
 
-  const [blogs, bloggerConfig] = await Promise.all([getBlogs(), getBloggerConfig()]);
+  const [blogs, bloggerConfig] = await Promise.all([getBlogs(), getBloggerConfig(true)]);
   const blogPayloads = await Promise.all(
     blogs.map(async (blog) => {
       const currentPage = parsePage(searchParams?.[pageParamKey(blog.id)]);

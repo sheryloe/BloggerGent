@@ -12,7 +12,7 @@ type NavItem = {
 };
 
 const NAV_ITEMS: NavItem[] = [
-  { href: "/", label: "대시보드", description: "운영 개요", icon: LayoutGrid },
+  { href: "/dashboard", label: "대시보드", description: "운영 개요", icon: LayoutGrid },
   { href: "/planner", label: "플래너", description: "월간 일정 관리", icon: CalendarDays },
   { href: "/analytics", label: "분석", description: "성과 리포트", icon: FileChartColumn },
   { href: "/content-ops", label: "콘텐츠", description: "보관함과 검토", icon: FolderKanban },
@@ -36,7 +36,7 @@ export function DashboardSidebar() {
       <nav className="mt-6 space-y-2">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
-          const active = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
+          const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
             <Link
               key={item.href}

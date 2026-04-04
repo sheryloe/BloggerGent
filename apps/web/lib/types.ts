@@ -22,7 +22,14 @@ export type WorkflowStageType =
   | "related_posts"
   | "image_generation"
   | "html_assembly"
-  | "publishing";
+  | "publishing"
+  | "video_metadata_generation"
+  | "thumbnail_generation"
+  | "reel_packaging"
+  | "platform_publish"
+  | "performance_review"
+  | "seo_rewrite"
+  | "indexing_check";
 
 export interface BlogCompact {
   id: number;
@@ -947,6 +954,7 @@ export interface BloggerConfig {
   redirect_uri: string;
   default_publish_mode: string;
   connected: boolean;
+  remote_loaded?: boolean;
   authorization_url?: string | null;
   authorization_error?: string | null;
   connection_error?: string | null;
@@ -1093,6 +1101,138 @@ export interface ManagedChannelRead {
   plannerSupported: boolean;
   analyticsSupported: boolean;
   promptFlowSupported: boolean;
+  capabilities: string[];
+  oauthState: string;
+  quotaState: Record<string, string | number | boolean | null>;
+  agentPackSummary: Array<Record<string, string | number | boolean | null>>;
+  liveWorkerCount: number;
+  pendingItems: number;
+  failedItems: number;
+  linkedBlogId?: number | null;
+}
+
+export interface ContentItemRead {
+  id: number;
+  managedChannelId: number;
+  channelId: string;
+  provider: string;
+  blogId: number | null;
+  jobId: number | null;
+  sourceArticleId: number | null;
+  contentType: "blog_article" | "youtube_video" | "instagram_image" | "instagram_reel" | string;
+  lifecycleStatus: string;
+  status: string;
+  title: string;
+  description: string;
+  summary: string;
+  bodyText: string;
+  body: string;
+  caption: string;
+  assetManifest: Record<string, unknown>;
+  briefPayload: Record<string, unknown>;
+  reviewNotes: unknown[];
+  approvalStatus: string;
+  scheduledFor: string | null;
+  lastFeedback: string | null;
+  lastScore: Record<string, unknown>;
+  createdByAgent: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentWorkerRead {
+  id: number;
+  managedChannelId: number | null;
+  channelId: string | null;
+  workerKey: string;
+  runtimeKind: "claude_cli" | "codex_cli" | "gemini_cli" | string;
+  displayName: string;
+  roleName: string;
+  roleKey: string;
+  queueName: string;
+  concurrencyLimit: number;
+  status: string;
+  configPayload: Record<string, unknown>;
+  oauthSubject: string | null;
+  lastHeartbeatAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentRunRead {
+  id: number;
+  managedChannelId: number | null;
+  channelId: string | null;
+  contentItemId: number | null;
+  workerId: number | null;
+  agentWorkerId: number | null;
+  runKey: string;
+  runtimeKind: "claude_cli" | "codex_cli" | "gemini_cli" | string;
+  assignedRole: string;
+  roleKey: string;
+  providerModel: string | null;
+  status: string;
+  priority: number;
+  queuePriority: number;
+  timeoutSeconds: number;
+  retryCount: number;
+  attemptCount: number;
+  maxRetries: number;
+  maxAttempts: number;
+  startedAt: string | null;
+  endedAt: string | null;
+  promptSnapshot: string;
+  responseSnapshot: string;
+  logLines: unknown[];
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PlatformCredentialRead {
+  id: number;
+  managedChannelId: number | null;
+  channelId: string | null;
+  provider: string;
+  credentialKey: string;
+  subject: string | null;
+  displayName: string | null;
+  scopes: string[];
+  accessTokenConfigured: boolean;
+  refreshTokenConfigured: boolean;
+  expiresAt: string | null;
+  tokenType: string;
+  isValid: boolean;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentRuntimeHealthRead {
+  totalWorkers: number;
+  liveWorkers: number;
+  queuedRuns: number;
+  failedRuns: number;
+  runtimeStatus: string;
+  runtimes: Array<Record<string, string | number | boolean | null>>;
+}
+
+export interface MissionControlAlertRead {
+  key: string;
+  level: string;
+  title: string;
+  message: string;
+}
+
+export interface MissionControlRead {
+  workspaceLabel: string;
+  channels: ManagedChannelRead[];
+  workers: AgentWorkerRead[];
+  runs: AgentRunRead[];
+  recentContent: ContentItemRead[];
+  runtimeHealth: AgentRuntimeHealthRead;
+  alerts: MissionControlAlertRead[];
 }
 
 export interface PromptFlowStepRead {
@@ -1144,6 +1284,13 @@ export interface AnalyticsArticleFactRead {
   status: string | null;
   actualUrl: string | null;
   sourceType: string;
+  ctr: number | null;
+  indexStatus: "indexed" | "submitted" | "pending" | "blocked" | "failed" | "unknown" | string;
+  indexCoverageState: string | null;
+  lastCrawlTime: string | null;
+  lastNotifyTime: string | null;
+  nextEligibleAt: string | null;
+  indexLastCheckedAt: string | null;
 }
 
 export interface AnalyticsThemeMonthlyStatRead {
@@ -1198,9 +1345,27 @@ export interface AnalyticsBlogMonthlyReportRead {
   articleFacts: AnalyticsArticleFactRead[];
 }
 
+export interface AnalyticsDailySummaryRead {
+  date: string;
+  totalPosts: number;
+  generatedPosts: number;
+  syncedPosts: number;
+  avgSeo: number | null;
+  avgGeo: number | null;
+}
+
+export interface AnalyticsDailySummaryListResponse {
+  blogId: number;
+  month: string;
+  items: AnalyticsDailySummaryRead[];
+}
+
 export interface AnalyticsArticleFactListResponse {
   blogId: number;
   month: string;
+  total: number;
+  page: number;
+  pageSize: number;
   items: AnalyticsArticleFactRead[];
 }
 

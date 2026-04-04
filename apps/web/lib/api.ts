@@ -29,12 +29,19 @@
   PromptTemplate,
   SettingItem,
   AnalyticsBackfillRead,
+  AnalyticsDailySummaryListResponse,
   AnalyticsBlogMonthlySummaryRead,
   AnalyticsIntegratedRead,
+  AgentRunRead,
+  AgentRuntimeHealthRead,
+  AgentWorkerRead,
+  ContentItemRead,
   ManagedChannelRead,
+  MissionControlRead,
   ModelPolicyRead,
   PlannerCalendarRead,
   PlannerCategoryRead,
+  PlatformCredentialRead,
   PlannerMonthPlanRequest,
   PromptFlowRead,
   PlannerSlotCreateRequest,
@@ -277,8 +284,13 @@ export async function getPrompts() {
   return apiFetch<PromptTemplate[]>("/prompts");
 }
 
-export async function getBloggerConfig() {
-  return apiFetch<BloggerConfig>("/blogger/config");
+export async function getBloggerConfig(includeRemote = false) {
+  const search = new URLSearchParams();
+  if (includeRemote) {
+    search.set("include_remote", "true");
+  }
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+  return apiFetch<BloggerConfig>(`/blogger/config${suffix}`);
 }
 
 export async function getCloudflareOverview() {
@@ -407,7 +419,165 @@ function mapManagedChannel(item: any): ManagedChannelRead {
     plannerSupported: item.planner_supported ?? false,
     analyticsSupported: item.analytics_supported ?? false,
     promptFlowSupported: item.prompt_flow_supported ?? false,
+    capabilities: item.capabilities ?? [],
+    oauthState: item.oauth_state ?? "unknown",
+    quotaState: item.quota_state ?? {},
+    agentPackSummary: item.agent_pack_summary ?? [],
+    liveWorkerCount: item.live_worker_count ?? 0,
+    pendingItems: item.pending_items ?? 0,
+    failedItems: item.failed_items ?? 0,
+    linkedBlogId: item.linked_blog_id ?? null,
   };
+}
+
+function mapContentItem(item: any): ContentItemRead {
+  return {
+    id: item.id,
+    managedChannelId: item.managed_channel_id,
+    channelId: item.channel_id ?? "",
+    provider: item.provider ?? "",
+    blogId: item.blog_id ?? null,
+    jobId: item.job_id ?? null,
+    sourceArticleId: item.source_article_id ?? null,
+    contentType: item.content_type,
+    lifecycleStatus: item.lifecycle_status ?? item.status ?? "draft",
+    status: item.lifecycle_status ?? item.status ?? "draft",
+    title: item.title ?? "",
+    description: item.description ?? "",
+    summary: item.description ?? "",
+    bodyText: item.body_text ?? "",
+    body: item.body_text ?? "",
+    caption: item.brief_payload?.caption ?? item.description ?? "",
+    assetManifest: item.asset_manifest ?? {},
+    briefPayload: item.brief_payload ?? {},
+    reviewNotes: item.review_notes ?? [],
+    approvalStatus: item.approval_status ?? "pending",
+    scheduledFor: item.scheduled_for ?? null,
+    lastFeedback: item.last_feedback ?? null,
+    lastScore: item.last_score ?? {},
+    createdByAgent: item.created_by_agent ?? null,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  };
+}
+
+function mapAgentWorker(item: any): AgentWorkerRead {
+  return {
+    id: item.id,
+    managedChannelId: item.managed_channel_id ?? null,
+    channelId: item.channel_id ?? null,
+    workerKey: item.worker_key,
+    runtimeKind: item.runtime_kind,
+    displayName: item.display_name,
+    roleName: item.role_name ?? "",
+    roleKey: item.role_name ?? "",
+    queueName: item.queue_name ?? "default",
+    concurrencyLimit: item.concurrency_limit ?? 1,
+    status: item.status,
+    configPayload: item.config_payload ?? {},
+    oauthSubject: (item.config_payload?.oauth_subject as string | undefined) ?? null,
+    lastHeartbeatAt: item.last_heartbeat_at ?? null,
+    lastError: item.last_error ?? null,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  };
+}
+
+function mapAgentRun(item: any): AgentRunRead {
+  return {
+    id: item.id,
+    managedChannelId: item.managed_channel_id ?? null,
+    channelId: item.channel_id ?? null,
+    contentItemId: item.content_item_id ?? null,
+    workerId: item.worker_id ?? null,
+    agentWorkerId: item.worker_id ?? null,
+    runKey: item.run_key,
+    runtimeKind: item.runtime_kind,
+    assignedRole: item.assigned_role ?? "",
+    roleKey: item.assigned_role ?? "",
+    providerModel: item.provider_model ?? null,
+    status: item.status,
+    priority: item.priority ?? 50,
+    queuePriority: item.priority ?? 50,
+    timeoutSeconds: item.timeout_seconds ?? 900,
+    retryCount: item.retry_count ?? 0,
+    attemptCount: item.retry_count ?? 0,
+    maxRetries: item.max_retries ?? 3,
+    maxAttempts: item.max_retries ?? 3,
+    startedAt: item.started_at ?? null,
+    endedAt: item.ended_at ?? null,
+    promptSnapshot: item.prompt_snapshot ?? "",
+    responseSnapshot: item.response_snapshot ?? "",
+    logLines: item.log_lines ?? [],
+    errorMessage: item.error_message ?? null,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  };
+}
+
+function mapPlatformCredential(item: any): PlatformCredentialRead {
+  return {
+    id: item.id,
+    managedChannelId: item.managed_channel_id ?? null,
+    channelId: item.channel_id ?? null,
+    provider: item.provider,
+    credentialKey: item.credential_key ?? "",
+    subject: item.subject ?? null,
+    displayName: item.subject ?? null,
+    scopes: item.scopes ?? [],
+    accessTokenConfigured: item.access_token_configured ?? false,
+    refreshTokenConfigured: item.refresh_token_configured ?? false,
+    expiresAt: item.expires_at ?? null,
+    tokenType: item.token_type ?? "Bearer",
+    isValid: item.is_valid ?? false,
+    lastError: item.last_error ?? null,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  };
+}
+
+function mapAgentRuntimeHealth(item: any): AgentRuntimeHealthRead {
+  const workerStatus = item?.worker_status ?? {};
+  const runStatus = item?.run_status ?? {};
+  const failedRuns = Number(runStatus.failed ?? 0);
+  const queuedRuns = Number(runStatus.queued ?? 0);
+  const liveWorkers = Number(workerStatus.running ?? 0) + Number(workerStatus.busy ?? 0);
+  const runtimeStatus = item?.healthy ? "healthy" : failedRuns > 0 ? "error" : queuedRuns > 0 ? "busy" : "standby";
+
+  return {
+    totalWorkers: item?.worker_count ?? 0,
+    liveWorkers,
+    queuedRuns,
+    failedRuns,
+    runtimeStatus,
+    runtimes: (item?.runtime_kinds ?? []).map((runtimeKind: string) => ({
+      runtimeKind,
+      label: runtimeKind,
+      active: runtimeStatus !== "standby",
+    })),
+  };
+}
+
+function mapMissionControl(payload: any): MissionControlRead {
+  return {
+    workspaceLabel: payload.workspace_label ?? "Bloggent Mission Control",
+    channels: (payload.channels ?? []).map(mapManagedChannel),
+    workers: (payload.workers ?? []).map(mapAgentWorker),
+    runs: (payload.runs ?? []).map(mapAgentRun),
+    recentContent: (payload.recent_content ?? []).map(mapContentItem),
+    runtimeHealth: mapAgentRuntimeHealth(payload.runtime_health ?? {}),
+    alerts: (payload.alerts ?? []).map((item: any) => ({
+      key: item.key,
+      level: item.level,
+      title: item.title,
+      message: item.message,
+    })),
+  };
+}
+
+export async function getMissionControl() {
+  const payload = await apiFetch<any>("/workspace/mission-control", { revalidate: false });
+  return mapMissionControl(payload);
 }
 
 function mapPromptFlow(payload: any): PromptFlowRead {
@@ -460,6 +630,13 @@ function mapAnalyticsArticleFact(item: any) {
     status: item.status ?? null,
     actualUrl: item.actual_url ?? null,
     sourceType: item.source_type,
+    ctr: item.ctr ?? null,
+    indexStatus: item.index_status ?? "unknown",
+    indexCoverageState: item.index_coverage_state ?? null,
+    lastCrawlTime: item.last_crawl_time ?? null,
+    lastNotifyTime: item.last_notify_time ?? null,
+    nextEligibleAt: item.next_eligible_at ?? null,
+    indexLastCheckedAt: item.index_last_checked_at ?? null,
   };
 }
 
@@ -498,6 +675,17 @@ function mapAnalyticsSummary(item: any): AnalyticsBlogMonthlySummaryRead {
   };
 }
 
+function mapAnalyticsDailySummary(item: any) {
+  return {
+    date: item.date,
+    totalPosts: item.total_posts ?? 0,
+    generatedPosts: item.generated_posts ?? 0,
+    syncedPosts: item.synced_posts ?? 0,
+    avgSeo: item.avg_seo ?? null,
+    avgGeo: item.avg_geo ?? null,
+  };
+}
+
 function mapAnalyticsReport(payload: any): AnalyticsBlogMonthlyReportRead {
   return {
     blogId: payload.blog_id,
@@ -532,8 +720,8 @@ export async function getChannels() {
   return (payload ?? []).map(mapManagedChannel);
 }
 
-export async function getChannelPromptFlow(channelId: string) {
-  const payload = await apiFetch<any>(`/channels/${encodeURIComponent(channelId)}/prompt-flow`, { revalidate: false });
+export async function getChannelPromptFlow(channelId: string, signal?: AbortSignal) {
+  const payload = await apiFetch<any>(`/channels/${encodeURIComponent(channelId)}/prompt-flow`, { revalidate: false, signal });
   return mapPromptFlow(payload);
 }
 
@@ -646,16 +834,90 @@ export async function getAnalyticsMonthly(month: string) {
   } satisfies AnalyticsBlogMonthlyListResponse;
 }
 
-export async function getBlogMonthlyReport(blogId: number, month: string) {
-  const payload = await apiFetch<any>(`/analytics/blogs/${blogId}/monthly-report?month=${month}`);
+export async function getBlogMonthlyReport(blogId: number, month: string, signal?: AbortSignal) {
+  const payload = await apiFetch<any>(`/analytics/blogs/${blogId}/monthly-report?month=${month}`, { signal });
   return mapAnalyticsReport(payload);
 }
 
-export async function getBlogMonthlyArticles(blogId: number, month: string) {
-  const payload = await apiFetch<any>(`/analytics/blogs/${blogId}/articles?month=${month}`);
+export async function getBlogDailySummary(
+  blogId: number,
+  params: {
+    month: string;
+    sourceType?: string;
+    themeKey?: string | null;
+    category?: string | null;
+    status?: string | null;
+    signal?: AbortSignal;
+  },
+) {
+  const search = new URLSearchParams({
+    month: params.month,
+  });
+  if (params.sourceType && params.sourceType !== "all") {
+    search.set("source_type", params.sourceType);
+  }
+  if (params.themeKey) {
+    search.set("theme_key", params.themeKey);
+  }
+  if (params.category) {
+    search.set("category", params.category);
+  }
+  if (params.status) {
+    search.set("status", params.status);
+  }
+  const payload = await apiFetch<any>(`/analytics/blogs/${blogId}/daily-summary?${search.toString()}`, { signal: params.signal });
   return {
     blogId: payload.blog_id,
     month: payload.month,
+    items: (payload.items ?? []).map(mapAnalyticsDailySummary),
+  } satisfies AnalyticsDailySummaryListResponse;
+}
+
+export async function getBlogMonthlyArticles(
+  blogId: number,
+  params: {
+    month: string;
+    date?: string | null;
+    sourceType?: string;
+    themeKey?: string | null;
+    category?: string | null;
+    status?: string | null;
+    sort?: "published_at" | "seo" | "geo" | "similarity" | "title";
+    dir?: "asc" | "desc";
+    page?: number;
+    pageSize?: number;
+    signal?: AbortSignal;
+  },
+) {
+  const search = new URLSearchParams({
+    month: params.month,
+    page: String(params.page ?? 1),
+    page_size: String(params.pageSize ?? 50),
+    sort: params.sort ?? "published_at",
+    dir: params.dir ?? "desc",
+  });
+  if (params.date) {
+    search.set("date", params.date);
+  }
+  if (params.sourceType && params.sourceType !== "all") {
+    search.set("source_type", params.sourceType);
+  }
+  if (params.themeKey) {
+    search.set("theme_key", params.themeKey);
+  }
+  if (params.category) {
+    search.set("category", params.category);
+  }
+  if (params.status) {
+    search.set("status", params.status);
+  }
+  const payload = await apiFetch<any>(`/analytics/blogs/${blogId}/articles?${search.toString()}`, { signal: params.signal });
+  return {
+    blogId: payload.blog_id,
+    month: payload.month,
+    total: payload.total ?? 0,
+    page: payload.page ?? 1,
+    pageSize: payload.page_size ?? params.pageSize ?? 50,
     items: (payload.items ?? []).map(mapAnalyticsArticleFact),
   } satisfies AnalyticsArticleFactListResponse;
 }
@@ -673,6 +935,40 @@ export async function applyNextMonthWeights(blogId: number, month: string) {
   } satisfies AnalyticsThemeWeightApplyResponse;
 }
 
+export async function requestAnalyticsIndexing(payload: { blogId: number; url: string; force?: boolean }) {
+  const response = await apiFetch<any>("/analytics/indexing/request", {
+    method: "POST",
+    body: JSON.stringify({
+      blog_id: payload.blogId,
+      url: payload.url,
+      force: payload.force ?? false,
+    }),
+  });
+  return {
+    status: response.status,
+    reason: response.reason ?? null,
+    blogId: response.blog_id,
+    url: response.url,
+    indexStatus: response.index_status ?? "unknown",
+    nextEligibleAt: response.next_eligible_at ?? null,
+    lastNotifyTime: response.last_notify_time ?? null,
+    indexLastCheckedAt: response.index_last_checked_at ?? null,
+    lastError: response.last_error ?? null,
+  };
+}
+
+export async function refreshAnalyticsIndexing(payload: { blogId: number; urls?: string[]; limit?: number }) {
+  const response = await apiFetch<any>("/analytics/indexing/refresh", {
+    method: "POST",
+    body: JSON.stringify({
+      blog_id: payload.blogId,
+      urls: payload.urls ?? null,
+      limit: payload.limit ?? 50,
+    }),
+  });
+  return response;
+}
+
 export async function getIntegratedAnalytics(params: {
   range: string;
   month: string;
@@ -681,6 +977,8 @@ export async function getIntegratedAnalytics(params: {
   themeKey?: string | null;
   category?: string | null;
   status?: string | null;
+  includeReport?: boolean;
+  signal?: AbortSignal;
 }) {
   const search = new URLSearchParams({
     range: params.range,
@@ -701,7 +999,10 @@ export async function getIntegratedAnalytics(params: {
   if (params.status) {
     search.set("status", params.status);
   }
-  const payload = await apiFetch<any>(`/analytics/integrated?${search.toString()}`);
+  if (params.includeReport) {
+    search.set("include_report", "true");
+  }
+  const payload = await apiFetch<any>(`/analytics/integrated?${search.toString()}`, { signal: params.signal });
   return {
     month: payload.month,
     range: payload.range,

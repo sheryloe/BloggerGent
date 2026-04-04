@@ -6,6 +6,7 @@ import {
   createChannelPromptFlowStep,
   deleteChannelPromptFlowStep,
   getBlogArchive,
+  getBloggerConfig,
   getBlogs,
   getChannelPromptFlow,
   getChannels,
@@ -63,6 +64,8 @@ type SettingSection = {
   description: string;
   keys: string[];
 };
+
+const GOOGLE_INDEXING_SCOPE = "https://www.googleapis.com/auth/indexing";
 
 const TABS: Array<{ key: SettingsTab; label: string }> = [
   { key: "workspace", label: "개요" },
@@ -778,6 +781,7 @@ async function loadChannelPreviews(channelList: ManagedChannelRead[], blogList: 
 
 export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
   const settingsByKey = useMemo(() => new Map(settings.map((item) => [item.key, item])), [settings]);
+  const [runtimeConfig, setRuntimeConfig] = useState<BloggerConfigRead>(config);
   const [activeTab, setActiveTab] = useState<SettingsTab>("workspace");
   const [savedSettings, setSavedSettings] = useState<Record<string, string>>(() => Object.fromEntries(settings.map((item) => [item.key, item.value])));
   const [localSettings, setLocalSettings] = useState<Record<string, string>>(() => Object.fromEntries(settings.map((item) => [item.key, item.value])));
@@ -795,15 +799,23 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
   const [flowSaveState, setFlowSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [modelPolicy, setModelPolicy] = useState<ModelPolicyRead | null>(null);
   const [selectedStageType, setSelectedStageType] = useState<string>(STAGE_ORDER[0]);
+  const [channelPreviewsLoaded, setChannelPreviewsLoaded] = useState(false);
+  const [channelPreviewsLoading, setChannelPreviewsLoading] = useState(false);
+  const [remoteConfigLoading, setRemoteConfigLoading] = useState(false);
+  const [remoteConfigError, setRemoteConfigError] = useState("");
   const [isPending, startTransition] = useTransition();
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flowDraftVersion = useRef(0);
 
   useEffect(() => {
+    setRuntimeConfig(config);
+  }, [config]);
+
+  useEffect(() => {
     let mounted = true;
     startTransition(() => {
-      void Promise.all([getChannels(), getModelPolicy(), getBlogs()])
-        .then(async ([channelList, policy, blogList]) => {
+      void Promise.all([getChannels(), getModelPolicy()])
+        .then(([channelList, policy]) => {
           if (!mounted) {
             return;
           }
@@ -813,10 +825,6 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
           const defaultChannel = channelList.find((item) => item.promptFlowSupported) ?? channelList[0] ?? null;
           if (defaultChannel) {
             setSelectedChannelId((current) => current || defaultChannel.channelId);
-          }
-          const previews = await loadChannelPreviews(channelList, blogList);
-          if (mounted) {
-            setChannelPreviews(previews);
           }
         })
         .catch(() => {
@@ -831,12 +839,42 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
   }, []);
 
   useEffect(() => {
+    if (activeTab !== "channels" || channelPreviewsLoaded || channelPreviewsLoading || channels.length === 0) {
+      return;
+    }
+    let mounted = true;
+    const timer = window.setTimeout(() => {
+      setChannelPreviewsLoading(true);
+      void getBlogs()
+        .then((blogList) => loadChannelPreviews(channels, blogList))
+        .then((previews) => {
+          if (!mounted) return;
+          setChannelPreviews(previews);
+          setChannelPreviewsLoaded(true);
+        })
+        .catch(() => {
+          if (!mounted) return;
+          setBootstrapError("채널 미리보기를 불러오지 못했습니다.");
+        })
+        .finally(() => {
+          if (!mounted) return;
+          setChannelPreviewsLoading(false);
+        });
+    }, 200);
+    return () => {
+      mounted = false;
+      window.clearTimeout(timer);
+    };
+  }, [activeTab, channels, channelPreviewsLoaded, channelPreviewsLoading]);
+
+  useEffect(() => {
     if (!selectedChannelId) {
       return;
     }
     let mounted = true;
-    startTransition(() => {
-      void getChannelPromptFlow(selectedChannelId)
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void getChannelPromptFlow(selectedChannelId, controller.signal)
         .then((payload) => {
           if (!mounted) {
             return;
@@ -852,15 +890,17 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
             setSelectedCloudflareCategory("");
           }
         })
-        .catch(() => {
-          if (mounted) {
-            setFlow(null);
-            setFlowError("프롬프트 플로우를 불러오지 못했습니다.");
-          }
+        .catch((error) => {
+          if (!mounted) return;
+          if (error instanceof DOMException && error.name === "AbortError") return;
+          setFlow(null);
+          setFlowError("프롬프트 플로우를 불러오지 못했습니다.");
         });
     });
     return () => {
       mounted = false;
+      window.clearTimeout(timer);
+      controller.abort();
     };
   }, [selectedChannelId]);
 
@@ -1003,6 +1043,19 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
     }
   }
 
+  async function handleLoadRemoteConfig() {
+    try {
+      setRemoteConfigLoading(true);
+      setRemoteConfigError("");
+      const next = await getBloggerConfig(true);
+      setRuntimeConfig(next);
+    } catch {
+      setRemoteConfigError("연동 데이터를 불러오지 못했습니다.");
+    } finally {
+      setRemoteConfigLoading(false);
+    }
+  }
+
   async function applyFlowUpdate(patch: Partial<StepDraft>, immediate = false) {
     if (!selectedStep || !draft || !selectedChannel) {
       return;
@@ -1123,6 +1176,17 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
   const currentSections = groupedSettings.filter((section) => section.key === activeTab);
   const currentSectionKeys = currentSections.flatMap((section) => section.items.map((item) => item.key));
   const currentDirtyCount = currentSectionKeys.filter(isDirtyField).length;
+  const oauthClientConfigured = Boolean(runtimeConfig.client_id_configured && runtimeConfig.client_secret_configured);
+  const oauthStartUrl = runtimeConfig.authorization_url || `${process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1"}/blogger/oauth/start`;
+  const grantedScopeSet = useMemo(
+    () => new Set((runtimeConfig.granted_scopes ?? []).map((item) => item.trim()).filter(Boolean)),
+    [runtimeConfig.granted_scopes],
+  );
+  const missingScopes = useMemo(
+    () => (runtimeConfig.oauth_scopes ?? []).filter((scope) => !grantedScopeSet.has(scope)),
+    [runtimeConfig.oauth_scopes, grantedScopeSet],
+  );
+  const indexingScopeGranted = grantedScopeSet.has(GOOGLE_INDEXING_SCOPE);
   const overviewStats = [
     { label: "자동화 게이트", value: localSettings.automation_master_enabled === "true" ? "활성" : "중지" },
     { label: "품질 게이트", value: localSettings.quality_gate_enabled === "true" ? "사용" : "중지" },
@@ -1404,6 +1468,92 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
               </div>
             ) : null}
 
+            {activeTab === "integrations" ? (
+              <article className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm lg:p-6">
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                  <div>
+                    <h3 className="text-xl font-semibold text-slate-950">Google OAuth2 연동</h3>
+                    <p className="mt-1 text-sm text-slate-500">Blogger, Search Console, GA4, Indexing API 동작은 이 OAuth 인증 상태를 기준으로 결정됩니다.</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {oauthClientConfigured ? (
+                      <a
+                        href={oauthStartUrl}
+                        className="rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800"
+                      >
+                        OAuth2 연결/재인증
+                      </a>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled
+                        className="rounded-full bg-slate-200 px-4 py-2 text-sm font-medium text-slate-500"
+                      >
+                        먼저 Client ID/Secret 저장
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void handleLoadRemoteConfig()}
+                      disabled={remoteConfigLoading}
+                      className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                    >
+                      {remoteConfigLoading ? "연동 데이터 조회 중..." : "연동 데이터 불러오기"}
+                    </button>
+                    <a
+                      href="/google"
+                      className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                    >
+                      연동 상태 확인
+                    </a>
+                    <a
+                      href="/guide"
+                      className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                    >
+                      문제 해결 가이드
+                    </a>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <StatTile label="OAuth 연결" value={runtimeConfig.connected ? "연결됨" : "미연결"} />
+                  <StatTile label="승인 Scope" value={String(runtimeConfig.granted_scopes.length)} />
+                  <StatTile label="누락 Scope" value={String(missingScopes.length)} />
+                  <StatTile label="Indexing Scope" value={indexingScopeGranted ? "승인됨" : "누락"} />
+                </div>
+
+                <div className="mt-3 text-xs text-slate-500">
+                  원격 연동 데이터 조회 상태: {runtimeConfig.remote_loaded ? "불러옴" : "미조회(초기 경량 모드)"}
+                </div>
+                {remoteConfigError ? (
+                  <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    {remoteConfigError}
+                  </div>
+                ) : null}
+
+                {!indexingScopeGranted ? (
+                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-7 text-amber-900">
+                    `https://www.googleapis.com/auth/indexing` 권한이 누락되어 자동 색인 요청이 실행되지 않습니다. 위의 `OAuth2 연결/재인증`을 실행해 권한을 다시 승인하세요.
+                  </div>
+                ) : null}
+
+                {missingScopes.length ? (
+                  <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-7 text-slate-700">
+                    <p className="font-semibold text-slate-900">누락 Scope</p>
+                    <p className="mt-2 break-all">{missingScopes.join(", ")}</p>
+                  </div>
+                ) : null}
+
+                <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-7 text-slate-700">
+                  <p className="font-semibold text-slate-900">동작하지 않을 때 확인 순서</p>
+                  <p className="mt-2">1. `blogger_client_id`, `blogger_client_secret`, `blogger_redirect_uri` 저장 후 현재 탭 저장을 눌러 반영합니다.</p>
+                  <p>2. Google OAuth 동의화면이 Testing이면 실제 로그인 계정을 Test users에 추가합니다.</p>
+                  <p>3. `OAuth2 연결/재인증` 버튼으로 다시 인증하고, `/google` 화면에서 승인 Scope에 indexing이 포함됐는지 확인합니다.</p>
+                  <p>4. 여전히 실패하면 Redirect URI가 Google Cloud 설정과 완전히 동일한지(프로토콜/포트/경로) 확인합니다.</p>
+                </div>
+              </article>
+            ) : null}
+
             {currentSections.map((section) => (
               <article key={section.id} className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm lg:p-6">
                 <div className="flex items-center justify-between gap-3">
@@ -1524,8 +1674,8 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
               <h3 className="text-lg font-semibold text-slate-950">현재 탭 요약</h3>
               <p className="mt-2 text-sm leading-6 text-slate-600">키 덤프 대신 실제 운영 과업 기준으로 섹션을 재구성했습니다.</p>
             </div>
-            <InfoRow label="Blogger 연결 블로그" value={String(config.blogs.length)} />
-            <InfoRow label="OAuth 연결 상태" value={config.connected ? "연결됨" : "확인 필요"} />
+            <InfoRow label="Blogger 연결 블로그" value={String(runtimeConfig.blogs.length)} />
+            <InfoRow label="OAuth 연결 상태" value={runtimeConfig.connected ? "연결됨" : "확인 필요"} />
             <InfoRow label="변경 항목" value={String(currentDirtyCount)} />
             <InfoRow label="저장 상태" value={saveError || saveMessage || "대기"} />
             <button
