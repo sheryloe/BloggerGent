@@ -1,0 +1,393 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+
+from app.core.config import settings as app_settings
+from app.db.base import Base
+from app.models.entities import Blog, ContentItem, GoogleIndexUrlState, MetricFact, PublicationRecord, PublishMode, SearchConsolePageMetric
+from app.services import metric_ingestion_service
+from app.services import platform_oauth_service
+from app.services import platform_publish_service
+from app.services.platform_oauth_service import build_platform_authorization_url, complete_google_platform_oauth, refresh_platform_access_token
+from app.services.platform_publish_service import mark_content_item_publish_queued, process_platform_publish_queue
+from app.services.platform_service import (
+    create_content_item,
+    ensure_managed_channels,
+    get_channel_credential,
+    get_managed_channel_by_channel_id,
+    list_platform_integrations,
+    upsert_platform_credential,
+)
+from app.services.secret_service import decrypt_secret_value
+from app.services.settings_service import get_settings_map, upsert_settings
+
+
+class FakeResponse:
+    def __init__(self, status_code: int, payload: dict | None = None, *, headers: dict | None = None) -> None:
+        self.status_code = status_code
+        self._payload = payload or {}
+        self.headers = headers or {}
+        self.text = ""
+        self.content = b"{}"
+
+    @property
+    def is_success(self) -> bool:
+        return 200 <= self.status_code < 300
+
+    def json(self) -> dict:
+        return self._payload
+
+
+@pytest.fixture()
+def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Session:
+    monkeypatch.setattr(app_settings, "storage_root", str(tmp_path / "storage"))
+    monkeypatch.setattr(app_settings, "settings_encryption_secret", "test-secret")
+
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
+    Base.metadata.create_all(engine)
+
+    session = SessionLocal()
+    get_settings_map(session)
+    upsert_settings(
+        session,
+        {
+            "blogger_client_id": "google-client-id",
+            "blogger_client_secret": "google-client-secret",
+        },
+    )
+    try:
+        yield session
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def _create_blog(
+    db: Session,
+    *,
+    blog_id: int,
+    slug: str,
+    blogger_url: str = "https://example.com",
+    search_console_site_url: str | None = None,
+    ga4_property_id: str | None = None,
+) -> Blog:
+    blog = Blog(
+        id=blog_id,
+        name=f"Blog {blog_id}",
+        slug=slug,
+        content_category="custom",
+        primary_language="ko",
+        profile_key="custom",
+        publish_mode=PublishMode.DRAFT,
+        is_active=True,
+        blogger_url=blogger_url,
+        search_console_site_url=search_console_site_url,
+        ga4_property_id=ga4_property_id,
+    )
+    db.add(blog)
+    db.commit()
+    db.refresh(blog)
+    return blog
+
+
+def test_complete_google_platform_oauth_stores_youtube_credential(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    ensure_managed_channels(db)
+    channel = get_managed_channel_by_channel_id(db, "youtube:main")
+    assert channel is not None
+
+    monkeypatch.setattr(
+        platform_oauth_service,
+        "_google_token_request",
+        lambda _payload: {
+            "access_token": "youtube-access-token",
+            "refresh_token": "youtube-refresh-token",
+            "scope": " ".join(platform_oauth_service.YOUTUBE_OAUTH_SCOPES),
+            "token_type": "Bearer",
+            "expires_in": 3600,
+        },
+    )
+    monkeypatch.setattr(
+        platform_oauth_service,
+        "_fetch_youtube_channel_identity",
+        lambda _access_token: {
+            "remote_resource_id": "UC12345",
+            "display_name": "Main Channel",
+            "base_url": "https://www.youtube.com/channel/UC12345",
+            "subject": "Main Channel",
+            "metadata": {"channel_id": "UC12345"},
+        },
+    )
+
+    auth_url = build_platform_authorization_url(db, channel_id="youtube:main")
+    state = parse_qs(urlparse(auth_url).query)["state"][0]
+    result = complete_google_platform_oauth(db, code="oauth-code", state=state)
+
+    refreshed = get_managed_channel_by_channel_id(db, "youtube:main")
+    assert result["channel_id"] == "youtube:main"
+    assert refreshed is not None
+    assert refreshed.status == "connected"
+    credential = get_channel_credential(refreshed)
+    assert credential is not None
+    assert decrypt_secret_value(credential.access_token_encrypted) == "youtube-access-token"
+    assert credential.subject == "Main Channel"
+
+
+def test_refresh_platform_access_token_updates_youtube_token(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    ensure_managed_channels(db)
+    channel = get_managed_channel_by_channel_id(db, "youtube:main")
+    assert channel is not None
+
+    credential = upsert_platform_credential(
+        db,
+        channel=channel,
+        provider="youtube",
+        credential_key=channel.channel_id,
+        subject="Main Channel",
+        scopes=list(platform_oauth_service.YOUTUBE_OAUTH_SCOPES),
+        access_token="expired-token",
+        refresh_token="refresh-token",
+        expires_at=datetime.now(UTC) - timedelta(minutes=10),
+        token_type="Bearer",
+        refresh_metadata={},
+        is_valid=True,
+        last_error=None,
+    )
+    assert decrypt_secret_value(credential.access_token_encrypted) == "expired-token"
+
+    monkeypatch.setattr(
+        platform_oauth_service,
+        "_google_token_request",
+        lambda _payload: {
+            "access_token": "refreshed-token",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+        },
+    )
+    monkeypatch.setattr(
+        platform_oauth_service,
+        "_fetch_youtube_channel_identity",
+        lambda _access_token: {
+            "remote_resource_id": "UC12345",
+            "display_name": "Main Channel",
+            "base_url": "https://www.youtube.com/channel/UC12345",
+            "subject": "Main Channel",
+            "metadata": {"channel_id": "UC12345"},
+        },
+    )
+
+    refreshed = refresh_platform_access_token(db, channel_id="youtube:main")
+    assert decrypt_secret_value(refreshed.access_token_encrypted) == "refreshed-token"
+
+
+def test_list_platform_integrations_without_credentials(db: Session) -> None:
+    ensure_managed_channels(db)
+    integrations = list_platform_integrations(db)
+
+    by_channel_id = {item["channel_id"]: item for item in integrations}
+    assert "youtube:main" in by_channel_id
+    assert "instagram:main" in by_channel_id
+    assert by_channel_id["youtube:main"]["expires_at"] is None
+    assert by_channel_id["instagram:main"]["expires_at"] is None
+
+
+def test_process_platform_publish_queue_uploads_youtube_video(db: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ensure_managed_channels(db)
+    channel = get_managed_channel_by_channel_id(db, "youtube:main")
+    assert channel is not None
+
+    upsert_platform_credential(
+        db,
+        channel=channel,
+        provider="youtube",
+        credential_key=channel.channel_id,
+        subject="Main Channel",
+        scopes=list(platform_oauth_service.YOUTUBE_OAUTH_SCOPES),
+        access_token="upload-token",
+        refresh_token="refresh-token",
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+        token_type="Bearer",
+        refresh_metadata={},
+        is_valid=True,
+        last_error=None,
+    )
+
+    video_file = tmp_path / "sample.mp4"
+    video_file.write_bytes(b"video-bytes")
+    thumbnail_file = tmp_path / "thumb.png"
+    thumbnail_file.write_bytes(b"thumb-bytes")
+
+    item = create_content_item(
+        db,
+        channel=channel,
+        content_type="youtube_video",
+        title="Test Upload",
+        description="Video description",
+        asset_manifest={
+            "video_file_path": str(video_file),
+            "thumbnail_file_path": str(thumbnail_file),
+        },
+        brief_payload={"tags": ["alpha", "beta"]},
+    )
+    mark_content_item_publish_queued(db, item)
+
+    requests: list[tuple[str, str]] = []
+
+    def _fake_authorized_request(_db, *, channel_id: str, method: str, url: str, **_kwargs):
+        requests.append((method, url))
+        if method == "POST" and url == platform_publish_service.YOUTUBE_UPLOAD_INIT_URL:
+            return FakeResponse(200, {}, headers={"Location": "https://upload.example.com/session"})
+        if method == "PUT" and url == "https://upload.example.com/session":
+            return FakeResponse(200, {"id": "video-123"})
+        if method == "POST" and url == platform_publish_service.YOUTUBE_THUMBNAIL_UPLOAD_URL:
+            return FakeResponse(200, {"kind": "youtube#thumbnailSetResponse"})
+        raise AssertionError(f"Unexpected request: {method} {url}")
+
+    monkeypatch.setattr(platform_publish_service, "authorized_platform_request", _fake_authorized_request)
+    result = process_platform_publish_queue(db, limit=5)
+
+    refreshed = db.get(ContentItem, item.id)
+    assert result["processed_count"] == 1
+    assert refreshed is not None
+    assert refreshed.lifecycle_status == "review"
+    latest_publication = (
+        db.query(PublicationRecord)
+        .filter(PublicationRecord.content_item_id == item.id)
+        .order_by(PublicationRecord.id.desc())
+        .first()
+    )
+    assert latest_publication is not None
+    assert latest_publication.publish_status == "uploaded_private"
+    assert latest_publication.remote_url == "https://www.youtube.com/watch?v=video-123"
+    assert requests[0][1] == platform_publish_service.YOUTUBE_UPLOAD_INIT_URL
+
+
+def test_process_platform_publish_queue_blocks_instagram_without_live_capability(db: Session) -> None:
+    ensure_managed_channels(db)
+    channel = get_managed_channel_by_channel_id(db, "instagram:main")
+    assert channel is not None
+
+    item = create_content_item(
+        db,
+        channel=channel,
+        content_type="instagram_image",
+        title="IG Post",
+        description="Caption",
+        asset_manifest={"image_url": "https://img.example.com/post.png"},
+    )
+    mark_content_item_publish_queued(db, item)
+
+    result = process_platform_publish_queue(db, limit=5)
+    latest_publication = (
+        db.query(PublicationRecord)
+        .filter(PublicationRecord.content_item_id == item.id)
+        .order_by(PublicationRecord.id.desc())
+        .first()
+    )
+
+    assert result["processed_count"] == 1
+    assert latest_publication is not None
+    assert latest_publication.publish_status == "blocked"
+    assert latest_publication.response_payload["reason"] == "instagram_publish_capability_disabled"
+
+
+def test_sync_blogger_channel_metrics_writes_metric_facts(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    blog = _create_blog(
+        db,
+        blog_id=11,
+        slug="blogger-metrics",
+        blogger_url="https://example.com",
+        search_console_site_url="sc-domain:example.com",
+        ga4_property_id="123456789",
+    )
+    ensure_managed_channels(db)
+    channel = get_managed_channel_by_channel_id(db, f"blogger:{blog.id}")
+    assert channel is not None
+
+    item = create_content_item(
+        db,
+        channel=channel,
+        content_type="blog_article",
+        title="Indexed Article",
+        description="SEO article",
+    )
+    db.add(
+        PublicationRecord(
+            content_item_id=item.id,
+            managed_channel_id=channel.id,
+            provider="blogger",
+            remote_id="post-1",
+            remote_url="https://example.com/posts/indexed-article",
+            publish_status="published",
+            published_at=datetime.now(UTC),
+            response_payload={},
+        )
+    )
+    db.add(
+        GoogleIndexUrlState(
+            blog_id=blog.id,
+            url="https://example.com/posts/indexed-article",
+            index_status="indexed",
+        )
+    )
+    db.add(
+        SearchConsolePageMetric(
+            blog_id=blog.id,
+            url="https://example.com/posts/indexed-article",
+            clicks=12,
+            impressions=120,
+            ctr=0.1,
+            position=5.2,
+        )
+    )
+    db.commit()
+
+    monkeypatch.setattr(
+        metric_ingestion_service,
+        "refresh_indexing_for_blog",
+        lambda _db, blog_id: {"status": "ok", "blog_id": blog_id},
+    )
+    monkeypatch.setattr(
+        metric_ingestion_service,
+        "query_search_console_performance",
+        lambda _db, _site_url, *, days, row_limit: {
+            "totals": {"clicks": 12.0, "impressions": 120.0, "ctr": 0.1, "position": 5.2},
+            "top_pages": [
+                {
+                    "keys": ["https://example.com/posts/indexed-article"],
+                    "clicks": 12.0,
+                    "impressions": 120.0,
+                    "ctr": 0.1,
+                    "position": 5.2,
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        metric_ingestion_service,
+        "query_analytics_overview",
+        lambda _db, _property_id, *, days, row_limit: {
+            "totals": {"screenPageViews": 300.0, "sessions": 110.0, "activeUsers": 90.0},
+            "top_pages": [
+                {
+                    "page_path": "/posts/indexed-article",
+                    "screenPageViews": 300.0,
+                    "sessions": 110.0,
+                }
+            ],
+        },
+    )
+
+    result = metric_ingestion_service.sync_blogger_channel_metrics(db, channel_id=f"blogger:{blog.id}", days=28, refresh_indexing=True)
+    refreshed = db.get(ContentItem, item.id)
+
+    assert result["facts_written"] > 0
+    assert db.query(MetricFact).filter(MetricFact.managed_channel_id == channel.id).count() > 0
+    assert refreshed is not None
+    assert refreshed.last_score["composite"] is not None
