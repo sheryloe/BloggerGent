@@ -13,7 +13,7 @@ import {
   getPlannerCalendar,
   updatePlannerSlot,
 } from "@/lib/api";
-import type { ManagedChannelRead, PlannerCalendarRead, PlannerCategoryRead, PlannerDayRead, PlannerSlotRead } from "@/lib/types";
+import type { ManagedChannelRead, PlannerCalendarRead, PlannerCategoryRead, PlannerDayRead } from "@/lib/types";
 
 type PlannerManagerProps = {
   channels: ManagedChannelRead[];
@@ -130,6 +130,22 @@ function parseDetailTab(value: string | null): DetailTab {
   return value === "month" ? "month" : "day";
 }
 
+function providerTypeLabel(provider: string) {
+  if (provider === "blogger") return "블로그";
+  if (provider === "youtube") return "유튜브";
+  if (provider === "instagram") return "인스타그램";
+  if (provider === "cloudflare") return "Cloudflare";
+  return provider;
+}
+
+function publishModeText(value?: string | null) {
+  const normalized = (value ?? "").toLowerCase();
+  if (normalized === "draft") return "초안";
+  if (normalized === "publish") return "즉시 게시";
+  if (normalized === "scheduled") return "예약 게시";
+  return value ?? "초안";
+}
+
 function defaultDraft(dateKey: string, categories: PlannerCategoryRead[]): SlotDraft {
   return {
     categoryKey: categories[0]?.key ?? "",
@@ -146,11 +162,26 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const plannerChannels = useMemo(() => channels.filter((item) => item.plannerSupported), [channels]);
+  const plannerTypeKeys = useMemo(
+    () => Array.from(new Set(plannerChannels.map((channel) => channel.provider).filter(Boolean))),
+    [plannerChannels],
+  );
   const todayDateKey = useMemo(() => formatDateKey(new Date()), []);
   const month = searchParams.get("month") ?? defaultMonth();
   const selectedTab = parseDetailTab(searchParams.get("panel"));
   const legacyBlogId = searchParams.get("blog");
-  const selectedChannelId = searchParams.get("channel") ?? (legacyBlogId ? `blogger:${legacyBlogId}` : plannerChannels[0]?.channelId ?? "");
+  const requestedType = searchParams.get("type");
+  const selectedType = requestedType && plannerTypeKeys.includes(requestedType) ? requestedType : plannerTypeKeys[0] ?? "";
+  const typeFilteredChannels = useMemo(
+    () => plannerChannels.filter((channel) => channel.provider === selectedType),
+    [plannerChannels, selectedType],
+  );
+  const requestedChannelId = searchParams.get("channel") ?? (legacyBlogId ? `blogger:${legacyBlogId}` : "");
+  const selectedChannelId =
+    typeFilteredChannels.find((channel) => channel.channelId === requestedChannelId)?.channelId ??
+    typeFilteredChannels[0]?.channelId ??
+    plannerChannels[0]?.channelId ??
+    "";
 
   const [calendar, setCalendar] = useState<PlannerCalendarRead | null>(null);
   const [statusMessage, setStatusMessage] = useState("");
@@ -265,7 +296,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
   async function handleRebuildMonthPlan() {
     if (!selectedChannelId) return;
     try {
-      setStatusMessage("월간 계획을 다시 만들고 있습니다.");
+      setStatusMessage("월간 계획을 다시 만드는 중입니다.");
       const next = await buildPlannerMonthPlan({ channelId: selectedChannelId, month, overwrite: true });
       setCalendar(next);
       const nextDate = next.days.find((day) => day.planDate === todayDateKey)?.planDate ?? next.days[0]?.planDate ?? null;
@@ -281,7 +312,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
   async function handleAddSlot() {
     if (!selectedDay || !draft) return;
     try {
-      setStatusMessage("슬롯을 추가하고 있습니다.");
+      setStatusMessage("슬롯을 추가하는 중입니다.");
       const created = await createPlannerSlot({
         planDayId: selectedDay.id,
         categoryKey: draft.categoryKey,
@@ -302,7 +333,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
   async function handleSaveSlot() {
     if (!selectedSlot || !draft) return;
     try {
-      setStatusMessage("슬롯을 저장하고 있습니다.");
+      setStatusMessage("슬롯을 저장하는 중입니다.");
       await updatePlannerSlot(selectedSlot.id, {
         categoryKey: draft.categoryKey,
         scheduledFor: withSeconds(draft.scheduledFor),
@@ -321,7 +352,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
   async function handleGenerateSlot() {
     if (!selectedSlot) return;
     try {
-      setStatusMessage("슬롯 생성을 시작합니다.");
+      setStatusMessage("선택한 슬롯을 실행하는 중입니다.");
       await generatePlannerSlot(selectedSlot.id);
       await loadCalendar(selectedDay?.planDate ?? null);
       setStatusMessage("슬롯 실행을 요청했습니다.");
@@ -333,7 +364,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
   async function handleCancelSlot() {
     if (!selectedSlot) return;
     try {
-      setStatusMessage("슬롯을 취소하고 있습니다.");
+      setStatusMessage("슬롯을 취소하는 중입니다.");
       await cancelPlannerSlot(selectedSlot.id);
       await loadCalendar(selectedDay?.planDate ?? null);
       setStatusMessage("슬롯을 취소했습니다.");
@@ -342,7 +373,15 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
     }
   }
 
-  const selectedChannel = plannerChannels.find((item) => item.channelId === selectedChannelId) ?? plannerChannels[0] ?? null;
+  const selectedChannel = typeFilteredChannels.find((item) => item.channelId === selectedChannelId) ?? typeFilteredChannels[0] ?? null;
+
+  if (!plannerChannels.length) {
+    return (
+      <div className="rounded-[28px] border border-dashed border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
+        플래너를 지원하는 연결 채널이 없습니다. 먼저 연동 설정에서 채널을 연결하세요.
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 rounded-[32px] bg-[#f5f7ff] p-6 text-slate-900 shadow-[0_24px_80px_rgba(15,23,42,0.08)] md:p-8">
@@ -350,19 +389,47 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
         <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-indigo-500">Planner</p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">채널 공통 플래너</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">플래너는 주제, 타겟, 카테고리, 예약 시간만 관리합니다. 프롬프트 편집은 설정의 채널별 생성 규칙에서 처리합니다.</p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">게시 플래너 운영</h1>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+              타입을 먼저 고르고, 그 안에서 실제 연결된 채널별로 월간 배분과 일간 슬롯을 관리합니다. 프롬프트 편집은 관리자 설정의 7단계 플로우에서 처리합니다.
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Link href="/settings?tab=pipeline" className="rounded-full bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-200">채널별 생성 규칙</Link>
-            <button type="button" onClick={handleRebuildMonthPlan} className="rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800">월간 계획 다시 만들기</button>
+            <Link href="/admin" className="rounded-full bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-200">
+              관리자 설정 열기
+            </Link>
+            <button type="button" onClick={handleRebuildMonthPlan} className="rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800">
+              월간 계획 다시 만들기
+            </button>
           </div>
         </div>
-        <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(220px,280px)_200px_minmax(0,1fr)]">
+        <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(180px,220px)_minmax(220px,280px)_200px_minmax(0,1fr)]">
+          <Field label="타입">
+            <select
+              value={selectedType}
+              onChange={(event) => {
+                const nextType = event.target.value;
+                const nextChannel =
+                  plannerChannels.find((channel) => channel.provider === nextType)?.channelId ??
+                  plannerChannels[0]?.channelId ??
+                  "";
+                setQuery({ type: nextType, channel: nextChannel, blog: null, selectedDate: null });
+              }}
+              className={inputClass()}
+            >
+              {plannerTypeKeys.map((provider) => (
+                <option key={provider} value={provider}>
+                  {providerTypeLabel(provider)}
+                </option>
+              ))}
+            </select>
+          </Field>
           <Field label="운영 채널">
             <select value={selectedChannelId} onChange={(event) => setQuery({ channel: event.target.value, blog: null, selectedDate: null })} className={inputClass()}>
-              {plannerChannels.map((channel) => (
-                <option key={channel.channelId} value={channel.channelId}>{channel.name}</option>
+              {typeFilteredChannels.map((channel) => (
+                <option key={channel.channelId} value={channel.channelId}>
+                  {channel.name}
+                </option>
               ))}
             </select>
           </Field>
@@ -370,9 +437,9 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
             <input type="month" value={month} onChange={(event) => setQuery({ month: event.target.value, selectedDate: null })} className={inputClass()} />
           </Field>
           <div className="grid gap-3 rounded-[24px] bg-slate-50 p-4 md:grid-cols-3">
-            <MetricCard label="목표 슬롯" value={`${monthSummary.target}개`} />
-            <MetricCard label="생성 완료" value={`${monthSummary.generated}개`} />
-            <MetricCard label="발행 완료" value={`${monthSummary.published}개`} />
+            <MetricCard label="목표 슬롯" value={`${monthSummary.target}건`} />
+            <MetricCard label="생성 완료" value={`${monthSummary.generated}건`} />
+            <MetricCard label="발행 완료" value={`${monthSummary.published}건`} />
           </div>
         </div>
         {statusMessage ? <p className="mt-4 text-sm text-indigo-600">{statusMessage}</p> : null}
@@ -382,7 +449,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
         <div className="rounded-[28px] bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">메인 캔버스</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">월간 캘린더</p>
               <h2 className="mt-2 text-2xl font-semibold text-slate-950">{formatMonthLabel(month)}</h2>
             </div>
             {selectedChannel ? <FlagPill tone="slate">{selectedChannel.name}</FlagPill> : null}
@@ -390,7 +457,9 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
           <div className="mt-5 overflow-x-auto">
             <div className="min-w-[780px]">
               <div className="grid grid-cols-7 gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                {["월", "화", "수", "목", "금", "토", "일"].map((label) => <div key={label} className="px-2">{label}</div>)}
+                {["월", "화", "수", "목", "금", "토", "일"].map((label) => (
+                  <div key={label} className="px-2">{label}</div>
+                ))}
               </div>
               <div className="mt-3 grid grid-cols-7 gap-2">
                 {monthCells.map((cell, index) => {
@@ -399,7 +468,12 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
                   const isSelected = cell.dateKey === selectedDay?.planDate;
                   const chips = Object.entries(day?.categoryMix ?? {}).slice(0, 3);
                   return (
-                    <button key={cell.dateKey} type="button" onClick={() => setQuery({ selectedDate: cell.dateKey, panel: "day" })} className={`min-h-[160px] rounded-[24px] p-4 text-left transition ${isSelected ? "bg-indigo-50 ring-2 ring-indigo-200" : "bg-slate-50 hover:bg-slate-100"}`}>
+                    <button
+                      key={cell.dateKey}
+                      type="button"
+                      onClick={() => setQuery({ selectedDate: cell.dateKey, panel: "day" })}
+                      className={`min-h-[160px] rounded-[24px] p-4 text-left transition ${isSelected ? "bg-indigo-50 ring-2 ring-indigo-200" : "bg-slate-50 hover:bg-slate-100"}`}
+                    >
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-lg font-semibold text-slate-950">{cell.dayNumber}</p>
@@ -408,11 +482,13 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
                         <FlagPill tone="slate">{day?.slotCount ?? 0} 슬롯</FlagPill>
                       </div>
                       <div className="mt-4 space-y-2 text-xs text-slate-500">
-                        <p>생성 {day?.slots.filter((slot) => slot.status === "generated" || slot.status === "published").length ?? 0}</p>
+                        <p>생성 완료 {day?.slots.filter((slot) => slot.status === "generated" || slot.status === "published").length ?? 0}</p>
                         <div className="flex flex-wrap gap-1.5">
                           {chips.length ? chips.map(([key, count]) => (
-                            <span key={key} className="rounded-full px-2.5 py-1 text-[11px] font-medium text-slate-700" style={{ backgroundColor: `${categoryMap.get(key)?.color ?? "#cbd5e1"}33` }}>{categoryMap.get(key)?.name ?? key} {count}</span>
-                          )) : <span className="text-slate-400">계획 없음</span>}
+                            <span key={key} className="rounded-full px-2.5 py-1 text-[11px] font-medium text-slate-700" style={{ backgroundColor: `${categoryMap.get(key)?.color ?? "#cbd5e1"}33` }}>
+                              {categoryMap.get(key)?.name ?? key} {count}
+                            </span>
+                          )) : <span className="text-slate-400">배정 없음</span>}
                         </div>
                       </div>
                     </button>
@@ -426,8 +502,12 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
         <div className="space-y-4">
           <div className="rounded-[28px] bg-white p-4 shadow-sm">
             <div className="flex items-center gap-2 rounded-full bg-slate-100 p-1 text-sm">
-              <button type="button" onClick={() => setQuery({ panel: "day" })} className={`rounded-full px-4 py-2 font-medium ${selectedTab === "day" ? "bg-white text-slate-950 shadow-sm" : "text-slate-600"}`}>일간 계획</button>
-              <button type="button" onClick={() => setQuery({ panel: "month" })} className={`rounded-full px-4 py-2 font-medium ${selectedTab === "month" ? "bg-white text-slate-950 shadow-sm" : "text-slate-600"}`}>월간 집계</button>
+              <button type="button" onClick={() => setQuery({ panel: "day" })} className={`rounded-full px-4 py-2 font-medium ${selectedTab === "day" ? "bg-white text-slate-950 shadow-sm" : "text-slate-600"}`}>
+                일간 계획
+              </button>
+              <button type="button" onClick={() => setQuery({ panel: "month" })} className={`rounded-full px-4 py-2 font-medium ${selectedTab === "month" ? "bg-white text-slate-950 shadow-sm" : "text-slate-600"}`}>
+                월간 집계
+              </button>
             </div>
           </div>
 
@@ -438,7 +518,9 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">선택 날짜</p>
                   <h2 className="mt-2 text-2xl font-semibold text-slate-950">{selectedDay ? `${formatDayLabel(selectedDay.planDate)} · ${formatWeekday(selectedDay.planDate)}요일` : "날짜를 선택하세요"}</h2>
                 </div>
-                <button type="button" onClick={handleAddSlot} disabled={!selectedDay || !draft} className="rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300">슬롯 추가</button>
+                <button type="button" onClick={handleAddSlot} disabled={!selectedDay || !draft} className="rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300">
+                  슬롯 추가
+                </button>
               </div>
 
               <div className="space-y-2">
@@ -477,7 +559,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
                   </div>
 
                   <details className="rounded-[20px] border border-slate-200 bg-white p-4">
-                    <summary className="cursor-pointer text-sm font-semibold text-slate-900">추가 옵션</summary>
+                    <summary className="cursor-pointer text-sm font-semibold text-slate-900">추가 입력</summary>
                     <div className="mt-4 grid gap-4">
                       <Field label="정보 수준">
                         <input value={draft.briefInformationLevel} onChange={(event) => setDraft((current) => current ? { ...current, briefInformationLevel: event.target.value } : current)} className={inputClass()} />
@@ -489,9 +571,15 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
                   </details>
 
                   <div className="flex flex-wrap gap-2">
-                    <button type="button" onClick={handleSaveSlot} disabled={!selectedSlot} className="rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300">슬롯 저장</button>
-                    <button type="button" onClick={handleGenerateSlot} disabled={!selectedSlot} className="rounded-full bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-200">실행</button>
-                    <button type="button" onClick={handleCancelSlot} disabled={!selectedSlot} className="rounded-full bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:text-rose-300">취소</button>
+                    <button type="button" onClick={handleSaveSlot} disabled={!selectedSlot} className="rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300">
+                      슬롯 저장
+                    </button>
+                    <button type="button" onClick={handleGenerateSlot} disabled={!selectedSlot} className="rounded-full bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-200">
+                      실행
+                    </button>
+                    <button type="button" onClick={handleCancelSlot} disabled={!selectedSlot} className="rounded-full bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:text-rose-300">
+                      취소
+                    </button>
                   </div>
                 </div>
               ) : null}
@@ -500,12 +588,12 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold text-slate-950">실행 상태</p>
-                    <p className="mt-1 text-xs text-slate-500">발행 관련 단계는 플래너에서 편집하지 않고 결과만 확인합니다.</p>
+                    <p className="mt-1 text-xs text-slate-500">발행 관련 상세 조건은 관리자 설정에서 관리하고, 여기서는 결과 상태와 링크만 확인합니다.</p>
                   </div>
                   {selectedSlot ? <span className={`rounded-full px-3 py-1 text-xs font-medium ${statusTone(selectedSlot.status)}`}>{statusText(selectedSlot.status)}</span> : null}
                 </div>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <ReadonlyItem label="발행 모드" value={selectedSlot?.publishMode || "draft"} />
+                  <ReadonlyItem label="발행 모드" value={publishModeText(selectedSlot?.publishMode)} />
                   <ReadonlyItem label="품질 게이트" value={selectedSlot?.qualityGateStatus || selectedSlot?.articleQualityStatus || "대기"} />
                   <ReadonlyItem label="예약 상태" value={selectedSlot?.scheduledFor ? `${formatDayLabel(selectedSlot.scheduledFor.slice(0, 10))} ${toDatetimeLocal(selectedSlot.scheduledFor).slice(11, 16)}` : "미정"} />
                   <ReadonlyItem label="결과 상태" value={selectedSlot?.resultStatus || selectedSlot?.articlePublishStatus || "대기"} />
@@ -517,7 +605,9 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
                 <div className="mt-4 rounded-[20px] bg-white p-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">생성 결과 링크</p>
                   {selectedSlot?.resultUrl || selectedSlot?.articlePublishedUrl ? (
-                    <a href={selectedSlot.resultUrl || selectedSlot.articlePublishedUrl || "#"} target="_blank" rel="noreferrer" className="mt-2 inline-flex rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800">사이트 가기</a>
+                    <a href={selectedSlot.resultUrl || selectedSlot.articlePublishedUrl || "#"} target="_blank" rel="noreferrer" className="mt-2 inline-flex rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800">
+                      사이트 열기
+                    </a>
                   ) : (
                     <p className="mt-2 text-sm text-slate-500">아직 생성 결과가 없습니다.</p>
                   )}
@@ -528,7 +618,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
             <div className="space-y-4 rounded-[28px] bg-white p-5 shadow-sm">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">월간 집계</p>
-                <h2 className="mt-2 text-2xl font-semibold text-slate-950">카테고리 배치 현황</h2>
+                <h2 className="mt-2 text-2xl font-semibold text-slate-950">카테고리 배분 현황</h2>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 {monthCategoryStats.map((category) => (
@@ -540,7 +630,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
                       </div>
                       <FlagPill tone="slate">가중치 {category.weight}</FlagPill>
                     </div>
-                    <p className="mt-3 text-sm text-slate-600">목표 {category.planned}개 / 실제 {category.actual}개</p>
+                    <p className="mt-3 text-sm text-slate-600">목표 {category.planned}건 / 실제 {category.actual}건</p>
                   </div>
                 ))}
               </div>

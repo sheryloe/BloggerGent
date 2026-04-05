@@ -96,7 +96,8 @@ services:
     ports:
       - "${WEB_PORT:-3001}:3000"
     command: >
-      sh -c "rm -rf /app/.next/server /app/.next/cache &&
+      sh -c "rm -rf /app/.next &&
+      mkdir -p /app/.next &&
       npm run dev -- --hostname 0.0.0.0 --port 3000"
 
   bootstrap:

@@ -1,10 +1,8 @@
-﻿"use client";
+"use client";
 
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import {
-  createChannelPromptFlowStep,
-  deleteChannelPromptFlowStep,
   getBlogArchive,
   getBloggerConfig,
   getBlogs,
@@ -15,7 +13,6 @@ import {
   getWorkspaceOAuthStartUrl,
   getModelPolicy,
   refreshWorkspaceOAuth,
-  reorderChannelPromptFlow,
   syncWorkspaceChannelMetrics,
   updateChannelPromptFlowStep,
   updateSettings,
@@ -36,9 +33,10 @@ import type {
 type SettingsConsoleProps = {
   settings: SettingRead[];
   config: BloggerConfigRead;
+  mode?: "all" | "admin" | "integrations";
 };
 
-type SettingsTab = "workspace" | "channels" | "pipeline" | "models" | "planner" | "automation" | "publishing" | "integrations";
+type SettingsTab = "channels" | "pipeline" | "planner" | "automation" | "publishing" | "integrations";
 
 type PreviewItem = {
   id: string;
@@ -54,12 +52,6 @@ type StepDraft = {
   promptTemplate: string;
   providerModel: string;
   isEnabled: boolean;
-};
-
-type AuthCheckItem = {
-  label: string;
-  ok: boolean;
-  detail?: string;
 };
 
 type SettingControlKind = "text" | "textarea" | "password" | "number" | "boolean" | "select" | "time" | "url";
@@ -80,15 +72,19 @@ type SettingSection = {
 const GOOGLE_INDEXING_SCOPE = "https://www.googleapis.com/auth/indexing";
 
 const TABS: Array<{ key: SettingsTab; label: string }> = [
-  { key: "workspace", label: "개요" },
-  { key: "channels", label: "채널 관리" },
-  { key: "pipeline", label: "프롬프트 플로우" },
-  { key: "models", label: "모델" },
-  { key: "planner", label: "일정 / 플래너" },
+  { key: "integrations", label: "연동 설정" },
+  { key: "channels", label: "채널 설정" },
+  { key: "pipeline", label: "7단계 플로우" },
+  { key: "planner", label: "게시 플래너 운영" },
   { key: "automation", label: "자동화" },
   { key: "publishing", label: "품질 / 발행" },
-  { key: "integrations", label: "연동" },
 ];
+
+const TAB_KEYS_BY_MODE: Record<"all" | "admin" | "integrations", SettingsTab[]> = {
+  all: ["integrations", "channels", "pipeline", "planner", "automation", "publishing"],
+  admin: ["channels", "pipeline", "planner", "automation", "publishing"],
+  integrations: ["integrations"],
+};
 
 const STAGE_LABELS: Record<string, string> = {
   topic_discovery: "주제 발굴",
@@ -112,90 +108,26 @@ const STAGE_ORDER: WorkflowStageType[] = [
 
 const SECTION_DEFS: SettingSection[] = [
   {
-    id: "workspace-core",
-    key: "workspace",
-    title: "운영 기본값",
-    description: "서비스 이름, 실행 모드, 관리자 접근 같은 전역 기본값입니다.",
-    keys: ["app_name", "provider_mode", "default_publish_mode", "default_writer_tone", "admin_auth_enabled", "admin_auth_username"],
-  },
-  {
-    id: "models-core",
-    key: "models",
-    title: "생성 모델 라우팅",
-    description: "토픽 발굴과 글·이미지 생성에 쓰는 모델을 관리합니다.",
-    keys: [
-      "topic_discovery_provider",
-      "topic_discovery_model",
-      "gemini_topic_model",
-      "gemini_model",
-      "openai_text_model",
-      "openai_large_text_model",
-      "openai_small_text_model",
-      "openai_image_model",
-      "article_generation_model",
-      "image_prompt_generation_model",
-      "revision_pass_model",
-      "post_review_model",
-      "openai_request_saver_mode",
-    ],
-  },
-  {
     id: "planner-core",
     key: "planner",
-    title: "플래너 기준값",
-    description: "일간 계획 화면의 기본 슬롯과 전역 스케줄 기준입니다.",
+    title: "게시 플래너 운영",
+    description: "플래너 자동화는 4개 토글만 유지합니다.",
     keys: [
-      "planner_default_daily_posts",
-      "planner_day_start_time",
-      "planner_day_end_time",
-      "schedule_enabled",
-      "schedule_time",
-      "schedule_timezone",
-      "topics_per_run",
-      "topic_discovery_max_topics_per_run",
-    ],
-  },
-  {
-    id: "planner-channel",
-    key: "planner",
-    title: "채널 일정",
-    description: "여행, 미스테리, Cloudflare 채널의 반복 일정과 시트/학습 스케줄입니다.",
-    keys: [
-      "travel_schedule_time",
-      "travel_schedule_interval_hours",
-      "travel_topics_per_run",
-      "travel_research_mode",
-      "travel_blossom_cap_ratio",
-      "mystery_schedule_time",
-      "mystery_schedule_interval_hours",
-      "mystery_topics_per_run",
-      "cloudflare_daily_publish_enabled",
-      "cloudflare_daily_publish_time",
-      "cloudflare_daily_publish_timezone",
-      "cloudflare_daily_publish_interval_hours",
-      "cloudflare_daily_publish_weekday_quota",
-      "cloudflare_daily_publish_sunday_quota",
-      "cloudflare_blossom_cap_ratio",
       "sheet_sync_enabled",
-      "sheet_sync_day",
-      "sheet_sync_time",
-      "training_schedule_enabled",
-      "training_schedule_time",
-      "training_schedule_timezone",
+      "automation_scheduler_enabled",
+      "automation_publish_queue_enabled",
+      "automation_content_review_enabled",
     ],
   },
   {
     id: "automation-core",
     key: "automation",
     title: "자동화 게이트",
-    description: "전역 자동화 허용과 도메인별 자동화 토글입니다.",
+    description: "게시 플래너 운영과 스케줄러 자동 실행 여부를 제어합니다.",
     keys: [
       "automation_master_enabled",
-      "automation_scheduler_enabled",
       "automation_google_indexing_enabled",
-      "automation_publish_queue_enabled",
       "automation_cloudflare_enabled",
-      "automation_content_review_enabled",
       "automation_sheet_enabled",
       "automation_telegram_enabled",
       "automation_training_enabled",
@@ -210,7 +142,7 @@ const SECTION_DEFS: SettingSection[] = [
     id: "publishing-gate",
     key: "publishing",
     title: "품질·발행 게이트",
-    description: "발행 전 품질 기준과 실제 발행 간격을 수치로 관리합니다.",
+    description: "처음 보는 사람도 이해할 수 있게 발행 기준과 패널티 임계치를 설명 중심으로 관리합니다.",
     keys: [
       "quality_gate_enabled",
       "quality_gate_min_seo_score",
@@ -235,8 +167,8 @@ const SECTION_DEFS: SettingSection[] = [
   {
     id: "integrations-blogger",
     key: "integrations",
-    title: "Blogger / Google",
-    description: "Blogger OAuth와 시트 기반 연동 정보입니다.",
+    title: "Google 연동",
+    description: "OAuth와 시트 연결에 필요한 최소 항목만 노출합니다.",
     keys: [
       "blogger_client_name",
       "blogger_client_id",
@@ -244,9 +176,6 @@ const SECTION_DEFS: SettingSection[] = [
       "blogger_redirect_uri",
       "google_sheet_url",
       "google_sheet_id",
-      "google_sheet_travel_tab",
-      "google_sheet_mystery_tab",
-      "google_sheet_cloudflare_tab",
     ],
   },
   {
@@ -275,8 +204,6 @@ const SECTION_DEFS: SettingSection[] = [
       "github_pages_assets_dir",
       "cloudflare_inline_images_enabled",
       "cloudflare_cdn_transform_enabled",
-      "travel_inline_collage_enabled",
-      "mystery_inline_collage_enabled",
       "wikimedia_image_count",
     ],
   },
@@ -284,7 +211,7 @@ const SECTION_DEFS: SettingSection[] = [
     id: "integrations-runtime",
     key: "integrations",
     title: "런타임 연동",
-    description: "Cloudflare API, AI 공급자 키, Telegram, Playwright 연결입니다.",
+    description: "외부 API, AI 공급자 키, Telegram, Playwright 연결입니다.",
     keys: [
       "cloudflare_channel_enabled",
       "cloudflare_blog_api_base_url",
@@ -354,11 +281,11 @@ const FIELD_LABELS: Record<string, string> = {
   blogger_playwright_cdp_url: "CDP URL",
   blogger_playwright_account_index: "계정 인덱스",
   automation_master_enabled: "자동화 전체 마스터 스위치",
-  automation_scheduler_enabled: "스케줄러 자동화 사용",
+  automation_scheduler_enabled: "채널별 자동 생성 사용",
   automation_google_indexing_enabled: "Google Indexing 자동화 사용",
-  automation_publish_queue_enabled: "발행 큐 자동화 사용",
+  automation_publish_queue_enabled: "슬롯 저장 후 자동 발행",
   automation_cloudflare_enabled: "Cloudflare 자동화 사용",
-  automation_content_review_enabled: "콘텐츠 검토 자동화 사용",
+  automation_content_review_enabled: "사람 검토 후 발행",
   automation_sheet_enabled: "시트 자동화 사용(구형)",
   automation_telegram_enabled: "텔레그램 자동화 사용",
   automation_training_enabled: "학습 자동화 사용",
@@ -370,14 +297,14 @@ const FIELD_LABELS: Record<string, string> = {
   schedule_enabled: "전역 스케줄러 사용",
   schedule_time: "전역 스케줄 실행 시각",
   schedule_timezone: "전역 스케줄 시간대",
-  travel_schedule_time: "여행 채널 시작 시각",
-  travel_schedule_interval_hours: "여행 채널 반복 간격(시간)",
-  travel_topics_per_run: "여행 채널 회차당 주제 수",
-  travel_research_mode: "여행 리서치 모드",
-  travel_blossom_cap_ratio: "여행 Blossom 상한 비율",
-  mystery_schedule_time: "미스터리 채널 시작 시각",
-  mystery_schedule_interval_hours: "미스터리 채널 반복 간격(시간)",
-  mystery_topics_per_run: "미스터리 채널 회차당 주제 수",
+  travel_schedule_time: "블로그 1 시작 시각",
+  travel_schedule_interval_hours: "블로그 1 반복 간격(시간)",
+  travel_topics_per_run: "블로그 1 회차당 주제 수",
+  travel_research_mode: "블로그 1 리서치 모드",
+  travel_blossom_cap_ratio: "블로그 1 Blossom 상한 비율",
+  mystery_schedule_time: "블로그 2 시작 시각",
+  mystery_schedule_interval_hours: "블로그 2 반복 간격(시간)",
+  mystery_topics_per_run: "블로그 2 회차당 주제 수",
   cloudflare_daily_publish_enabled: "Cloudflare 일간 발행 사용",
   cloudflare_daily_publish_time: "Cloudflare 시작 시각",
   cloudflare_daily_publish_timezone: "Cloudflare 시간대",
@@ -391,10 +318,10 @@ const FIELD_LABELS: Record<string, string> = {
   gemini_api_key: "Gemini API 키",
   google_sheet_url: "Google Sheets URL",
   google_sheet_id: "Google Sheets 문서 ID",
-  google_sheet_travel_tab: "여행 시트 탭 이름",
-  google_sheet_mystery_tab: "미스터리 시트 탭 이름",
+  google_sheet_travel_tab: "블로그 1 시트 탭 이름",
+  google_sheet_mystery_tab: "블로그 2 시트 탭 이름",
   google_sheet_cloudflare_tab: "Cloudflare 시트 탭 이름",
-  sheet_sync_enabled: "시트 동기화 사용",
+  sheet_sync_enabled: "월초 자동 주제 배분 사용",
   sheet_sync_day: "시트 동기화 요일",
   sheet_sync_time: "시트 동기화 시각",
   publish_daily_limit_per_blog: "채널별 일일 발행 한도",
@@ -411,8 +338,8 @@ const FIELD_LABELS: Record<string, string> = {
   cloudflare_r2_prefix: "R2 저장 경로 접두사",
   cloudflare_cdn_transform_enabled: "Cloudflare 이미지 변환 URL 사용",
   cloudflare_inline_images_enabled: "Cloudflare 인라인 이미지 사용",
-  travel_inline_collage_enabled: "여행 인라인 콜라주 사용",
-  mystery_inline_collage_enabled: "미스터리 인라인 콜라주 사용",
+  travel_inline_collage_enabled: "블로그 1 인라인 콜라주 사용",
+  mystery_inline_collage_enabled: "블로그 2 인라인 콜라주 사용",
   training_schedule_enabled: "학습 스케줄 사용",
   training_schedule_time: "학습 실행 시각",
   training_schedule_timezone: "학습 시간대",
@@ -455,11 +382,11 @@ const FIELD_DESCRIPTIONS: Record<string, string> = {
   post_review_model: "발행 전 검토와 평가 단계에서 사용하는 모델입니다.",
   openai_request_saver_mode: "가능하면 추가 요청을 줄여 비용과 호출량을 아낍니다.",
   automation_master_enabled: "모든 자동화 경로를 한 번에 허용하거나 차단하는 최상위 스위치입니다.",
-  automation_scheduler_enabled: "정시 스케줄러 자동 실행을 허용합니다.",
+  automation_scheduler_enabled: "채널별 슬롯 자동 생성 스케줄 실행을 허용합니다.",
   automation_google_indexing_enabled: "Google Indexing API 호출 자동화를 허용합니다.",
-  automation_publish_queue_enabled: "발행 큐 자동 처리를 허용합니다.",
+  automation_publish_queue_enabled: "슬롯 저장 후 발행 큐 자동 처리를 허용합니다.",
   automation_cloudflare_enabled: "Cloudflare 채널 자동화를 허용합니다.",
-  automation_content_review_enabled: "콘텐츠 품질 검토 자동화를 허용합니다.",
+  automation_content_review_enabled: "발행 전에 사람 검토 단계를 강제하는 운영 플래그입니다.",
   automation_sheet_enabled: "기존 Google Sheets 자동화 플래그입니다.",
   automation_telegram_enabled: "텔레그램 운영 명령 폴링 자동화를 허용합니다.",
   automation_training_enabled: "학습 세션 자동 실행을 허용합니다.",
@@ -470,12 +397,12 @@ const FIELD_DESCRIPTIONS: Record<string, string> = {
   schedule_enabled: "전역 스케줄러 자체를 켜거나 끕니다.",
   schedule_time: "전역 스케줄러 실행 시각입니다.",
   schedule_timezone: "전역 스케줄러 기준 시간대입니다.",
-  travel_schedule_time: "여행 채널 자동 생성이 시작되는 시각입니다.",
-  travel_schedule_interval_hours: "여행 채널 자동 생성 반복 간격입니다.",
-  travel_topics_per_run: "여행 채널 한 번 실행 시 생성할 주제 수입니다.",
-  mystery_schedule_time: "미스터리 채널 자동 생성이 시작되는 시각입니다.",
-  mystery_schedule_interval_hours: "미스터리 채널 자동 생성 반복 간격입니다.",
-  mystery_topics_per_run: "미스터리 채널 한 번 실행 시 생성할 주제 수입니다.",
+  travel_schedule_time: "블로그 1 자동 생성이 시작되는 시각입니다.",
+  travel_schedule_interval_hours: "블로그 1 자동 생성 반복 간격입니다.",
+  travel_topics_per_run: "블로그 1 한 번 실행 시 생성할 주제 수입니다.",
+  mystery_schedule_time: "블로그 2 자동 생성이 시작되는 시각입니다.",
+  mystery_schedule_interval_hours: "블로그 2 자동 생성 반복 간격입니다.",
+  mystery_topics_per_run: "블로그 2 한 번 실행 시 생성할 주제 수입니다.",
   training_schedule_enabled: "정해진 시각에 학습과 리포트 작업을 자동 실행합니다.",
   training_schedule_time: "학습 자동화가 시작되는 시각입니다.",
   training_schedule_timezone: "학습 자동화 기준 시간대입니다.",
@@ -485,10 +412,10 @@ const FIELD_DESCRIPTIONS: Record<string, string> = {
   cloudflare_daily_publish_interval_hours: "Cloudflare 채널 자동 발행 반복 간격입니다.",
   cloudflare_daily_publish_weekday_quota: "월요일부터 토요일까지 하루 발행 개수입니다.",
   cloudflare_daily_publish_sunday_quota: "일요일 하루 발행 개수입니다.",
-  travel_blossom_cap_ratio: "여행 채널에서 Blossom 계열 주제 비중 상한입니다.",
+  travel_blossom_cap_ratio: "블로그 1에서 Blossom 계열 주제 비중 상한입니다.",
   cloudflare_blossom_cap_ratio: "Cloudflare 채널에서 Blossom 계열 주제 비중 상한입니다.",
-  travel_research_mode: "여행 채널 리서치 방식을 운영 모드에 맞게 조정합니다.",
-  sheet_sync_enabled: "정해진 요일과 시각에 Google Sheets 동기화를 실행합니다.",
+  travel_research_mode: "블로그 1 리서치 방식을 운영 모드에 맞게 조정합니다.",
+  sheet_sync_enabled: "월초 주제 배분과 슬롯 기준값 동기화를 실행합니다.",
   sheet_sync_day: "시트 동기화를 수행할 요일입니다.",
   sheet_sync_time: "시트 동기화를 수행할 시각입니다.",
   quality_gate_enabled: "발행 전 중복도·SEO·GEO 기준을 검사합니다.",
@@ -713,22 +640,6 @@ function shouldShowField(key: string, values: Record<string, string>) {
   return true;
 }
 
-function isDiagnosticField(item: SettingRead) {
-  return (
-    item.key.includes("_last_") ||
-    item.key.endsWith("_updated_at") ||
-    item.key.endsWith("_created_at") ||
-    item.key.endsWith("_counts") ||
-    item.key.endsWith("_path") ||
-    item.key.endsWith("_weights") ||
-    item.key.endsWith("_streak") ||
-    item.key.endsWith("_scope") ||
-    item.key.endsWith("_type") ||
-    item.key.endsWith("_expires_at") ||
-    item.key === "content_overview_tab"
-  );
-}
-
 function normalizeOptions(value: string, options: SettingOption[] | null) {
   if (!options) {
     return [];
@@ -794,10 +705,12 @@ async function loadChannelPreviews(channelList: ManagedChannelRead[], blogList: 
   return previewMap;
 }
 
-export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
+export function SettingsConsole({ settings, config, mode = "all" }: SettingsConsoleProps) {
+  const visibleTabKeys = TAB_KEYS_BY_MODE[mode];
+  const defaultTab = visibleTabKeys[0] ?? "integrations";
   const settingsByKey = useMemo(() => new Map(settings.map((item) => [item.key, item])), [settings]);
   const [runtimeConfig, setRuntimeConfig] = useState<BloggerConfigRead>(config);
-  const [activeTab, setActiveTab] = useState<SettingsTab>("workspace");
+  const [activeTab, setActiveTab] = useState<SettingsTab>(defaultTab);
   const [savedSettings, setSavedSettings] = useState<Record<string, string>>(() => Object.fromEntries(settings.map((item) => [item.key, item.value])));
   const [localSettings, setLocalSettings] = useState<Record<string, string>>(() => Object.fromEntries(settings.map((item) => [item.key, item.value])));
   const [saveMessage, setSaveMessage] = useState("");
@@ -813,7 +726,6 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
   const [draft, setDraft] = useState<StepDraft | null>(null);
   const [flowSaveState, setFlowSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [modelPolicy, setModelPolicy] = useState<ModelPolicyRead | null>(null);
-  const [selectedStageType, setSelectedStageType] = useState<string>(STAGE_ORDER[0]);
   const [channelPreviewsLoaded, setChannelPreviewsLoaded] = useState(false);
   const [channelPreviewsLoading, setChannelPreviewsLoading] = useState(false);
   const [remoteConfigLoading, setRemoteConfigLoading] = useState(false);
@@ -827,6 +739,7 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
   const [workspaceIntegrationError, setWorkspaceIntegrationError] = useState("");
   const [integrationActionMessage, setIntegrationActionMessage] = useState("");
   const [integrationActionError, setIntegrationActionError] = useState("");
+  const [integrationFocus, setIntegrationFocus] = useState<"google" | "blogger" | "youtube" | "instagram" | "cloudflare">("blogger");
   const [isPending, startTransition] = useTransition();
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flowDraftVersion = useRef(0);
@@ -836,9 +749,15 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
   }, [config]);
 
   useEffect(() => {
+    if (!visibleTabKeys.includes(activeTab)) {
+      setActiveTab(defaultTab);
+    }
+  }, [activeTab, defaultTab, visibleTabKeys]);
+
+  useEffect(() => {
     let mounted = true;
     startTransition(() => {
-      void Promise.all([getChannels(), getModelPolicy()])
+      void Promise.all([getChannels(true), getModelPolicy()])
         .then(([channelList, policy]) => {
           if (!mounted) {
             return;
@@ -869,7 +788,7 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
     let mounted = true;
     const timer = window.setTimeout(() => {
       setChannelPreviewsLoading(true);
-      void getBlogs()
+      void getBlogs(true)
         .then((blogList) => loadChannelPreviews(channels, blogList))
         .then((previews) => {
           if (!mounted) return;
@@ -906,7 +825,6 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
           setFlowError("");
           const ordered = sortSteps(payload.steps);
           setFlow({ ...payload, steps: ordered });
-          setSelectedStageType(payload.availableStageTypes[0] ?? STAGE_ORDER[0]);
           if (payload.provider === "cloudflare") {
             const categories = Array.from(new Set(ordered.map((step) => step.id.split("::")[0]).filter(Boolean)));
             setSelectedCloudflareCategory((current) => (current && categories.includes(current) ? current : categories[0] ?? ""));
@@ -984,9 +902,12 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
     };
   }, []);
 
+  const visibleTabs = useMemo(() => TABS.filter((tab) => visibleTabKeys.includes(tab.key)), [visibleTabKeys]);
+
   const groupedSettings = useMemo(
     () =>
-      SECTION_DEFS.map((section) => ({
+      SECTION_DEFS.filter((section) => visibleTabKeys.includes(section.key))
+      .map((section) => ({
         ...section,
         items: section.keys
           .map((key) => settingsByKey.get(key))
@@ -994,12 +915,7 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
           .filter((item) => !shouldHideField(item))
           .filter((item) => shouldShowField(item.key, localSettings)),
       })).filter((section) => section.items.length > 0),
-    [localSettings, settingsByKey],
-  );
-
-  const diagnosticItems = useMemo(
-    () => settings.filter((item) => !shouldHideField(item) && !isSecretKey(item) && isDiagnosticField(item)),
-    [settings],
+    [localSettings, settingsByKey, visibleTabKeys],
   );
 
   function handleSettingChange(key: string, value: string) {
@@ -1190,60 +1106,7 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
     }, 700);
   }
 
-  async function handleMoveStep(stepId: string, direction: "left" | "right") {
-    if (!flow?.structureEditable || !selectedChannel) {
-      return;
-    }
-    try {
-      const ordered = sortSteps(flow.steps);
-      const index = ordered.findIndex((step) => step.id === stepId);
-      if (index < 0) {
-        return;
-      }
-      const targetIndex = direction === "left" ? index - 1 : index + 1;
-      if (targetIndex < 0 || targetIndex >= ordered.length) {
-        return;
-      }
-      const next = [...ordered];
-      const [moved] = next.splice(index, 1);
-      next.splice(targetIndex, 0, moved);
-      const updated = await reorderChannelPromptFlow(selectedChannel.channelId, next.map((step) => step.id));
-      setFlowError("");
-      setFlow({ ...updated, steps: sortSteps(updated.steps) });
-    } catch {
-      setFlowError("프롬프트 단계 순서를 바꾸지 못했습니다.");
-    }
-  }
-
-  async function handleAddStep() {
-    if (!flow?.structureEditable || !selectedChannel || !selectedStageType) {
-      return;
-    }
-    try {
-      const updated = await createChannelPromptFlowStep(selectedChannel.channelId, selectedStageType);
-      setFlowError("");
-      setFlow({ ...updated, steps: sortSteps(updated.steps) });
-    } catch {
-      setFlowError("새 단계를 추가하지 못했습니다.");
-    }
-  }
-
-  async function handleRemoveStep(step: PromptFlowStepRead) {
-    if (!step.removable || !selectedChannel) {
-      return;
-    }
-    try {
-      const updated = await deleteChannelPromptFlowStep(selectedChannel.channelId, step.id);
-      setFlowError("");
-      setFlow({ ...updated, steps: sortSteps(updated.steps) });
-    } catch {
-      setFlowError("단계를 삭제하지 못했습니다.");
-    }
-  }
-
   const currentSections = groupedSettings.filter((section) => section.key === activeTab);
-  const currentSectionKeys = currentSections.flatMap((section) => section.items.map((item) => item.key));
-  const currentDirtyCount = currentSectionKeys.filter(isDirtyField).length;
   const oauthClientConfigured = Boolean(runtimeConfig.client_id_configured && runtimeConfig.client_secret_configured);
   const grantedScopeSet = useMemo(
     () => new Set((runtimeConfig.granted_scopes ?? []).map((item) => item.trim()).filter(Boolean)),
@@ -1254,12 +1117,6 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
     [runtimeConfig.oauth_scopes, grantedScopeSet],
   );
   const indexingScopeGranted = grantedScopeSet.has(GOOGLE_INDEXING_SCOPE);
-  const overviewStats = [
-    { label: "자동화 게이트", value: localSettings.automation_master_enabled === "true" ? "활성" : "중지" },
-    { label: "품질 게이트", value: localSettings.quality_gate_enabled === "true" ? "사용" : "중지" },
-    { label: "공개 이미지", value: FIELD_LABELS.public_image_provider ? prettifyKey(localSettings.public_image_provider || "local") : "미설정" },
-    { label: "플래너 슬롯", value: `${localSettings.planner_default_daily_posts || "0"}개` },
-  ];
   const integrationByChannel = useMemo(
     () => new Map(workspaceIntegrations.integrations.map((item) => [item.channelId, item])),
     [workspaceIntegrations.integrations],
@@ -1319,6 +1176,117 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
     };
   }, [integrationByChannel, integrationChannels, localSettings.cloudflare_blog_api_base_url]);
   const indexingAutomationEnabled = localSettings.automation_google_indexing_enabled === "true";
+  const integrationOptions = useMemo(
+    () => [
+      {
+        key: "google" as const,
+        title: "Google 공통 인증",
+        summary: runtimeConfig.connected ? "연결됨" : "연결 필요",
+        tone: runtimeConfig.connected ? "emerald" : "amber",
+        description: "Blogger, Search Console, GA4, Indexing API 공통 인증입니다.",
+        detailLines: [
+          `OAuth 연결: ${runtimeConfig.connected ? "정상" : "미연결"}`,
+          `승인 Scope: ${runtimeConfig.granted_scopes.length}개`,
+          `누락 Scope: ${missingScopes.length}개`,
+        ],
+        actionHref: oauthStartUrl,
+        actionLabel: "Google OAuth 연결",
+      },
+      {
+        key: "blogger" as const,
+        title: "Blogger 채널",
+        summary: `${providerAuthSummary.blogger.connected}/${providerAuthSummary.blogger.total} 연결`,
+        tone:
+          providerAuthSummary.blogger.total > 0 && providerAuthSummary.blogger.connected === providerAuthSummary.blogger.total
+            ? "emerald"
+            : "amber",
+        description: "연결된 Blogger 블로그만 서비스 화면에 노출합니다.",
+        detailLines: [
+          `채널 수: ${providerAuthSummary.blogger.total}개`,
+          `OAuth 연결: ${providerAuthSummary.blogger.connected}개`,
+          `유효 토큰: ${providerAuthSummary.blogger.validCredentials}개`,
+        ],
+        actionHref: providerAuthSummary.blogger.firstChannelId ? getWorkspaceOAuthStartUrl(providerAuthSummary.blogger.firstChannelId) : null,
+        actionLabel: "Blogger OAuth 실행",
+      },
+      {
+        key: "youtube" as const,
+        title: "YouTube 채널",
+        summary: `${providerAuthSummary.youtube.connected}/${providerAuthSummary.youtube.total} 연결`,
+        tone:
+          providerAuthSummary.youtube.total > 0 && providerAuthSummary.youtube.connected === providerAuthSummary.youtube.total
+            ? "emerald"
+            : "amber",
+        description: "연결 완료된 채널만 Content Lab과 분석 화면에 노출합니다.",
+        detailLines: [
+          `채널 수: ${providerAuthSummary.youtube.total}개`,
+          `OAuth 연결: ${providerAuthSummary.youtube.connected}개`,
+          `유효 토큰: ${providerAuthSummary.youtube.validCredentials}개`,
+        ],
+        actionHref: providerAuthSummary.youtube.firstChannelId ? getWorkspaceOAuthStartUrl(providerAuthSummary.youtube.firstChannelId) : null,
+        actionLabel: "YouTube OAuth 실행",
+      },
+      {
+        key: "instagram" as const,
+        title: "Instagram 채널",
+        summary: `${providerAuthSummary.instagram.connected}/${providerAuthSummary.instagram.total} 연결`,
+        tone:
+          providerAuthSummary.instagram.total > 0 && providerAuthSummary.instagram.connected === providerAuthSummary.instagram.total
+            ? "emerald"
+            : "amber",
+        description: "연결 완료된 채널만 Content Lab과 분석 화면에 노출합니다.",
+        detailLines: [
+          `채널 수: ${providerAuthSummary.instagram.total}개`,
+          `OAuth 연결: ${providerAuthSummary.instagram.connected}개`,
+          `유효 토큰: ${providerAuthSummary.instagram.validCredentials}개`,
+        ],
+        actionHref: providerAuthSummary.instagram.firstChannelId ? getWorkspaceOAuthStartUrl(providerAuthSummary.instagram.firstChannelId) : null,
+        actionLabel: "Instagram OAuth 실행",
+      },
+      {
+        key: "cloudflare" as const,
+        title: "Cloudflare 블로그",
+        summary: cloudflareAuthSummary.channelConnected ? "연결됨" : "연결 필요",
+        tone: cloudflareAuthSummary.channelConnected && cloudflareAuthSummary.baseUrlConfigured ? "emerald" : "amber",
+        description: "API Base URL과 토큰이 있어야 실제 블로그 운영 화면에 노출합니다.",
+        detailLines: [
+          `채널 연결: ${cloudflareAuthSummary.channelConnected ? "정상" : "점검 필요"}`,
+          `API Base URL: ${cloudflareAuthSummary.baseUrlConfigured ? "설정됨" : "미설정"}`,
+          `채널 ID: ${cloudflareAuthSummary.channelId ?? "미구성"}`,
+        ],
+        actionHref: null,
+        actionLabel: "",
+      },
+    ],
+    [
+      cloudflareAuthSummary.baseUrlConfigured,
+      cloudflareAuthSummary.channelConnected,
+      cloudflareAuthSummary.channelId,
+      missingScopes.length,
+      oauthStartUrl,
+      providerAuthSummary.blogger.connected,
+      providerAuthSummary.blogger.firstChannelId,
+      providerAuthSummary.blogger.total,
+      providerAuthSummary.blogger.validCredentials,
+      providerAuthSummary.instagram.connected,
+      providerAuthSummary.instagram.firstChannelId,
+      providerAuthSummary.instagram.total,
+      providerAuthSummary.instagram.validCredentials,
+      providerAuthSummary.youtube.connected,
+      providerAuthSummary.youtube.firstChannelId,
+      providerAuthSummary.youtube.total,
+      providerAuthSummary.youtube.validCredentials,
+      runtimeConfig.connected,
+      runtimeConfig.granted_scopes.length,
+    ],
+  );
+  const focusedIntegration = integrationOptions.find((item) => item.key === integrationFocus) ?? integrationOptions[0];
+  const visibleIntegrationChannels = useMemo(() => {
+    if (focusedIntegration.key === "google") {
+      return integrationChannels.filter((channel) => ["blogger", "youtube"].includes(String(channel.provider || "").toLowerCase()));
+    }
+    return integrationChannels.filter((channel) => String(channel.provider || "").toLowerCase() === focusedIntegration.key);
+  }, [focusedIntegration.key, integrationChannels]);
 
   return (
     <div className="space-y-5">
@@ -1327,18 +1295,19 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
           <div className="space-y-2">
             <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">설정 워크스페이스</p>
             <h2 className="text-[28px] font-semibold tracking-tight text-slate-950">설정 콘솔</h2>
-            <p className="max-w-3xl text-sm leading-6 text-slate-600">채널·플로우는 작업 화면으로 유지하고, 나머지 설정은 운영 과업 기준의 섹션 카드로 재구성했습니다. 비밀값은 직접 입력한 경우에만 저장합니다.</p>
+            <p className="max-w-3xl text-sm leading-6 text-slate-600">
+              필요한 설정만 남기고 정리했습니다. 연동은 연동 설정에서, 운영 기준은 관리자 설정에서, 7단계 플로우는 별도 탭에서 수정합니다.
+            </p>
           </div>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <GuideStep number="01" title="일간 기준 운영" description="기준값은 일간 운영 데이터로 저장합니다." />
-            <GuideStep number="02" title="채널별 파이프라인" description="블로그·Cloudflare별 단계를 따로 관리합니다." />
-            <GuideStep number="03" title="월간 공유 반영" description="설정 변경은 계획·분석 화면에 바로 공유됩니다." />
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+            <p className="font-semibold text-slate-900">현재 원칙</p>
+            <p className="mt-1">구조 변경은 막고, 실제 연결된 채널 기준으로만 설정을 노출합니다.</p>
           </div>
         </div>
       </section>
 
       <div className="flex flex-wrap gap-2">
-        {TABS.map((tab) => (
+        {visibleTabs.map((tab) => (
           <button
             key={tab.key}
             type="button"
@@ -1454,31 +1423,12 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
                 <ReadonlyField label="편집 범위" value="전체 블로그 파이프라인" />
               )}
               <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                <p className="font-semibold text-slate-900">가로형 파이프라인</p>
-                <p className="mt-1 leading-6">블록 안에는 단계 요약만 표시합니다. 본문과 세부 설정은 아래 편집기에서 수정됩니다.</p>
+                <p className="font-semibold text-slate-900">7단계 고정 플로우</p>
+                <p className="mt-1 leading-6">구조는 고정이며, 단계별 내용만 수정할 수 있습니다.</p>
               </div>
             </div>
             <div className="flex flex-wrap items-end gap-3">
-              {flow?.structureEditable ? (
-                <>
-                  <SelectField label="단계 추가" value={selectedStageType} onChange={setSelectedStageType}>
-                    {(flow.availableStageTypes.length ? flow.availableStageTypes : STAGE_ORDER).map((stage) => (
-                      <option key={stage} value={stage}>
-                        {STAGE_LABELS[stage] ?? stage}
-                      </option>
-                    ))}
-                  </SelectField>
-                  <button
-                    type="button"
-                    onClick={() => void handleAddStep()}
-                    className="rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800"
-                  >
-                    단계 추가
-                  </button>
-                </>
-              ) : (
-                <FlagPill tone="slate">구조 고정 채널</FlagPill>
-              )}
+              <FlagPill tone="slate">구조 고정</FlagPill>
             </div>
           </div>
 
@@ -1510,15 +1460,7 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
                           <p className={active ? "line-clamp-1 text-xs text-slate-300" : "line-clamp-1 text-xs text-slate-500"}>{step.providerModel || "기본값 상속"}</p>
                           <p className={active ? "line-clamp-2 text-xs text-slate-300" : "line-clamp-2 text-xs text-slate-500"}>{step.objective || "목적 미설정"}</p>
                         </div>
-                        {flow?.structureEditable ? (
-                          <div className="flex shrink-0 flex-col gap-2">
-                            <button type="button" className={blockActionClass(active)} onClick={(event) => { event.stopPropagation(); void handleMoveStep(step.id, "left"); }}>←</button>
-                            <button type="button" className={blockActionClass(active)} onClick={(event) => { event.stopPropagation(); void handleMoveStep(step.id, "right"); }}>→</button>
-                            {step.removable ? (
-                              <button type="button" className={blockActionClass(active)} onClick={(event) => { event.stopPropagation(); void handleRemoveStep(step); }}>삭제</button>
-                            ) : null}
-                          </div>
-                        ) : null}
+                        <FlagPill tone={active ? "dark" : "slate"}>{step.promptEnabled ? "프롬프트 단계" : "시스템 단계"}</FlagPill>
                       </div>
                     </button>
                     {index < visibleSteps.length - 1 ? <div className="text-slate-300">→</div> : null}
@@ -1568,9 +1510,19 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
                     </label>
                   </FieldGroup>
                   <ReadonlyField label="구조 변경 가능" value={selectedStep.structureEditable ? "예" : "아니오"} />
-                  <FieldGroup label="프롬프트 본문" className="xl:col-span-2">
-                    <textarea value={draft.promptTemplate} onChange={(event) => void applyFlowUpdate({ promptTemplate: event.target.value })} rows={14} className={textareaClass("min-h-[320px]")} />
-                  </FieldGroup>
+                  {selectedStep.promptEnabled ? (
+                    <FieldGroup label="프롬프트 본문" className="xl:col-span-2">
+                      <textarea value={draft.promptTemplate} onChange={(event) => void applyFlowUpdate({ promptTemplate: event.target.value })} rows={14} className={textareaClass("min-h-[320px]")} />
+                    </FieldGroup>
+                  ) : (
+                    <FieldGroup label="시스템 단계 설명" className="xl:col-span-2">
+                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm leading-6 text-slate-700">
+                        {selectedStep.stageType === "html_assembly"
+                          ? "HTML 조립은 본문, FAQ, 이미지, 관련 글을 조합해 최종 HTML 구조를 만드는 시스템 단계입니다. 사용자가 프롬프트를 직접 편집하는 단계가 아닙니다."
+                          : "이 단계는 시스템 처리 단계입니다. 구조와 로직은 고정하고 설명만 제공합니다."}
+                      </div>
+                    </FieldGroup>
+                  )}
                 </div>
               </div>
             ) : (
@@ -1583,153 +1535,58 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
       {activeTab !== "channels" && activeTab !== "pipeline" ? (
         <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-4">
-            {activeTab === "workspace" ? (
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                {overviewStats.map((item) => (
-                  <div key={item.label} className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{item.label}</p>
-                    <p className="mt-2 text-xl font-semibold text-slate-950">{item.value}</p>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-
             {activeTab === "integrations" ? (
               <article className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm lg:p-6">
                 <div>
-                  <h3 className="text-xl font-semibold text-slate-950">파트별 인증 상태</h3>
-                  <p className="mt-1 text-sm text-slate-500">운영 파트별 인증 상태를 분리해 점검할 수 있도록 구성했습니다.</p>
+                  <h3 className="text-xl font-semibold text-slate-950">먼저 연결할 대상을 선택하세요</h3>
+                  <p className="mt-1 text-sm text-slate-500">운영 화면에는 실제 연결된 대상만 보입니다. 여기서 인증 대상을 고른 뒤 바로 연결합니다.</p>
                 </div>
 
-                <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  <AuthPartCard
-                    title="Google OAuth"
-                    summary={runtimeConfig.connected ? "연결됨" : "연결 필요"}
-                    tone={runtimeConfig.connected ? "emerald" : "amber"}
-                    checks={[
-                      { label: "OAuth 연결", ok: runtimeConfig.connected },
-                      { label: "Client ID/Secret 설정", ok: oauthClientConfigured },
-                      { label: "누락 Scope 없음", ok: missingScopes.length === 0, detail: missingScopes.length ? `${missingScopes.length}개 누락` : undefined },
-                    ]}
-                    action={oauthStartUrl ? (
-                      <a
-                        href={oauthStartUrl}
-                        className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
-                      >
-                        OAuth 재인증
-                      </a>
-                    ) : null}
-                  />
-                  <AuthPartCard
-                    title="Blogger 채널 OAuth"
-                    summary={`${providerAuthSummary.blogger.connected}/${providerAuthSummary.blogger.total} 연결`}
-                    tone={providerAuthSummary.blogger.total > 0 && providerAuthSummary.blogger.connected === providerAuthSummary.blogger.total ? "emerald" : "amber"}
-                    checks={[
-                      { label: "채널 구성", ok: providerAuthSummary.blogger.total > 0, detail: `총 ${providerAuthSummary.blogger.total}개` },
-                      {
-                        label: "OAuth 연결",
-                        ok: providerAuthSummary.blogger.total > 0 && providerAuthSummary.blogger.connected === providerAuthSummary.blogger.total,
-                        detail: `${providerAuthSummary.blogger.connected}개 연결`,
-                      },
-                      {
-                        label: "유효 토큰",
-                        ok: providerAuthSummary.blogger.total > 0 && providerAuthSummary.blogger.validCredentials >= providerAuthSummary.blogger.connected,
-                        detail: `${providerAuthSummary.blogger.validCredentials}개 유효`,
-                      },
-                    ]}
-                    action={providerAuthSummary.blogger.firstChannelId ? (
-                      <a
-                        href={getWorkspaceOAuthStartUrl(providerAuthSummary.blogger.firstChannelId)}
-                        className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
-                      >
-                        Blogger OAuth
-                      </a>
-                    ) : null}
-                  />
-                  <AuthPartCard
-                    title="YouTube 채널 OAuth"
-                    summary={`${providerAuthSummary.youtube.connected}/${providerAuthSummary.youtube.total} 연결`}
-                    tone={providerAuthSummary.youtube.total > 0 && providerAuthSummary.youtube.connected === providerAuthSummary.youtube.total ? "emerald" : "amber"}
-                    checks={[
-                      { label: "채널 구성", ok: providerAuthSummary.youtube.total > 0, detail: `총 ${providerAuthSummary.youtube.total}개` },
-                      {
-                        label: "OAuth 연결",
-                        ok: providerAuthSummary.youtube.total > 0 && providerAuthSummary.youtube.connected === providerAuthSummary.youtube.total,
-                        detail: `${providerAuthSummary.youtube.connected}개 연결`,
-                      },
-                      {
-                        label: "유효 토큰",
-                        ok: providerAuthSummary.youtube.total > 0 && providerAuthSummary.youtube.validCredentials >= providerAuthSummary.youtube.connected,
-                        detail: `${providerAuthSummary.youtube.validCredentials}개 유효`,
-                      },
-                    ]}
-                    action={providerAuthSummary.youtube.firstChannelId ? (
-                      <a
-                        href={getWorkspaceOAuthStartUrl(providerAuthSummary.youtube.firstChannelId)}
-                        className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
-                      >
-                        YouTube OAuth
-                      </a>
-                    ) : null}
-                  />
-                  <AuthPartCard
-                    title="Instagram 채널 OAuth"
-                    summary={`${providerAuthSummary.instagram.connected}/${providerAuthSummary.instagram.total} 연결`}
-                    tone={providerAuthSummary.instagram.total > 0 && providerAuthSummary.instagram.connected === providerAuthSummary.instagram.total ? "emerald" : "amber"}
-                    checks={[
-                      { label: "채널 구성", ok: providerAuthSummary.instagram.total > 0, detail: `총 ${providerAuthSummary.instagram.total}개` },
-                      {
-                        label: "OAuth 연결",
-                        ok: providerAuthSummary.instagram.total > 0 && providerAuthSummary.instagram.connected === providerAuthSummary.instagram.total,
-                        detail: `${providerAuthSummary.instagram.connected}개 연결`,
-                      },
-                      {
-                        label: "유효 토큰",
-                        ok: providerAuthSummary.instagram.total > 0 && providerAuthSummary.instagram.validCredentials >= providerAuthSummary.instagram.connected,
-                        detail: `${providerAuthSummary.instagram.validCredentials}개 유효`,
-                      },
-                    ]}
-                    action={providerAuthSummary.instagram.firstChannelId ? (
-                      <a
-                        href={getWorkspaceOAuthStartUrl(providerAuthSummary.instagram.firstChannelId)}
-                        className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
-                      >
-                        Instagram OAuth
-                      </a>
-                    ) : null}
-                  />
-                  <AuthPartCard
-                    title="Cloudflare 연동"
-                    summary={cloudflareAuthSummary.channelConnected ? "연결됨" : "연결 필요"}
-                    tone={cloudflareAuthSummary.channelConnected && cloudflareAuthSummary.baseUrlConfigured ? "emerald" : "amber"}
-                    checks={[
-                      { label: "채널 연결 상태", ok: cloudflareAuthSummary.channelConnected },
-                      { label: "API Base URL 설정", ok: cloudflareAuthSummary.baseUrlConfigured },
-                      { label: "채널 존재", ok: Boolean(cloudflareAuthSummary.channelId), detail: cloudflareAuthSummary.channelId || "미구성" },
-                    ]}
-                  />
-                  <AuthPartCard
-                    title="Indexing 자동화"
-                    summary={indexingAutomationEnabled && indexingScopeGranted ? "활성" : "점검 필요"}
-                    tone={indexingAutomationEnabled && indexingScopeGranted ? "emerald" : "amber"}
-                    checks={[
-                      { label: "automation_google_indexing_enabled", ok: indexingAutomationEnabled },
-                      { label: "Indexing Scope 승인", ok: indexingScopeGranted },
-                      {
-                        label: "OAuth 재인증 필요 여부",
-                        ok: indexingScopeGranted,
-                        detail: indexingScopeGranted ? "정상" : "필수",
-                      },
-                    ]}
-                    action={oauthStartUrl ? (
-                      <a
-                        href={oauthStartUrl}
-                        className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
-                      >
-                        Scope 재승인
-                      </a>
-                    ) : null}
-                  />
+                <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                  {integrationOptions.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => setIntegrationFocus(item.key)}
+                      className={`rounded-[22px] border px-4 py-4 text-left transition ${
+                        focusedIntegration.key === item.key
+                          ? "border-slate-950 bg-slate-950 text-white"
+                          : "border-slate-200 bg-slate-50 text-slate-900 hover:border-slate-300"
+                      }`}
+                    >
+                      <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${focusedIntegration.key === item.key ? "text-slate-300" : "text-slate-500"}`}>{item.title}</p>
+                      <p className="mt-2 text-base font-semibold">{item.summary}</p>
+                      <p className={`mt-2 text-sm leading-6 ${focusedIntegration.key === item.key ? "text-slate-200" : "text-slate-600"}`}>{item.description}</p>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mt-5 rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">선택 대상</p>
+                      <h4 className="mt-1 text-lg font-semibold text-slate-950">{focusedIntegration.title}</h4>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">{focusedIntegration.description}</p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <FlagPill tone={focusedIntegration.tone === "emerald" ? "emerald" : "amber"}>{focusedIntegration.summary}</FlagPill>
+                      {focusedIntegration.actionHref ? (
+                        <a
+                          href={focusedIntegration.actionHref}
+                          className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+                        >
+                          {focusedIntegration.actionLabel}
+                        </a>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-3">
+                    {focusedIntegration.detailLines.map((line) => (
+                      <div key={line} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                        {line}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </article>
             ) : null}
@@ -1848,7 +1705,7 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
                 ) : null}
 
                 <div className="mt-5 grid gap-4 lg:grid-cols-2">
-                  {(workspaceIntegrations.channels.length ? workspaceIntegrations.channels : channels).map((channel) => {
+                  {visibleIntegrationChannels.map((channel) => {
                     const integration = integrationByChannel.get(channel.channelId);
                     const credential = credentialByChannel.get(channel.channelId);
                     const oauthStartUrlForChannel = getWorkspaceOAuthStartUrl(channel.channelId);
@@ -1908,8 +1765,20 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
                       </div>
                     );
                   })}
+                  {!visibleIntegrationChannels.length ? (
+                    <div className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-sm text-slate-500">
+                      선택한 대상에 연결된 채널이 아직 없습니다.
+                    </div>
+                  ) : null}
                 </div>
               </article>
+            ) : null}
+
+            {saveError ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{saveError}</div>
+            ) : null}
+            {saveMessage ? (
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">{saveMessage}</div>
             ) : null}
 
             {currentSections.map((section) => (
@@ -1919,9 +1788,19 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
                     <h3 className="text-xl font-semibold text-slate-950">{section.title}</h3>
                     <p className="mt-1 text-sm text-slate-500">{section.description}</p>
                   </div>
-                  <FlagPill tone={section.items.some((item) => isDirtyField(item.key)) ? "indigo" : "slate"}>
-                    {section.items.filter((item) => isDirtyField(item.key)).length || section.items.length}개 {section.items.some((item) => isDirtyField(item.key)) ? "변경" : "설정"}
-                  </FlagPill>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveSettings(section.items.map((item) => item.key))}
+                      disabled={!section.items.some((item) => isDirtyField(item.key))}
+                      className="rounded-full bg-slate-950 px-4 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                    >
+                      이 섹션 저장
+                    </button>
+                    <FlagPill tone={section.items.some((item) => isDirtyField(item.key)) ? "indigo" : "slate"}>
+                      {section.items.filter((item) => isDirtyField(item.key)).length || section.items.length}개 {section.items.some((item) => isDirtyField(item.key)) ? "변경" : "설정"}
+                    </FlagPill>
+                  </div>
                 </div>
                 <div className="mt-5 grid gap-4 xl:grid-cols-2">
                   {section.items.map((item) => {
@@ -2004,96 +1883,11 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
               </article>
             ))}
 
-            {activeTab === "workspace" && diagnosticItems.length ? (
-              <article className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm lg:p-6">
-                <div>
-                  <h3 className="text-xl font-semibold text-slate-950">운영 진단 값</h3>
-                  <p className="mt-1 text-sm text-slate-500">마지막 실행 시간, 경로, 카운트 같은 읽기 전용 운영 값입니다.</p>
-                </div>
-                <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200">
-                  <div className="grid grid-cols-[minmax(220px,280px)_minmax(0,1fr)] bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                    <span>키</span>
-                    <span>값</span>
-                  </div>
-                  <div className="divide-y divide-slate-100">
-                    {diagnosticItems.map((item) => (
-                      <div key={item.key} className="grid grid-cols-[minmax(220px,280px)_minmax(0,1fr)] gap-4 px-4 py-3 text-sm">
-                        <span className="break-all font-medium text-slate-900">{item.key}</span>
-                        <span className="break-all text-slate-600">{localSettings[item.key] || "미기록"}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </article>
-            ) : null}
           </div>
-          <aside className="space-y-4 rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-            <div>
-              <h3 className="text-lg font-semibold text-slate-950">현재 탭 요약</h3>
-              <p className="mt-2 text-sm leading-6 text-slate-600">키 덤프 대신 실제 운영 과업 기준으로 섹션을 재구성했습니다.</p>
-            </div>
-            <InfoRow label="Blogger 연결 블로그" value={String(runtimeConfig.blogs.length)} />
-            <InfoRow label="OAuth 연결 상태" value={runtimeConfig.connected ? "연결됨" : "확인 필요"} />
-            <InfoRow label="변경 항목" value={String(currentDirtyCount)} />
-            <InfoRow label="저장 상태" value={saveError || saveMessage || "대기"} />
-            <button
-              type="button"
-              onClick={() => void handleSaveSettings(currentSectionKeys)}
-              className="w-full rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800"
-            >
-              현재 탭 저장
-            </button>
-            {saveError ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{saveError}</div> : null}
-          </aside>
         </section>
       ) : null}
 
       {isPending ? <div className="text-xs text-slate-400">데이터를 불러오는 중입니다.</div> : null}
-    </div>
-  );
-}
-
-function AuthPartCard({
-  title,
-  summary,
-  tone,
-  checks,
-  action,
-}: {
-  title: string;
-  summary: string;
-  tone: "emerald" | "amber";
-  checks: AuthCheckItem[];
-  action?: ReactNode;
-}) {
-  return (
-    <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
-      <div className="flex items-center justify-between gap-2">
-        <h4 className="text-sm font-semibold text-slate-950">{title}</h4>
-        <FlagPill tone={tone}>{summary}</FlagPill>
-      </div>
-      <div className="mt-3 space-y-2">
-        {checks.map((item) => (
-          <div key={`${title}-${item.label}`} className="flex items-center justify-between gap-3 text-xs">
-            <span className="text-slate-600">{item.label}</span>
-            <span className={item.ok ? "font-semibold text-emerald-700" : "font-semibold text-amber-700"}>
-              {item.ok ? "OK" : "확인 필요"}
-              {item.detail ? ` · ${item.detail}` : ""}
-            </span>
-          </div>
-        ))}
-      </div>
-      {action ? <div className="mt-4">{action}</div> : null}
-    </div>
-  );
-}
-
-function GuideStep({ number, title, description }: { number: string; title: string; description: string }) {
-  return (
-    <div className="rounded-[22px] bg-slate-50 px-4 py-3">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">{number}</p>
-      <p className="mt-1 text-sm font-semibold text-slate-900">{title}</p>
-      <p className="mt-1 text-xs leading-5 text-slate-500">{description}</p>
     </div>
   );
 }
@@ -2190,11 +1984,4 @@ function inputClass() {
 
 function textareaClass(extra: string) {
   return `w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200 ${extra}`;
-}
-
-function blockActionClass(active: boolean) {
-  return [
-    "rounded-full px-2.5 py-1 text-[11px] font-medium transition",
-    active ? "bg-white/15 text-white hover:bg-white/20" : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900",
-  ].join(" ");
 }

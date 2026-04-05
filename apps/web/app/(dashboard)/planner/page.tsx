@@ -1,4 +1,4 @@
-import { Suspense } from "react";
+﻿import { Suspense } from "react";
 
 import { PlannerManager } from "@/components/dashboard/planner-manager";
 import { fetchChannels } from "@/lib/api";

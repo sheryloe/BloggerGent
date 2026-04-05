@@ -1248,6 +1248,7 @@ class ManagedChannelRead(BaseModel):
     provider: ChannelProvider | str
     channel_id: str
     name: str
+    is_enabled: bool = True
     status: ManagedChannelStatus | str
     base_url: str | None = None
     primary_category: str | None = None
@@ -1313,6 +1314,49 @@ class PlatformIntegrationRead(BaseModel):
     expires_at: datetime | None = None
     is_valid: bool = False
     last_error: str | None = None
+
+
+class SeoTargetRead(BaseModel):
+    target_id: str
+    provider: ChannelProvider | str
+    channel_id: str | None = None
+    label: str
+    base_url: str | None = None
+    linked_blog_id: int | None = None
+    search_console_site_url: str | None = None
+    ga4_property_id: str | None = None
+    oauth_state: str = "unknown"
+    is_connected: bool = False
+
+
+class RuntimeUsageBucketRead(BaseModel):
+    key: str
+    label: str
+    event_count: int = 0
+    request_count: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+    error_count: int = 0
+    latest_event_at: datetime | None = None
+
+
+class RuntimeUsageTotalRead(BaseModel):
+    event_count: int = 0
+    request_count: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+    error_count: int = 0
+
+
+class WorkspaceRuntimeUsageRead(BaseModel):
+    generated_at: datetime
+    days: int
+    totals: RuntimeUsageTotalRead
+    providers: list[RuntimeUsageBucketRead] = Field(default_factory=list)
 
 
 class PublicationRecordRead(BaseModel):
@@ -1544,6 +1588,51 @@ class WorkspaceOverviewRead(BaseModel):
     channels: list[ManagedChannelRead] = Field(default_factory=list)
     content_items: list[ContentItemRead] = Field(default_factory=list)
     runtime: WorkspaceRuntimeOverviewRead
+
+
+class WorkspaceRuntimeUsageBucketRead(BaseModel):
+    provider_key: str
+    label: str
+    request_count: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float = 0
+    error_count: int = 0
+    last_event_at: datetime | None = None
+    models: list[str] = Field(default_factory=list)
+
+
+class WorkspaceRuntimeUsageTotalsRead(BaseModel):
+    request_count: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float = 0
+    error_count: int = 0
+    last_event_at: datetime | None = None
+    models: list[str] = Field(default_factory=list)
+
+
+class WorkspaceRuntimeUsageRead(BaseModel):
+    generated_at: datetime
+    days: int
+    providers: list[WorkspaceRuntimeUsageBucketRead] = Field(default_factory=list)
+    totals: WorkspaceRuntimeUsageTotalsRead = Field(default_factory=WorkspaceRuntimeUsageTotalsRead)
+
+
+class SeoTargetRead(BaseModel):
+    target_id: str
+    provider: ChannelProvider | str
+    channel_id: str
+    blog_id: int | None = None
+    label: str
+    base_url: str | None = None
+    linked_blog_id: int | None = None
+    search_console_site_url: str | None = None
+    ga4_property_id: str | None = None
+    oauth_state: str = "disconnected"
+    is_connected: bool = False
 
 
 class PromptFlowStepRead(BaseModel):

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 
@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    project_name: str = "Donggr AutoBloggent"
+    project_name: str = "동그리 자동 블로그전트"
     api_v1_prefix: str = "/api/v1"
     database_url: str = "postgresql+psycopg2://bloggent:bloggent@postgres:5432/bloggent"
     redis_url: str = "redis://redis:6379/0"
@@ -132,3 +132,4 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+

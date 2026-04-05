@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -176,10 +176,16 @@ def _build_platform_flow(db: Session, channel_id: str) -> PromptFlowRead:
 
 
 @router.get("", response_model=list[ManagedChannelRead])
-def get_channels(db: Session = Depends(get_db)) -> list[ManagedChannelRead]:
+def get_channels(
+    include_disconnected: bool = Query(default=False),
+    db: Session = Depends(get_db),
+) -> list[ManagedChannelRead]:
     blogs = list_blogs(db)
     summary_map = get_blog_summary_map(db, [blog.id for blog in blogs]) if blogs else {}
-    channels = [ManagedChannelRead(**serialize_managed_channel(channel)) for channel in list_managed_channels(db)]
+    channels = [
+        ManagedChannelRead(**serialize_managed_channel(channel))
+        for channel in list_managed_channels(db, include_disconnected=include_disconnected)
+    ]
 
     for channel in channels:
         if channel.provider != "blogger":
@@ -190,27 +196,6 @@ def get_channels(db: Session = Depends(get_db)) -> list[ManagedChannelRead]:
         channel.posts_count = summary.get("published_posts", channel.posts_count)
         channel.pending_items = max(channel.pending_items, summary.get("job_count", 0) - summary.get("completed_jobs", 0))
 
-    overview = get_cloudflare_overview(db)
-    channels.append(
-        ManagedChannelRead(
-            provider="cloudflare",
-            channel_id=f"cloudflare:{overview.get('channel_id')}",
-            name=overview.get("channel_name") or overview.get("site_title") or "Cloudflare",
-            status=overview.get("provider_status") or "unknown",
-            base_url=overview.get("base_url"),
-            primary_category="archive",
-            purpose="Cloudflare 기반 아카이브 채널입니다.",
-            posts_count=overview.get("posts_count", 0),
-            categories_count=overview.get("categories_count", 0),
-            prompts_count=overview.get("prompts_count", 0),
-            planner_supported=True,
-            analytics_supported=True,
-            prompt_flow_supported=True,
-            capabilities=["archive_publish", "analytics"],
-            oauth_state="connected" if overview.get("provider_status") == "connected" else "attention",
-            quota_state={"state": "unknown"},
-        )
-    )
     return channels
 
 

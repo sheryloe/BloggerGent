@@ -27,6 +27,7 @@ from app.services.platform_service import (
 )
 from app.services.secret_service import decrypt_secret_value
 from app.services.settings_service import get_settings_map, upsert_settings
+from app.services.usage_service import record_usage_event
 
 
 class FakeResponse:
@@ -76,6 +77,7 @@ def _create_blog(
     blog_id: int,
     slug: str,
     blogger_url: str = "https://example.com",
+    blogger_blog_id: str | None = None,
     search_console_site_url: str | None = None,
     ga4_property_id: str | None = None,
 ) -> Blog:
@@ -88,6 +90,7 @@ def _create_blog(
         profile_key="custom",
         publish_mode=PublishMode.DRAFT,
         is_active=True,
+        blogger_blog_id=blogger_blog_id or f"remote-{blog_id}",
         blogger_url=blogger_url,
         search_console_site_url=search_console_site_url,
         ga4_property_id=ga4_property_id,
@@ -196,6 +199,97 @@ def test_list_platform_integrations_without_credentials(db: Session) -> None:
     assert "instagram:main" in by_channel_id
     assert by_channel_id["youtube:main"]["expires_at"] is None
     assert by_channel_id["instagram:main"]["expires_at"] is None
+
+
+def test_mission_control_filters_disabled_and_unconfigured_default_channels(db: Session) -> None:
+    active_blog = _create_blog(
+        db,
+        blog_id=21,
+        slug="active-blog",
+        blogger_url="https://active.example.com",
+    )
+    inactive_blog = _create_blog(
+        db,
+        blog_id=22,
+        slug="inactive-blog",
+        blogger_url="https://inactive.example.com",
+    )
+    inactive_blog.is_active = False
+    db.add(inactive_blog)
+    db.commit()
+
+    ensure_managed_channels(db)
+    payload = workspace_service.build_mission_control_payload(db, use_cache=False)
+    channel_ids = {item["channel_id"] for item in payload["channels"]}
+
+    assert f"blogger:{active_blog.id}" in channel_ids
+    assert f"blogger:{inactive_blog.id}" not in channel_ids
+    assert "youtube:main" not in channel_ids
+    assert "instagram:main" not in channel_ids
+
+
+def test_managed_channels_include_configured_cloudflare(db: Session) -> None:
+    upsert_settings(
+        db,
+        {
+            "cloudflare_channel_enabled": "true",
+            "cloudflare_blog_api_base_url": "https://api.dongriarchive.com",
+            "cloudflare_blog_m2m_token": "cf-token",
+            "cloudflare_r2_public_base_url": "https://img.dongriarchive.com",
+        },
+    )
+
+    ensure_managed_channels(db)
+    channel = get_managed_channel_by_channel_id(db, "cloudflare:dongriarchive")
+    assert channel is not None
+    assert channel.provider == "cloudflare"
+    assert channel.is_enabled is True
+    assert channel.status == "connected"
+    assert channel.oauth_state == "connected"
+    assert channel.base_url == "https://img.dongriarchive.com"
+
+
+def test_workspace_runtime_usage_groups_provider_buckets(db: Session) -> None:
+    blog = _create_blog(db, blog_id=77, slug="usage-blog")
+
+    record_usage_event(
+        db,
+        blog_id=blog.id,
+        stage_type="article_generation",
+        provider_name="gemini_cli",
+        provider_model="gemini-2.5-pro",
+        endpoint="cli:generate",
+        input_tokens=120,
+        output_tokens=80,
+        estimated_cost_usd=0.12,
+        request_count=2,
+        success=True,
+    )
+    record_usage_event(
+        db,
+        blog_id=blog.id,
+        stage_type="review",
+        provider_name="codex-cli",
+        provider_model="codex-latest",
+        endpoint="cli:review",
+        input_tokens=40,
+        output_tokens=20,
+        estimated_cost_usd=0.03,
+        request_count=1,
+        success=False,
+        error_message="timeout",
+    )
+
+    payload = workspace_service.workspace_runtime_usage(db, days=7)
+    by_key = {item["provider_key"]: item for item in payload["providers"]}
+
+    assert payload["totals"]["request_count"] == 3
+    assert payload["totals"]["input_tokens"] == 160
+    assert payload["totals"]["output_tokens"] == 100
+    assert payload["totals"]["total_tokens"] == 260
+    assert payload["totals"]["error_count"] == 1
+    assert by_key["gemini_cli"]["total_tokens"] == 200
+    assert by_key["codex_cli"]["error_count"] == 1
 
 
 def test_process_platform_publish_queue_uploads_youtube_video(db: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

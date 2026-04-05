@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
@@ -27,7 +27,7 @@ async function readApiError(response: Response) {
     }
   } catch {}
 
-  return `Request failed (${response.status}).`;
+  return `요청이 실패했습니다. (${response.status})`;
 }
 
 export function GooglePostSyncButton({ blogId }: { blogId: number }) {
@@ -50,7 +50,7 @@ export function GooglePostSyncButton({ blogId }: { blogId: number }) {
     }
 
     const payload = (await response.json()) as { count?: number };
-    setMessage(`현재 게시글 ${payload.count ?? 0}건을 다시 가져왔습니다.`);
+    setMessage(`현재 게시글 ${payload.count ?? 0}건을 다시 동기화했습니다.`);
     startTransition(() => {
       router.refresh();
     });
@@ -59,7 +59,7 @@ export function GooglePostSyncButton({ blogId }: { blogId: number }) {
   return (
     <div className="space-y-2">
       <Button type="button" variant="outline" onClick={() => void handleSync()} disabled={isPending}>
-        {isPending ? "가져오는 중..." : "현재 게시글 가져오기"}
+        {isPending ? "동기화 중..." : "현재 게시글 동기화"}
       </Button>
       {message ? <p className="text-sm text-emerald-700">{message}</p> : null}
       {error ? <p className="text-sm text-rose-700">{error}</p> : null}

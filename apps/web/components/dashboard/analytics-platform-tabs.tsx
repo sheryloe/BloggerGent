@@ -1,12 +1,13 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const PLATFORM_TABS = [
   { href: "/analytics/blogger", label: "Blogger" },
-  { href: "/analytics/youtube", label: "YouTube" },
-  { href: "/analytics/instagram", label: "Instagram" },
+  { href: "/analytics/cloudflare", label: "Cloudflare" },
+  { href: "/analytics/youtube", label: "유튜브" },
+  { href: "/analytics/instagram", label: "인스타그램" },
 ] as const;
 
 function isActive(pathname: string, href: string) {
@@ -18,7 +19,7 @@ export function AnalyticsPlatformTabs() {
 
   return (
     <div className="rounded-[24px] border border-slate-200 bg-white p-2 shadow-sm">
-      <div className="grid gap-2 sm:grid-cols-3">
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {PLATFORM_TABS.map((tab) => {
           const active = isActive(pathname, tab.href);
           return (
@@ -26,7 +27,7 @@ export function AnalyticsPlatformTabs() {
               key={tab.href}
               href={tab.href}
               className={`rounded-2xl px-4 py-3 text-center text-sm font-semibold transition ${
-                active ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                active ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
               }`}
             >
               {tab.label}

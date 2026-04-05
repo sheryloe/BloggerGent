@@ -16,6 +16,7 @@ from app.schemas.api import (
 )
 from app.services.blog_service import list_visible_blog_ids
 from app.services.blogger_label_backfill_service import dry_run_blogger_editorial_label_backfill
+from app.services.ops_health_service import generate_ops_health_report
 from app.services.cloudflare_r2_migration_service import run_cloudflare_r2_image_migration
 from app.services.providers.base import ProviderRuntimeError
 from app.tasks.admin import run_blogger_editorial_label_backfill
@@ -55,6 +56,8 @@ def get_latest_ops_health_report() -> dict:
         return {
             "status": "missing",
             "file_path": "",
+            "report_path": "",
+            "generated_at_kst": None,
             "report": None,
             "recent_files": [],
         }
@@ -68,11 +71,42 @@ def get_latest_ops_health_report() -> dict:
             detail=f"Invalid ops-health report JSON: {latest.name}",
         ) from exc
 
+    generated_at_kst = report.get("generated_at_kst") if isinstance(report, dict) else None
     return {
         "status": "ok",
         "file_path": str(latest),
+        "report_path": str(latest),
+        "generated_at_kst": generated_at_kst,
         "report": report,
         "recent_files": [path.name for path in files],
+    }
+
+
+@router.post("/ops-health/sync")
+def sync_ops_health_report(db: Session = Depends(get_db)) -> dict:
+    try:
+        result = generate_ops_health_report(db)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "ops_health_sync_failed",
+                "detail": str(exc),
+            },
+        ) from exc
+
+    recent_files = [path.name for path in _list_ops_health_reports(limit=20)]
+    file_path = str(result["report_paths"].get("json", ""))
+    report = result.get("report") if isinstance(result, dict) else None
+    generated_at_kst = report.get("generated_at_kst") if isinstance(report, dict) else None
+    return {
+        "status": "ok",
+        "message": "ops_health_sync_completed",
+        "file_path": file_path,
+        "report_path": file_path,
+        "generated_at_kst": generated_at_kst,
+        "report": report,
+        "recent_files": recent_files,
     }
 
 

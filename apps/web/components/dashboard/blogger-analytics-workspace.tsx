@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -114,7 +114,7 @@ function mapApiSort(sort: BloggerSortKey): "published_at" | "seo" | "geo" | "sim
   return "published_at";
 }
 
-export function BloggerAnalyticsWorkspace({ blogs, channels }: { blogs: Blog[]; channels: ManagedChannelRead[] }) {
+export function BloggerAnalyticsWorkspace({ blogs, channels: _channels }: { blogs: Blog[]; channels: ManagedChannelRead[] }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -131,15 +131,7 @@ export function BloggerAnalyticsWorkspace({ blogs, channels }: { blogs: Blog[]; 
   const queryDir = (searchParams.get("dir") as SortDir | null) ?? "desc";
   const queryPage = toNumber(searchParams.get("page"), 1);
 
-  const availableBlogs = useMemo(() => {
-    const linkedSet = new Set(
-      channels
-        .filter((channel) => channel.provider === "blogger" && channel.linkedBlogId != null)
-        .map((channel) => Number(channel.linkedBlogId)),
-    );
-    const candidates = linkedSet.size > 0 ? blogs.filter((blog) => linkedSet.has(blog.id)) : blogs;
-    return candidates.length > 0 ? candidates : blogs;
-  }, [blogs, channels]);
+  const availableBlogs = useMemo(() => blogs, [blogs]);
 
   const selectedBlogId = useMemo(() => {
     if (availableBlogs.some((blog) => blog.id === queryBlogId)) return queryBlogId;
@@ -223,15 +215,12 @@ export function BloggerAnalyticsWorkspace({ blogs, channels }: { blogs: Blog[]; 
 
   const rows = useMemo<BloggerRow[]>(() => {
     const blogName = selectedBlog?.name ?? "-";
-    return facts.map((item) => {
-      const dbsScore = computeDbs(item);
-      return {
-        ...item,
-        dbsScore,
-        lowFlag: isAnyLow(item),
-        blogName,
-      };
-    });
+    return facts.map((item) => ({
+      ...item,
+      dbsScore: computeDbs(item),
+      lowFlag: isAnyLow(item),
+      blogName,
+    }));
   }, [facts, selectedBlog]);
 
   const filteredRows = useMemo(() => {
@@ -253,7 +242,6 @@ export function BloggerAnalyticsWorkspace({ blogs, channels }: { blogs: Blog[]; 
 
     const sorted = [...byLow].sort((a, b) => {
       const direction = queryDir === "asc" ? 1 : -1;
-
       const compareText = (left: string | null | undefined, right: string | null | undefined) =>
         (left ?? "").localeCompare(right ?? "", "ko");
 
@@ -283,7 +271,6 @@ export function BloggerAnalyticsWorkspace({ blogs, channels }: { blogs: Blog[]; 
 
   const lowCount = filteredRows.filter((row) => row.lowFlag).length;
   const dbsLowCount = filteredRows.filter((row) => row.dbsScore < 70).length;
-
   const calendarCells = useMemo(() => buildCalendarCells(queryMonth, dailySummaries), [queryMonth, dailySummaries]);
 
   return (
@@ -294,58 +281,39 @@ export function BloggerAnalyticsWorkspace({ blogs, channels }: { blogs: Blog[]; 
         <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Blogger Analytics</p>
-            <h1 className="mt-2 text-2xl font-semibold text-slate-900">게시글 품질 테이블</h1>
-            <p className="mt-1 text-sm text-slate-600">SEO / GEO / CTR / DBS를 URL 단위로 정렬·필터링합니다.</p>
+            <h1 className="mt-2 text-2xl font-semibold text-slate-900">게시글 성과 테이블</h1>
+            <p className="mt-1 text-sm text-slate-600">SEO, GEO, CTR, DBS 지표를 블로그별로 정렬하고 필터링할 수 있습니다.</p>
           </div>
           <div className="flex flex-wrap gap-2 text-xs font-semibold">
-            <span className="rounded-xl bg-slate-100 px-3 py-2 text-slate-700">Rows {filteredRows.length}</span>
-            <span className="rounded-xl bg-rose-100 px-3 py-2 text-rose-700">Any&lt;70 {lowCount}</span>
-            <span className="rounded-xl bg-amber-100 px-3 py-2 text-amber-700">DBS&lt;70 {dbsLowCount}</span>
+            <span className="rounded-xl bg-slate-100 px-3 py-2 text-slate-700">행 수 {filteredRows.length}</span>
+            <span className="rounded-xl bg-rose-100 px-3 py-2 text-rose-700">저점 항목 {lowCount}</span>
+            <span className="rounded-xl bg-amber-100 px-3 py-2 text-amber-700">DBS 70 미만 {dbsLowCount}</span>
           </div>
         </div>
 
         <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-8">
           <label className="text-xs font-semibold text-slate-600">
             기준 월
-            <input
-              type="month"
-              value={queryMonth}
-              onChange={(event) => setQuery({ month: event.target.value, page: "1" })}
-              className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
-            />
+            <input type="month" value={queryMonth} onChange={(event) => setQuery({ month: event.target.value, page: "1" })} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm" />
           </label>
           <label className="text-xs font-semibold text-slate-600">
             블로그
-            <select
-              value={selectedBlogId ?? ""}
-              onChange={(event) => setQuery({ blog: event.target.value || null, page: "1" })}
-              className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
-            >
+            <select value={selectedBlogId ?? ""} onChange={(event) => setQuery({ blog: event.target.value || null, page: "1" })} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
               {availableBlogs.map((blog) => (
-                <option key={blog.id} value={blog.id}>
-                  {blog.name}
-                </option>
+                <option key={blog.id} value={blog.id}>{blog.name}</option>
               ))}
             </select>
           </label>
           <label className="text-xs font-semibold text-slate-600">
-            보기
-            <select
-              value={queryView}
-              onChange={(event) => setQuery({ view: event.target.value, page: "1" })}
-              className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
-            >
+            보기 방식
+            <select value={queryView} onChange={(event) => setQuery({ view: event.target.value, page: "1" })} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
               <option value="list">글 목록</option>
               <option value="calendar">캘린더</option>
             </select>
           </label>
           <label className="text-xs font-semibold text-slate-600">
-            저점수 필터
-            <select
-              value={queryLow}
-              onChange={(event) => setQuery({ low: event.target.value, page: "1" })}
-              className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
-            >
+            저점 필터
+            <select value={queryLow} onChange={(event) => setQuery({ low: event.target.value, page: "1" })} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
               <option value="none">전체</option>
               <option value="any70">SEO/GEO/CTR 중 70 미만</option>
               <option value="dbs70">DBS 70 미만</option>
@@ -353,31 +321,15 @@ export function BloggerAnalyticsWorkspace({ blogs, channels }: { blogs: Blog[]; 
           </label>
           <label className="text-xs font-semibold text-slate-600">
             상태
-            <input
-              type="text"
-              value={queryStatus}
-              onChange={(event) => setQuery({ status: event.target.value || null, page: "1" })}
-              placeholder="published"
-              className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
-            />
+            <input type="text" value={queryStatus} onChange={(event) => setQuery({ status: event.target.value || null, page: "1" })} placeholder="published" className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm" />
           </label>
           <label className="text-xs font-semibold text-slate-600">
             검색
-            <input
-              type="text"
-              value={queryQ}
-              onChange={(event) => setQuery({ q: event.target.value || null, page: "1" })}
-              placeholder="제목/카테고리/URL"
-              className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
-            />
+            <input type="text" value={queryQ} onChange={(event) => setQuery({ q: event.target.value || null, page: "1" })} placeholder="제목 / 카테고리 / URL" className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm" />
           </label>
           <label className="text-xs font-semibold text-slate-600">
-            정렬
-            <select
-              value={querySort}
-              onChange={(event) => setQuery({ sort: event.target.value, page: "1" })}
-              className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
-            >
+            정렬 기준
+            <select value={querySort} onChange={(event) => setQuery({ sort: event.target.value, page: "1" })} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
               <option value="publishedAt">발행일</option>
               <option value="title">제목</option>
               <option value="status">상태</option>
@@ -388,12 +340,8 @@ export function BloggerAnalyticsWorkspace({ blogs, channels }: { blogs: Blog[]; 
             </select>
           </label>
           <label className="text-xs font-semibold text-slate-600">
-            방향
-            <select
-              value={queryDir}
-              onChange={(event) => setQuery({ dir: event.target.value, page: "1" })}
-              className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
-            >
+            정렬 방향
+            <select value={queryDir} onChange={(event) => setQuery({ dir: event.target.value, page: "1" })} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
               <option value="desc">내림차순</option>
               <option value="asc">오름차순</option>
             </select>
@@ -401,29 +349,20 @@ export function BloggerAnalyticsWorkspace({ blogs, channels }: { blogs: Blog[]; 
         </div>
       </section>
 
-      {error ? (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
-      ) : null}
+      {error ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
 
       {loading ? (
-        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-6 text-sm text-slate-500">분석 데이터를 로딩 중입니다.</div>
+        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-6 text-sm text-slate-500">분석 데이터를 불러오는 중입니다.</div>
       ) : queryView === "calendar" ? (
         <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
           <div className="grid grid-cols-7 gap-2 text-center text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
             {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((weekday) => (
-              <div key={weekday} className="rounded-xl bg-slate-100 px-2 py-2">
-                {weekday}
-              </div>
+              <div key={weekday} className="rounded-xl bg-slate-100 px-2 py-2">{weekday}</div>
             ))}
           </div>
           <div className="mt-3 grid grid-cols-7 gap-2">
             {calendarCells.map((cell, index) => (
-              <div
-                key={`${cell.dateKey ?? "blank"}-${index}`}
-                className={`min-h-[130px] rounded-2xl border p-3 ${
-                  cell.dateKey ? "border-slate-200 bg-slate-50" : "border-transparent bg-transparent"
-                }`}
-              >
+              <div key={`${cell.dateKey ?? "blank"}-${index}`} className={`min-h-[130px] rounded-2xl border p-3 ${cell.dateKey ? "border-slate-200 bg-slate-50" : "border-transparent bg-transparent"}`}>
                 {cell.dateKey ? (
                   <>
                     <p className="text-xs font-semibold text-slate-600">{formatDate(cell.dateKey)}</p>
@@ -442,29 +381,15 @@ export function BloggerAnalyticsWorkspace({ blogs, channels }: { blogs: Blog[]; 
             <table className="w-full min-w-[1420px] border-collapse text-sm">
               <thead>
                 <tr className="bg-slate-100 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-600">
-                  <th className="px-3 py-3">
-                    <button type="button" onClick={() => handleSort("publishedAt")}>발행일</button>
-                  </th>
+                  <th className="px-3 py-3"><button type="button" onClick={() => handleSort("publishedAt")}>발행일</button></th>
                   <th className="px-3 py-3">블로그</th>
-                  <th className="px-3 py-3">
-                    <button type="button" onClick={() => handleSort("title")}>제목</button>
-                  </th>
-                  <th className="px-3 py-3">
-                    <button type="button" onClick={() => handleSort("status")}>상태</button>
-                  </th>
-                  <th className="px-3 py-3">
-                    <button type="button" onClick={() => handleSort("seo")}>SEO</button>
-                  </th>
-                  <th className="px-3 py-3">
-                    <button type="button" onClick={() => handleSort("geo")}>GEO</button>
-                  </th>
-                  <th className="px-3 py-3">
-                    <button type="button" onClick={() => handleSort("ctr")}>CTR</button>
-                  </th>
-                  <th className="px-3 py-3">
-                    <button type="button" onClick={() => handleSort("dbs")}>DBS</button>
-                  </th>
-                  <th className="px-3 py-3">저점수</th>
+                  <th className="px-3 py-3"><button type="button" onClick={() => handleSort("title")}>제목</button></th>
+                  <th className="px-3 py-3"><button type="button" onClick={() => handleSort("status")}>상태</button></th>
+                  <th className="px-3 py-3"><button type="button" onClick={() => handleSort("seo")}>SEO</button></th>
+                  <th className="px-3 py-3"><button type="button" onClick={() => handleSort("geo")}>GEO</button></th>
+                  <th className="px-3 py-3"><button type="button" onClick={() => handleSort("ctr")}>CTR</button></th>
+                  <th className="px-3 py-3"><button type="button" onClick={() => handleSort("dbs")}>DBS</button></th>
+                  <th className="px-3 py-3">품질 상태</th>
                   <th className="px-3 py-3">URL</th>
                 </tr>
               </thead>
@@ -475,33 +400,13 @@ export function BloggerAnalyticsWorkspace({ blogs, channels }: { blogs: Blog[]; 
                     <td className="px-3 py-3 text-xs text-slate-700">{row.blogName}</td>
                     <td className="px-3 py-3 font-medium text-slate-900">{row.title || "(제목 없음)"}</td>
                     <td className="px-3 py-3 text-xs text-slate-600">{row.status ?? "-"}</td>
+                    <td className="px-3 py-3"><span className={`rounded-lg px-2 py-1 text-xs font-semibold ${lowToneClass(scoreOrZero(row.seoScore))}`}>{formatScore(row.seoScore)}</span></td>
+                    <td className="px-3 py-3"><span className={`rounded-lg px-2 py-1 text-xs font-semibold ${lowToneClass(scoreOrZero(row.geoScore))}`}>{formatScore(row.geoScore)}</span></td>
+                    <td className="px-3 py-3"><span className={`rounded-lg px-2 py-1 text-xs font-semibold ${lowToneClass(scoreOrZero(row.ctr))}`}>{formatScore(row.ctr)}</span></td>
+                    <td className="px-3 py-3"><span className={`rounded-lg px-2 py-1 text-xs font-semibold ${lowToneClass(row.dbsScore)}`}>{formatScore(row.dbsScore)}</span></td>
                     <td className="px-3 py-3">
-                      <span className={`rounded-lg px-2 py-1 text-xs font-semibold ${lowToneClass(scoreOrZero(row.seoScore))}`}>
-                        {formatScore(row.seoScore)}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className={`rounded-lg px-2 py-1 text-xs font-semibold ${lowToneClass(scoreOrZero(row.geoScore))}`}>
-                        {formatScore(row.geoScore)}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className={`rounded-lg px-2 py-1 text-xs font-semibold ${lowToneClass(scoreOrZero(row.ctr))}`}>
-                        {formatScore(row.ctr)}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className={`rounded-lg px-2 py-1 text-xs font-semibold ${lowToneClass(row.dbsScore)}`}>
-                        {formatScore(row.dbsScore)}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3">
-                      <span
-                        className={`rounded-lg px-2 py-1 text-xs font-semibold ${
-                          row.lowFlag ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"
-                        }`}
-                      >
-                        {row.lowFlag ? "LOW" : "OK"}
+                      <span className={`rounded-lg px-2 py-1 text-xs font-semibold ${row.lowFlag ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"}`}>
+                        {row.lowFlag ? "주의" : "정상"}
                       </span>
                     </td>
                     <td className="px-3 py-3 text-xs">
@@ -517,9 +422,7 @@ export function BloggerAnalyticsWorkspace({ blogs, channels }: { blogs: Blog[]; 
                 ))}
                 {pagedRows.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="px-4 py-8 text-center text-sm text-slate-500">
-                      조건에 맞는 게시글이 없습니다.
-                    </td>
+                    <td colSpan={10} className="px-4 py-8 text-center text-sm text-slate-500">조건에 맞는 게시글이 없습니다.</td>
                   </tr>
                 ) : null}
               </tbody>
@@ -527,24 +430,12 @@ export function BloggerAnalyticsWorkspace({ blogs, channels }: { blogs: Blog[]; 
           </div>
 
           <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-sm">
-            <p className="text-slate-600">
-              Page {currentPage} / {totalPages}
-            </p>
+            <p className="text-slate-600">페이지 {currentPage} / {totalPages}</p>
             <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={currentPage <= 1}
-                onClick={() => setQuery({ page: String(currentPage - 1) })}
-                className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-40"
-              >
+              <button type="button" disabled={currentPage <= 1} onClick={() => setQuery({ page: String(currentPage - 1) })} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-40">
                 이전
               </button>
-              <button
-                type="button"
-                disabled={currentPage >= totalPages}
-                onClick={() => setQuery({ page: String(currentPage + 1) })}
-                className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-40"
-              >
+              <button type="button" disabled={currentPage >= totalPages} onClick={() => setQuery({ page: String(currentPage + 1) })} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-40">
                 다음
               </button>
             </div>

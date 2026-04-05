@@ -10,10 +10,9 @@ from app.api.router import api_router
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.services.blog_service import (
-    disable_legacy_demo_blogs_for_live,
     enforce_free_tier_model_policy,
     ensure_all_blog_workflows,
-    ensure_default_blogs,
+    purge_legacy_demo_blogs,
 )
 from app.services.settings_service import ensure_default_settings, get_settings_map
 from app.services.storage_service import ensure_storage_dirs
@@ -66,11 +65,8 @@ def on_startup() -> None:
     db = SessionLocal()
     try:
         ensure_default_settings(db)
-        settings_map = get_settings_map(db)
-        enable_demo = settings_map.get("provider_mode", settings.provider_mode).lower() != "live"
-        ensure_default_blogs(db, enable_demo=enable_demo)
-        if not enable_demo:
-            disable_legacy_demo_blogs_for_live(db)
+        get_settings_map(db)
+        purge_legacy_demo_blogs(db)
         ensure_all_blog_workflows(db)
         enforce_free_tier_model_policy(db)
         backfill_missing_topic_memories(db)

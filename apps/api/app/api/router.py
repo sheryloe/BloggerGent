@@ -14,6 +14,7 @@ from app.api.routes import (
     jobs,
     planner,
     prompts,
+    seo,
     settings,
     telegram,
     topics,
@@ -35,6 +36,7 @@ api_router.include_router(planner.router)
 api_router.include_router(analytics.router)
 api_router.include_router(cloudflare.router, prefix="/cloudflare", tags=["cloudflare"])
 api_router.include_router(google.router, prefix="/google", tags=["google"])
+api_router.include_router(seo.router)
 api_router.include_router(prompts.router, prefix="/prompts", tags=["prompts"])
 api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
 api_router.include_router(settings.blogger_router, prefix="/blogger", tags=["blogger"])

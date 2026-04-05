@@ -803,6 +803,20 @@ def list_active_blogs(db: Session, *, provider_mode: str | None = None) -> list[
     return db.execute(query).scalars().unique().all()
 
 
+def list_connected_blogs(db: Session, *, provider_mode: str | None = None) -> list[Blog]:
+    resolved_provider_mode = _resolve_provider_mode(db, provider_mode)
+    query = (
+        select(Blog)
+        .where(Blog.is_active.is_(True))
+        .where(Blog.blogger_blog_id.is_not(None))
+        .where(Blog.blogger_blog_id != "")
+        .options(selectinload(Blog.agent_configs))
+        .order_by(Blog.created_at.asc(), Blog.id.asc())
+    )
+    query = _apply_visible_blog_filter(query, provider_mode=resolved_provider_mode)
+    return db.execute(query).scalars().unique().all()
+
+
 def list_visible_blog_ids(db: Session, *, provider_mode: str | None = None) -> list[int]:
     resolved_provider_mode = _resolve_provider_mode(db, provider_mode)
     query = select(Blog.id).order_by(Blog.created_at.asc(), Blog.id.asc())
@@ -1143,6 +1157,14 @@ def disable_legacy_demo_blogs_for_live(db: Session) -> None:
         blog.is_active = False
         db.add(blog)
     db.commit()
+
+
+def purge_legacy_demo_blogs(db: Session, *, provider_mode: str | None = None) -> None:
+    resolved_provider_mode = _resolve_provider_mode(db, provider_mode)
+    if resolved_provider_mode == "demo":
+        ensure_default_blogs(db, enable_demo=True)
+        return
+    disable_legacy_demo_blogs_for_live(db)
 
 
 def get_blog_summary_map(db: Session, blog_ids: list[int]) -> dict[int, BlogSummaryMetrics]:

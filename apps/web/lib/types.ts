@@ -1,4 +1,4 @@
-﻿export type JobStatus =
+export type JobStatus =
   | "PENDING"
   | "DISCOVERING_TOPICS"
   | "GENERATING_ARTICLE"
@@ -1097,6 +1097,7 @@ export interface ManagedChannelRead {
   provider: string;
   channelId: string;
   name: string;
+  isEnabled: boolean;
   status: string;
   baseUrl: string | null;
   primaryCategory: string | null;
@@ -1249,6 +1250,51 @@ export interface WorkspaceIntegrationOverviewRead {
   channels: ManagedChannelRead[];
   integrations: PlatformIntegrationRead[];
   credentials: PlatformCredentialRead[];
+}
+
+export interface WorkspaceRuntimeUsageBucketRead {
+  providerKey: string;
+  label: string;
+  requestCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+  errorCount: number;
+  lastEventAt: string | null;
+  models: string[];
+}
+
+export interface WorkspaceRuntimeUsageTotalsRead {
+  requestCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+  errorCount: number;
+  lastEventAt: string | null;
+  models: string[];
+}
+
+export interface WorkspaceRuntimeUsageRead {
+  generatedAt: string;
+  days: number;
+  providers: WorkspaceRuntimeUsageBucketRead[];
+  totals: WorkspaceRuntimeUsageTotalsRead;
+}
+
+export interface SeoTargetRead {
+  targetId: string;
+  provider: string;
+  channelId: string | null;
+  blogId: number | null;
+  label: string;
+  baseUrl: string | null;
+  linkedBlogId: number | null;
+  searchConsoleSiteUrl: string | null;
+  ga4PropertyId: string | null;
+  oauthState: string;
+  isConnected: boolean;
 }
 
 export interface AgentRuntimeHealthRead {

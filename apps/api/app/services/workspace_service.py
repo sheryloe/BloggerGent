@@ -7,7 +7,7 @@ from threading import Lock
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.entities import AgentRun, AgentWorker, ContentItem, PlatformCredential, PublicationRecord
+from app.models.entities import AIUsageEvent, AgentRun, AgentWorker, ContentItem, PlatformCredential, PublicationRecord
 from app.services.metric_ingestion_service import run_workspace_metric_sync_schedule, sync_channel_metrics
 from app.services.platform_oauth_service import build_platform_authorization_url, refresh_platform_access_token
 from app.services.platform_publish_service import (
@@ -43,6 +43,8 @@ RUNTIME_LABELS: dict[str, str] = {
     "claude_cli": "Claude CLI",
     "codex_cli": "Codex CLI",
     "gemini_cli": "Gemini CLI",
+    "openai": "OpenAI",
+    "other": "기타",
 }
 
 _MISSION_CONTROL_CACHE_TTL_SECONDS = 5
@@ -70,12 +72,119 @@ def _write_mission_control_cache(payload: dict, now: datetime) -> None:
         _MISSION_CONTROL_CACHE_EXPIRES_AT = now + timedelta(seconds=_MISSION_CONTROL_CACHE_TTL_SECONDS)
 
 
-def list_managed_channels(db: Session):
-    return list_platform_channels(db)
+def list_managed_channels(db: Session, *, include_disconnected: bool = False):
+    return list_platform_channels(db, include_disconnected=include_disconnected)
 
 
 def ensure_workspace_foundation(db: Session):
     return list_platform_channels(db)
+
+
+def _runtime_usage_bucket(event: AIUsageEvent) -> str:
+    combined = " ".join(
+        [
+            str(event.provider_mode or ""),
+            str(event.provider_name or ""),
+            str(event.provider_model or ""),
+            str(event.endpoint or ""),
+        ]
+    ).lower()
+    if "codex" in combined:
+        return "codex_cli"
+    if "gemini" in combined:
+        return "gemini_cli"
+    if "claude" in combined:
+        return "claude_cli"
+    if "openai" in combined or "gpt-" in combined:
+        return "openai"
+    return str(event.provider_name or event.provider_mode or "unknown").strip().lower() or "unknown"
+
+
+def workspace_runtime_usage(db: Session, *, days: int = 7) -> dict:
+    normalized_days = max(1, min(int(days or 7), 90))
+    now = datetime.now(UTC)
+    since = now - timedelta(days=normalized_days)
+    events = db.execute(select(AIUsageEvent).where(AIUsageEvent.created_at >= since).order_by(AIUsageEvent.created_at.desc())).scalars().all()
+
+    grouped: dict[str, dict] = {}
+    total_models: set[str] = set()
+    total_request_count = 0
+    total_input_tokens = 0
+    total_output_tokens = 0
+    total_tokens = 0
+    total_estimated_cost_usd = 0.0
+    total_error_count = 0
+    last_event_at: datetime | None = None
+
+    for event in events:
+        bucket = _runtime_usage_bucket(event)
+        payload = grouped.setdefault(
+            bucket,
+            {
+                "provider_key": bucket,
+                "label": RUNTIME_LABELS.get(bucket, bucket.replace("_", " ").title()),
+                "request_count": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+                "estimated_cost_usd": 0.0,
+                "error_count": 0,
+                "last_event_at": None,
+                "models": set(),
+            },
+        )
+        request_count = int(event.request_count or 0)
+        input_tokens = int(event.input_tokens or 0)
+        output_tokens = int(event.output_tokens or 0)
+        total_token_count = int(event.total_tokens or 0)
+        estimated_cost = float(event.estimated_cost_usd or 0.0)
+        error_count = 0 if event.success else max(1, request_count or 1)
+
+        payload["request_count"] += request_count
+        payload["input_tokens"] += input_tokens
+        payload["output_tokens"] += output_tokens
+        payload["total_tokens"] += total_token_count
+        payload["estimated_cost_usd"] += estimated_cost
+        payload["error_count"] += error_count
+        payload["last_event_at"] = max(filter(None, [payload["last_event_at"], event.created_at]), default=event.created_at)
+        if event.provider_model:
+            payload["models"].add(str(event.provider_model))
+
+        total_request_count += request_count
+        total_input_tokens += input_tokens
+        total_output_tokens += output_tokens
+        total_tokens += total_token_count
+        total_estimated_cost_usd += estimated_cost
+        total_error_count += error_count
+        if event.provider_model:
+            total_models.add(str(event.provider_model))
+        last_event_at = max(filter(None, [last_event_at, event.created_at]), default=event.created_at)
+
+    providers = [
+        {
+            **payload,
+            "estimated_cost_usd": round(float(payload["estimated_cost_usd"]), 6),
+            "models": sorted(payload["models"]),
+        }
+        for payload in grouped.values()
+    ]
+    providers.sort(key=lambda item: (-int(item["request_count"]), str(item["provider_key"])))
+
+    return {
+        "generated_at": now,
+        "days": normalized_days,
+        "providers": providers,
+        "totals": {
+            "request_count": total_request_count,
+            "input_tokens": total_input_tokens,
+            "output_tokens": total_output_tokens,
+            "total_tokens": total_tokens,
+            "estimated_cost_usd": round(total_estimated_cost_usd, 6),
+            "error_count": total_error_count,
+            "last_event_at": last_event_at,
+            "models": sorted(total_models),
+        },
+    }
 
 
 def get_managed_channel(db: Session, channel_id: str):
@@ -213,6 +322,32 @@ def _runtime_health_from_serialized(workers: list[dict], runs: list[dict]) -> di
         "healthy": failed_runs == 0 and worker_errors == 0,
         "generated_at": datetime.now(UTC),
     }
+
+
+def _to_int(value: object, default: int = 0) -> int:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
+def _channel_has_activity(channel: dict) -> bool:
+    return any(
+        _to_int(channel.get(key), 0) > 0
+        for key in ("posts_count", "pending_items", "failed_items", "live_worker_count")
+    )
+
+
+def _should_include_mission_channel(channel: dict) -> bool:
+    provider = str(channel.get("provider") or "").strip().lower()
+    oauth_state = str(channel.get("oauth_state") or "").strip().lower()
+    is_enabled = bool(channel.get("is_enabled", True))
+
+    if not is_enabled:
+        return False
+    if provider in {"youtube", "instagram"}:
+        return oauth_state == "connected" or _channel_has_activity(channel)
+    return True
 
 
 def list_platform_credentials(db: Session, *, channel_id: str | None = None) -> list[dict]:
@@ -727,10 +862,25 @@ def build_mission_control_payload(db: Session, *, use_cache: bool = True) -> dic
             return cached_payload
 
     channels = [serialize_channel(item) for item in list_platform_channels(db)]
-    workers = list_agent_workers(db, ensure_channels=False)
-    runs_for_health = list_agent_runs(db, limit=200, ensure_channels=False)
+    channels = [item for item in channels if _should_include_mission_channel(item)]
+    visible_channel_ids = {str(item.get("channel_id")) for item in channels if item.get("channel_id")}
+
+    workers = [
+        item
+        for item in list_agent_workers(db, ensure_channels=False)
+        if not item.get("channel_id") or item.get("channel_id") in visible_channel_ids
+    ]
+    runs_for_health = [
+        item
+        for item in list_agent_runs(db, limit=200, ensure_channels=False)
+        if not item.get("channel_id") or item.get("channel_id") in visible_channel_ids
+    ]
     runs = runs_for_health[:30]
-    recent_content = list_content_items(db, limit=12, ensure_channels=False)
+    recent_content = [
+        item
+        for item in list_content_items(db, limit=12, ensure_channels=False)
+        if item.get("channel_id") in visible_channel_ids
+    ]
     runtime_health = _runtime_health_from_serialized(workers, runs_for_health)
 
     alerts: list[dict[str, str]] = []
@@ -743,8 +893,8 @@ def build_mission_control_payload(db: Session, *, use_cache: bool = True) -> dic
             {
                 "key": "oauth-state",
                 "level": "info",
-                "title": "OAuth 연결 점검 필요",
-                "message": f"{len(disconnected)}개 채널이 인증 또는 권한 확인이 필요합니다.",
+                "title": "연동 점검 필요",
+                "message": f"{len(disconnected)}개 채널에서 인증 또는 권한 확인이 필요합니다.",
             }
         )
     if failed_channels:
@@ -752,8 +902,8 @@ def build_mission_control_payload(db: Session, *, use_cache: bool = True) -> dic
             {
                 "key": "failed-content",
                 "level": "warning",
-                "title": "실패한 콘텐츠 항목 존재",
-                "message": f"{len(failed_channels)}개 채널에 실패 상태 콘텐츠가 남아 있습니다.",
+                "title": "실패 콘텐츠 존재",
+                "message": f"{len(failed_channels)}개 채널에 실패 상태의 콘텐츠가 남아 있습니다.",
             }
         )
     if failed_runs:
@@ -761,13 +911,13 @@ def build_mission_control_payload(db: Session, *, use_cache: bool = True) -> dic
             {
                 "key": "failed-runs",
                 "level": "warning",
-                "title": "실패한 에이전트 런 존재",
-                "message": f"최근 실행에서 {len(failed_runs)}건의 실패 런이 감지되었습니다.",
+                "title": "실패 실행 감지",
+                "message": f"최근 실행에서 {len(failed_runs)}건의 실패가 감지되었습니다.",
             }
         )
 
     payload = {
-        "workspace_label": "Donggr AutoBloggent",
+        "workspace_label": "동그리 자동 블로그전트",
         "channels": channels,
         "workers": workers,
         "runs": runs,

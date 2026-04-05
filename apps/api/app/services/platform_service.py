@@ -20,6 +20,7 @@ from app.models.entities import (
     PublicationRecord,
 )
 from app.services.secret_service import decrypt_secret_value, encrypt_secret_value
+from app.services.settings_service import get_settings_map
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,6 +214,30 @@ def _ensure_default_agent_pack(db: Session, channel: ManagedChannel) -> None:
         db.flush()
 
 
+def _blog_channel_should_exist(blog: Blog | None) -> bool:
+    if blog is None:
+        return False
+    return bool(blog.is_active) and bool((blog.blogger_blog_id or "").strip())
+
+
+def _channel_has_runtime_activity(channel: ManagedChannel) -> bool:
+    return bool(channel.publication_records or channel.content_items or channel.agent_runs)
+
+
+def _channel_is_operational(channel: ManagedChannel) -> bool:
+    if not channel.is_enabled:
+        return False
+
+    provider = str(channel.provider or "").strip().lower()
+    if provider == "blogger":
+        return _blog_channel_should_exist(channel.linked_blog)
+    if provider == "cloudflare":
+        return bool((channel.base_url or "").strip())
+    if provider in {"youtube", "instagram"}:
+        return channel.oauth_state == "connected" or _channel_has_runtime_activity(channel)
+    return True
+
+
 def ensure_managed_channels(db: Session) -> list[ManagedChannel]:
     existing = {
         channel.channel_id: channel
@@ -222,11 +247,13 @@ def ensure_managed_channels(db: Session) -> list[ManagedChannel]:
 
     blogs = db.execute(select(Blog).order_by(Blog.created_at.asc(), Blog.id.asc())).scalars().all()
     for blog in blogs:
+        if not _blog_channel_should_exist(blog):
+            continue
         channel_id = f"blogger:{blog.id}"
         channel = existing.get(channel_id)
         has_valid_credential = bool(channel and has_valid_channel_credential(channel, "blogger"))
         oauth_state = "connected" if has_valid_credential else "not_configured"
-        status = "connected" if has_valid_credential and (blog.blogger_blog_id or "").strip() else "attention"
+        status = "connected" if has_valid_credential else "attention"
         payload = {
             "provider": "blogger",
             "channel_id": channel_id,
@@ -253,6 +280,64 @@ def ensure_managed_channels(db: Session) -> list[ManagedChannel]:
             for key, value in payload.items():
                 if getattr(channel, key) != value:
                     setattr(channel, key, value)
+                    changed = True
+
+    stale_blogger_channels = [
+        channel
+        for channel in list(existing.values())
+        if channel.provider == "blogger" and not _blog_channel_should_exist(channel.linked_blog)
+    ]
+    for channel in stale_blogger_channels:
+        db.delete(channel)
+        existing.pop(channel.channel_id, None)
+        changed = True
+
+    settings_values = get_settings_map(db)
+    cloudflare_enabled = str(settings_values.get("cloudflare_channel_enabled") or "false").strip().lower() not in {
+        "0",
+        "false",
+        "off",
+        "no",
+    }
+    cloudflare_api_base_url = str(settings_values.get("cloudflare_blog_api_base_url") or "").strip().rstrip("/")
+    cloudflare_public_base_url = str(settings_values.get("cloudflare_r2_public_base_url") or "").strip().rstrip("/")
+    cloudflare_token_configured = bool(str(settings_values.get("cloudflare_blog_m2m_token") or "").strip())
+    cloudflare_channel_id = "cloudflare:dongriarchive"
+    cloudflare_channel = existing.get(cloudflare_channel_id)
+
+    if cloudflare_enabled or cloudflare_channel is not None or cloudflare_api_base_url:
+        cloudflare_is_connected = cloudflare_enabled and bool(cloudflare_api_base_url) and cloudflare_token_configured
+        cloudflare_is_enabled = cloudflare_enabled and bool(cloudflare_api_base_url)
+        cloudflare_base_url = cloudflare_public_base_url or (f"{cloudflare_api_base_url}/assets" if cloudflare_api_base_url else None)
+        cloudflare_payload = {
+            "provider": "cloudflare",
+            "channel_id": cloudflare_channel_id,
+            "display_name": "Dongri Archive",
+            "remote_resource_id": "dongriarchive",
+            "linked_blog_id": None,
+            "status": "connected" if cloudflare_is_connected else "attention",
+            "base_url": cloudflare_base_url,
+            "primary_category": "archive",
+            "purpose": "Cloudflare blog publish and archive operations",
+            "capabilities": ["archive_publish", "analytics", "seo_feedback", "indexing"],
+            "oauth_state": "connected" if cloudflare_is_connected else "not_configured",
+            "quota_state": {},
+            "channel_metadata": {
+                "api_base_url": cloudflare_api_base_url or None,
+                "token_configured": cloudflare_token_configured,
+            },
+            "is_enabled": cloudflare_is_enabled,
+        }
+        if cloudflare_channel is None:
+            cloudflare_channel = ManagedChannel(**cloudflare_payload)
+            db.add(cloudflare_channel)
+            db.flush()
+            existing[cloudflare_channel_id] = cloudflare_channel
+            changed = True
+        else:
+            for key, value in cloudflare_payload.items():
+                if getattr(cloudflare_channel, key) != value:
+                    setattr(cloudflare_channel, key, value)
                     changed = True
 
     for defaults in DEFAULT_CHANNELS:
@@ -317,8 +402,11 @@ def ensure_managed_channels(db: Session) -> list[ManagedChannel]:
     return channels
 
 
-def list_managed_channels(db: Session) -> list[ManagedChannel]:
-    return ensure_managed_channels(db)
+def list_managed_channels(db: Session, *, include_disconnected: bool = False) -> list[ManagedChannel]:
+    channels = ensure_managed_channels(db)
+    if include_disconnected:
+        return channels
+    return [channel for channel in channels if _channel_is_operational(channel)]
 
 
 def get_managed_channel_by_channel_id(db: Session, channel_id: str) -> ManagedChannel | None:
@@ -825,6 +913,7 @@ def serialize_channel(channel: ManagedChannel) -> dict:
         "provider": channel.provider,
         "channel_id": channel.channel_id,
         "name": channel.display_name,
+        "is_enabled": bool(channel.is_enabled),
         "status": channel.status,
         "base_url": channel.base_url,
         "primary_category": channel.primary_category,

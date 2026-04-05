@@ -48,6 +48,7 @@ import {
   PlannerSlotCreateRequest,
   PlannerSlotRead,
   PlannerSlotUpdateRequest,
+  SeoTargetRead,
   AnalyticsArticleFactListResponse,
   AnalyticsBlogMonthlyListResponse,
   AnalyticsBlogMonthlyReportRead,
@@ -59,6 +60,7 @@ import {
   TelegramTestResult,
   Topic,
   WorkspaceIntegrationOverviewRead,
+  WorkspaceRuntimeUsageRead,
 } from "@/lib/types";
 
 function resolveBaseUrl() {
@@ -169,8 +171,9 @@ export async function recalculateContentOverview(payload: ContentOverviewSyncPay
   });
 }
 
-export async function getBlogs() {
-  return apiFetch<Blog[]>("/blogs");
+export async function getBlogs(connectedOnly = false) {
+  const query = connectedOnly ? "?connected_only=true" : "";
+  return apiFetch<Blog[]>(`/blogs${query}`);
 }
 
 export async function updateBlog(
@@ -431,6 +434,7 @@ function mapManagedChannel(item: any): ManagedChannelRead {
     provider: item.provider,
     channelId: item.channel_id,
     name: item.name,
+    isEnabled: item.is_enabled ?? true,
     status: item.status,
     baseUrl: item.base_url ?? null,
     primaryCategory: item.primary_category ?? null,
@@ -449,6 +453,55 @@ function mapManagedChannel(item: any): ManagedChannelRead {
     pendingItems: item.pending_items ?? 0,
     failedItems: item.failed_items ?? 0,
     linkedBlogId: item.linked_blog_id ?? null,
+  };
+}
+
+function mapSeoTarget(item: any): SeoTargetRead {
+  return {
+    targetId: item.target_id,
+    provider: item.provider,
+    channelId: item.channel_id ?? null,
+    blogId: item.blog_id ?? null,
+    label: item.label,
+    baseUrl: item.base_url ?? null,
+    linkedBlogId: item.linked_blog_id ?? null,
+    searchConsoleSiteUrl: item.search_console_site_url ?? null,
+    ga4PropertyId: item.ga4_property_id ?? null,
+    oauthState: item.oauth_state ?? "disconnected",
+    isConnected: item.is_connected ?? false,
+  };
+}
+
+function mapWorkspaceRuntimeUsageBucket(item: any) {
+  return {
+    providerKey: item.provider_key ?? item.key ?? "unknown",
+    label: item.label,
+    requestCount: item.request_count ?? 0,
+    inputTokens: item.input_tokens ?? 0,
+    outputTokens: item.output_tokens ?? 0,
+    totalTokens: item.total_tokens ?? 0,
+    estimatedCostUsd: item.estimated_cost_usd ?? 0,
+    errorCount: item.error_count ?? 0,
+    lastEventAt: item.last_event_at ?? item.latest_event_at ?? null,
+    models: item.models ?? [],
+  };
+}
+
+function mapWorkspaceRuntimeUsage(payload: any): WorkspaceRuntimeUsageRead {
+  return {
+    generatedAt: payload.generated_at,
+    days: payload.days ?? 7,
+    providers: (payload.providers ?? []).map(mapWorkspaceRuntimeUsageBucket),
+    totals: {
+      requestCount: payload.totals?.request_count ?? 0,
+      inputTokens: payload.totals?.input_tokens ?? 0,
+      outputTokens: payload.totals?.output_tokens ?? 0,
+      totalTokens: payload.totals?.total_tokens ?? 0,
+      estimatedCostUsd: payload.totals?.estimated_cost_usd ?? 0,
+      errorCount: payload.totals?.error_count ?? 0,
+      lastEventAt: payload.totals?.last_event_at ?? null,
+      models: payload.totals?.models ?? [],
+    },
   };
 }
 
@@ -621,7 +674,7 @@ function mapAgentRuntimeHealth(item: any): AgentRuntimeHealthRead {
 
 function mapMissionControl(payload: any): MissionControlRead {
   return {
-    workspaceLabel: payload.workspace_label ?? "Donggr AutoBloggent",
+    workspaceLabel: payload.workspace_label ?? "동그리 자동 블로그전트",
     channels: (payload.channels ?? []).map(mapManagedChannel),
     workers: (payload.workers ?? []).map(mapAgentWorker),
     runs: (payload.runs ?? []).map(mapAgentRun),
@@ -857,9 +910,20 @@ export async function getModelPolicy() {
   return apiFetch<ModelPolicyRead>("/settings/model-policy");
 }
 
-export async function getChannels() {
-  const payload = await apiFetch<any[]>("/channels", { revalidate: 15, timeoutMs: 5000 });
+export async function getChannels(includeDisconnected = false) {
+  const query = includeDisconnected ? "?include_disconnected=true" : "";
+  const payload = await apiFetch<any[]>(`/channels${query}`, { revalidate: 15, timeoutMs: 5000 });
   return (payload ?? []).map(mapManagedChannel);
+}
+
+export async function getSeoTargets() {
+  const payload = await apiFetch<any[]>("/seo/targets", { revalidate: 15, timeoutMs: 5000 });
+  return (payload ?? []).map(mapSeoTarget);
+}
+
+export async function getWorkspaceRuntimeUsage(days = 7) {
+  const payload = await apiFetch<any>(`/workspace/runtime/usage?days=${days}`, { revalidate: false, timeoutMs: 5000 });
+  return mapWorkspaceRuntimeUsage(payload);
 }
 
 export async function getChannelPromptFlow(channelId: string, signal?: AbortSignal) {
@@ -1188,3 +1252,4 @@ export const fetchBlogs = getBlogs;
 export const fetchChannels = getChannels;
 export const fetchSettings = getSettings;
 export const fetchBloggerConfig = getBloggerConfig;
+

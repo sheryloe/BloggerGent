@@ -460,6 +460,50 @@ class SyncedBloggerPost(TimestampMixin, Base):
     blog: Mapped[Blog] = relationship(back_populates="synced_blogger_posts")
 
 
+class SyncedCloudflarePost(TimestampMixin, Base):
+    __tablename__ = "synced_cloudflare_posts"
+    __table_args__ = (
+        sa.UniqueConstraint(
+            "managed_channel_id",
+            "remote_post_id",
+            name="uq_synced_cloudflare_posts_channel_remote_post",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    managed_channel_id: Mapped[int] = mapped_column(
+        sa.ForeignKey("managed_channels.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    remote_post_id: Mapped[str] = mapped_column(sa.String(255), nullable=False, index=True)
+    slug: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    title: Mapped[str] = mapped_column(sa.String(500), nullable=False)
+    url: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    status: Mapped[str] = mapped_column(sa.String(50), nullable=False, default="published")
+    published_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
+    created_at_remote: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
+    updated_at_remote: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
+    labels: Mapped[list] = mapped_column(sa.JSON, default=list, nullable=False)
+    category_name: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    category_slug: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    excerpt_text: Mapped[str] = mapped_column(sa.Text, nullable=False, default="")
+    thumbnail_url: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    seo_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    geo_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    ctr: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    index_status: Mapped[str | None] = mapped_column(sa.String(50), nullable=True)
+    quality_status: Mapped[str | None] = mapped_column(sa.String(50), nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=False,
+        server_default=sa.func.now(),
+        index=True,
+    )
+
+    managed_channel: Mapped["ManagedChannel"] = relationship(back_populates="synced_cloudflare_posts")
+
+
 class GoogleIndexUrlState(TimestampMixin, Base):
     __tablename__ = "google_index_url_states"
     __table_args__ = (sa.UniqueConstraint("blog_id", "url", name="uq_google_index_url_states_blog_url"),)
@@ -825,6 +869,11 @@ class ManagedChannel(TimestampMixin, Base):
         back_populates="managed_channel",
         cascade="all, delete-orphan",
         order_by="ContentItem.created_at.desc()",
+    )
+    synced_cloudflare_posts: Mapped[list["SyncedCloudflarePost"]] = relationship(
+        back_populates="managed_channel",
+        cascade="all, delete-orphan",
+        order_by="SyncedCloudflarePost.id.desc()",
     )
     publication_records: Mapped[list["PublicationRecord"]] = relationship(
         back_populates="managed_channel",

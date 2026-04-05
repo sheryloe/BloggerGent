@@ -1,4 +1,4 @@
-import nextDynamic from "next/dynamic";
+﻿import nextDynamic from "next/dynamic";
 
 import { DashboardShell } from "@/components/dashboard/dashboard-shell";
 
@@ -10,13 +10,14 @@ const OpenAIFreeUsageWidget = nextDynamic(
 );
 
 const nav = [
-  { href: "/dashboard", label: "Mission Control" },
-  { href: "/planner", label: "Publishing" },
-  { href: "/content-ops", label: "Content Lab" },
-  { href: "/analytics", label: "Analytics" },
-  { href: "/google", label: "SEO / Indexing" },
-  { href: "/settings", label: "Integrations" },
-  { href: "/ops-health", label: "Admin" },
+  { href: "/dashboard", label: "미션 컨트롤" },
+  { href: "/planner", label: "게시 플래너 운영" },
+  { href: "/content-ops", label: "콘텐츠 운영" },
+  { href: "/analytics", label: "분석" },
+  { href: "/google", label: "SEO / 색인" },
+  { href: "/settings", label: "연동 설정" },
+  { href: "/admin", label: "관리자 설정" },
+  { href: "/ops-health", label: "Ops Monitor" },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {

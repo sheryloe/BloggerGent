@@ -1,4 +1,4 @@
-import { MissionControl } from "@/components/dashboard/mission-control";
+﻿import { MissionControl } from "@/components/dashboard/mission-control";
 import { fetchChannels, getMissionControl } from "@/lib/api";
 import type { MissionControlRead } from "@/lib/types";
 
@@ -12,7 +12,7 @@ export default async function DashboardHomePage() {
     missionValue
       ? missionValue
       : {
-          workspaceLabel: "Donggr AutoBloggent",
+          workspaceLabel: "동그리 자동 블로그전트",
           channels,
           workers: [],
           runs: [],
@@ -30,3 +30,4 @@ export default async function DashboardHomePage() {
 
   return <MissionControl mission={mission} />;
 }
+

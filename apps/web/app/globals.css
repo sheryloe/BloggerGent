@@ -5,7 +5,7 @@
 :root {
   color-scheme: light;
   --background: #f4efe5;
-  --background-elevated: rgba(255, 252, 247, 0.9);
+  --background-elevated: rgba(255, 252, 247, 0.96);
   --foreground: #0f172a;
   --foreground-muted: #475569;
   --border: rgba(148, 163, 184, 0.22);
@@ -41,16 +41,18 @@ body {
     linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent 40%),
     var(--background);
   color: var(--foreground);
-  font-family: var(--font-body), sans-serif;
+  font-family: "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif;
+  text-rendering: optimizeLegibility;
 }
 
 .font-display {
-  font-family: var(--font-display), sans-serif;
+  font-family: "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif;
+  font-weight: 700;
 }
 
 .panel-surface {
   background: var(--background-elevated);
-  backdrop-filter: blur(20px);
+  backdrop-filter: blur(12px);
 }
 
 .grid-bg {
@@ -84,19 +86,19 @@ body {
 }
 
 .office-panel {
-  border: 1px solid rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(203, 213, 225, 0.72);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 252, 0.88)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(248, 250, 252, 0.97)),
     var(--background-elevated);
   box-shadow:
-    0 28px 70px rgba(15, 23, 42, 0.08),
+    0 24px 56px rgba(15, 23, 42, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.72);
-  backdrop-filter: blur(20px);
+  backdrop-filter: blur(10px);
 }
 
 .office-panel-strong {
   background:
-    linear-gradient(180deg, rgba(255, 251, 245, 0.98), rgba(248, 250, 252, 0.94)),
+    linear-gradient(180deg, rgba(255, 251, 245, 0.995), rgba(248, 250, 252, 0.98)),
     var(--background-elevated);
 }
 
@@ -118,8 +120,8 @@ body {
 }
 
 .office-nav-card {
-  border: 1px solid transparent;
-  background: rgba(255, 255, 255, 0.38);
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  background: rgba(248, 250, 252, 0.94);
   transition:
     transform 180ms ease,
     border-color 180ms ease,
@@ -129,15 +131,15 @@ body {
 
 .office-nav-card:hover {
   transform: translateY(-1px);
-  border-color: rgba(148, 163, 184, 0.22);
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.08);
+  border-color: rgba(100, 116, 139, 0.38);
+  background: rgba(255, 255, 255, 1);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.1);
 }
 
 .office-nav-card-active {
-  border-color: rgba(251, 146, 60, 0.28);
-  background: linear-gradient(180deg, rgba(255, 247, 237, 0.98), rgba(255, 255, 255, 0.82));
-  box-shadow: 0 20px 48px rgba(249, 115, 22, 0.12);
+  border-color: rgba(249, 115, 22, 0.44);
+  background: linear-gradient(180deg, rgba(255, 247, 237, 1), rgba(255, 255, 255, 0.95));
+  box-shadow: 0 14px 30px rgba(249, 115, 22, 0.16);
 }
 
 .mission-hero {

@@ -39,6 +39,7 @@ from app.services.blog_service import (
     import_blog_from_remote,
     list_blog_profiles,
     list_blogs,
+    list_connected_blogs,
     list_system_steps,
     list_user_visible_steps,
     list_workflow_steps,
@@ -222,8 +223,11 @@ def _validate_connection_value(items: list[dict], key: str, value: str | None, l
 
 
 @router.get("", response_model=list[BlogRead])
-def get_blogs(db: Session = Depends(get_db)) -> list[dict]:
-    blogs = list_blogs(db)
+def get_blogs(
+    connected_only: bool = Query(default=False),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    blogs = list_connected_blogs(db) if connected_only else list_blogs(db)
     summary_map = get_blog_summary_map(db, [blog.id for blog in blogs])
     return [
         _serialize_blog(

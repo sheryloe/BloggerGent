@@ -29,6 +29,7 @@ from app.schemas.api import (
     WorkspaceIntegrationOverviewRead,
     WorkspaceOverviewRead,
     WorkspaceRuntimeOverviewRead,
+    WorkspaceRuntimeUsageRead,
 )
 from app.services.blogger_sync_service import sync_connected_blogger_posts
 from app.services.platform_oauth_service import (
@@ -68,6 +69,7 @@ from app.services.workspace_service import (
     update_content_item,
     upsert_platform_credential,
     workspace_runtime_overview,
+    workspace_runtime_usage,
 )
 
 router = APIRouter(prefix="/workspace", tags=["workspace"])
@@ -240,7 +242,7 @@ def read_workspace_integrations(
     return WorkspaceIntegrationOverviewRead(
         channels=[
             item
-            for item in [serialize_managed_channel(channel) for channel in list_managed_channels(db)]
+            for item in [serialize_managed_channel(channel) for channel in list_managed_channels(db, include_disconnected=True)]
             if channel_id is None or item["channel_id"] == channel_id
         ],
         integrations=[
@@ -351,6 +353,14 @@ def read_workspace_runtime(
     db: Session = Depends(get_db),
 ) -> WorkspaceRuntimeOverviewRead:
     return WorkspaceRuntimeOverviewRead(**workspace_runtime_overview(db, channel_id=channel_id, limit=limit))
+
+
+@router.get("/runtime/usage", response_model=WorkspaceRuntimeUsageRead)
+def read_workspace_runtime_usage(
+    days: int = Query(default=7, ge=1, le=365),
+    db: Session = Depends(get_db),
+) -> WorkspaceRuntimeUsageRead:
+    return WorkspaceRuntimeUsageRead(**workspace_runtime_usage(db, days=days))
 
 
 @router.post("/metrics/sync")

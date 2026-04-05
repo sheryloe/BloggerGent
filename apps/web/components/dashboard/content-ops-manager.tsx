@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 
+import { getWorkspaceContentItems, processWorkspacePublishQueue, queueWorkspaceContentItemPublish } from "@/lib/api";
+import type { ContentItemRead, ContentOpsStatus, ContentReviewItem } from "@/lib/types";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { getWorkspaceContentItems, processWorkspacePublishQueue, queueWorkspaceContentItemPublish } from "@/lib/api";
-import type { ContentItemRead, ContentOpsStatus, ContentReviewItem } from "@/lib/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
 
@@ -28,26 +29,16 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 function riskTone(level: string) {
-  if (level === "high") {
-    return "border-rose-200 bg-rose-500/10 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/15 dark:text-rose-200";
-  }
-  if (level === "medium") {
-    return "border-amber-200 bg-amber-500/10 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200";
-  }
-  return "border-emerald-200 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200";
+  if (level === "high") return "border-rose-200 bg-rose-500/10 text-rose-700";
+  if (level === "medium") return "border-amber-200 bg-amber-500/10 text-amber-700";
+  return "border-emerald-200 bg-emerald-500/10 text-emerald-700";
 }
 
 function statusTone(value: string) {
-  if (value === "failed" || value === "rejected") {
-    return "border-rose-200 bg-rose-500/10 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/15 dark:text-rose-200";
-  }
-  if (value === "blocked_asset" || value === "blocked") {
-    return "border-amber-200 bg-amber-500/10 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200";
-  }
-  if (value === "approved" || value === "applied" || value === "auto_approved") {
-    return "border-emerald-200 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200";
-  }
-  return "border-slate-200 bg-slate-500/10 text-slate-700 dark:border-white/10 dark:bg-white/10 dark:text-zinc-200";
+  if (value === "failed" || value === "rejected") return "border-rose-200 bg-rose-500/10 text-rose-700";
+  if (value === "blocked_asset" || value === "blocked") return "border-amber-200 bg-amber-500/10 text-amber-700";
+  if (value === "approved" || value === "applied" || value === "auto_approved") return "border-emerald-200 bg-emerald-500/10 text-emerald-700";
+  return "border-slate-200 bg-slate-500/10 text-slate-700";
 }
 
 function issueMessage(issue: Record<string, unknown>) {
@@ -57,12 +48,10 @@ function issueMessage(issue: Record<string, unknown>) {
 }
 
 function readScore(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
+  if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
     const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
+    if (Number.isFinite(parsed)) return parsed;
   }
   return null;
 }
@@ -73,13 +62,13 @@ function scoreSummary(lastScore: Record<string, unknown>) {
     ["watch_quality", "Watch"],
     ["engagement_quality", "Engage"],
   ];
+
   const segments: string[] = [];
   pairs.forEach(([key, label]) => {
     const score = readScore(lastScore[key]);
-    if (score !== null) {
-      segments.push(`${label} ${score.toFixed(1)}`);
-    }
+    if (score !== null) segments.push(`${label} ${score.toFixed(1)}`);
   });
+
   return segments.join(" · ");
 }
 
@@ -106,9 +95,7 @@ export function ContentOpsManager({
   }, [platformItems]);
 
   const filteredPlatformItems = useMemo(() => {
-    if (platformStatusFilter === "all") {
-      return platformItems;
-    }
+    if (platformStatusFilter === "all") return platformItems;
     return platformItems.filter((item) => item.lifecycleStatus === platformStatusFilter);
   }, [platformItems, platformStatusFilter]);
 
@@ -117,11 +104,13 @@ export function ContentOpsManager({
       getWorkspaceContentItems({ provider: "youtube", limit: 30 }),
       getWorkspaceContentItems({ provider: "instagram", limit: 30 }),
     ]);
+
     const merged = [...youtubeItems, ...instagramItems].sort((left, right) => {
       const leftTime = new Date(left.updatedAt).getTime();
       const rightTime = new Date(right.updatedAt).getTime();
       return rightTime - leftTime;
     });
+
     setPlatformItems(merged.slice(0, 20));
   };
 
@@ -177,7 +166,7 @@ export function ContentOpsManager({
         setFeedback("");
         await queueWorkspaceContentItemPublish(itemId);
         await refreshData();
-        setFeedback(`콘텐츠 #${itemId}를 게시 대기열로 전환했습니다.`);
+        setFeedback(`콘텐츠 #${itemId}를 게시 대기열로 보냈습니다.`);
       } catch (error) {
         setFeedback(error instanceof Error ? error.message : "게시 대기열 등록에 실패했습니다.");
       }
@@ -195,7 +184,7 @@ export function ContentOpsManager({
         </Card>
         <Card>
           <CardHeader>
-            <CardDescription>고위험</CardDescription>
+            <CardDescription>고위험 항목</CardDescription>
             <CardTitle>{status.high_risk_count}</CardTitle>
           </CardHeader>
         </Card>
@@ -207,7 +196,7 @@ export function ContentOpsManager({
         </Card>
         <Card>
           <CardHeader>
-            <CardDescription>학습 스냅샷 경과</CardDescription>
+            <CardDescription>학습 스냅샷</CardDescription>
             <CardTitle>{status.learning_snapshot_age ?? "N/A"}</CardTitle>
           </CardHeader>
         </Card>
@@ -227,13 +216,13 @@ export function ContentOpsManager({
           <Button variant="outline" onClick={() => startTransition(refreshData)} disabled={isPending}>
             새로고침
           </Button>
-          {feedback ? <p className="text-sm text-slate-500 dark:text-zinc-400">{feedback}</p> : null}
+          {feedback ? <p className="text-sm text-slate-600">{feedback}</p> : null}
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>YouTube / Instagram 게시 큐</CardTitle>
+          <CardTitle>유튜브 / 인스타그램 게시 큐</CardTitle>
           <CardDescription>
             queued={platformSummary.queued} | blocked_asset={platformSummary.blockedAsset} | failed={platformSummary.failed} | published/review={platformSummary.published}
           </CardDescription>
@@ -250,25 +239,19 @@ export function ContentOpsManager({
           <div className="flex flex-wrap gap-2">
             {[
               ["all", "전체"],
-              ["blocked_asset", "에셋 대기"],
+              ["blocked_asset", "자산 대기"],
               ["ready_to_publish", "게시 준비"],
               ["failed", "실패"],
-              ["queued", "큐"],
+              ["queued", "대기"],
             ].map(([value, label]) => (
-              <Button
-                key={value}
-                size="sm"
-                variant={platformStatusFilter === value ? "default" : "outline"}
-                onClick={() => setPlatformStatusFilter(value)}
-                disabled={isPending}
-              >
+              <Button key={value} size="sm" variant={platformStatusFilter === value ? "default" : "outline"} onClick={() => setPlatformStatusFilter(value)} disabled={isPending}>
                 {label}
               </Button>
             ))}
           </div>
           <div className="grid gap-3">
             {filteredPlatformItems.length === 0 ? (
-              <p className="text-sm text-slate-500 dark:text-zinc-400">플랫폼 콘텐츠 항목이 없습니다.</p>
+              <p className="text-sm text-slate-500">플랫폼 콘텐츠 항목이 없습니다.</p>
             ) : (
               filteredPlatformItems.map((item) => {
                 const failureCode = String(
@@ -279,32 +262,22 @@ export function ContentOpsManager({
                 ).trim();
                 const scores = scoreSummary(item.lastScore);
                 return (
-                  <div key={item.id} className="rounded-lg border border-slate-200 px-3 py-3 dark:border-white/10">
+                  <div key={item.id} className="rounded-lg border border-slate-200 px-3 py-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="space-y-1">
-                        <p className="text-sm font-semibold text-slate-900 dark:text-zinc-100">
+                        <p className="text-sm font-semibold text-slate-900">
                           [{item.provider}] {item.title || "(제목 없음)"}
                         </p>
-                        <p className="text-xs text-slate-500 dark:text-zinc-400">
+                        <p className="text-xs text-slate-500">
                           #{item.id} · {item.contentType} · {item.lifecycleStatus} · {item.updatedAt}
                         </p>
-                        {scores ? (
-                          <p className="text-xs text-slate-500 dark:text-zinc-400">{scores}</p>
-                        ) : null}
-                        {item.blockedReason ? (
-                          <p className="text-xs font-medium text-amber-700 dark:text-amber-300">blocked: {item.blockedReason}</p>
-                        ) : null}
-                        {failureCode ? (
-                          <p className="text-xs font-medium text-rose-600 dark:text-rose-300">error: {failureCode}</p>
-                        ) : null}
+                        {scores ? <p className="text-xs text-slate-500">{scores}</p> : null}
+                        {item.blockedReason ? <p className="text-xs font-medium text-amber-700">차단 사유: {item.blockedReason}</p> : null}
+                        {failureCode ? <p className="text-xs font-medium text-rose-600">오류 코드: {failureCode}</p> : null}
                       </div>
                       <div className="flex items-center gap-2">
                         <Badge className={statusTone(item.lifecycleStatus)}>{item.lifecycleStatus}</Badge>
-                        {(item.lifecycleStatus === "draft" ||
-                          item.lifecycleStatus === "review" ||
-                          item.lifecycleStatus === "failed" ||
-                          item.lifecycleStatus === "blocked_asset" ||
-                          item.lifecycleStatus === "ready_to_publish") ? (
+                        {["draft", "review", "failed", "blocked_asset", "ready_to_publish"].includes(item.lifecycleStatus) ? (
                           <Button size="sm" variant="outline" onClick={() => queuePlatformItem(item.id)} disabled={isPending}>
                             게시 대기 등록
                           </Button>
@@ -336,24 +309,19 @@ export function ContentOpsManager({
             </CardHeader>
             <CardContent className="space-y-4">
               {item.source_url ? (
-                <a
-                  href={item.source_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-sm text-indigo-600 underline underline-offset-4 dark:text-indigo-300"
-                >
+                <a href={item.source_url} target="_blank" rel="noreferrer" className="text-sm text-indigo-600 underline underline-offset-4">
                   {item.source_url}
                 </a>
               ) : null}
 
               <div className="space-y-2">
-                <p className="text-sm font-semibold text-slate-900 dark:text-zinc-100">이슈</p>
+                <p className="text-sm font-semibold text-slate-900">이슈</p>
                 {item.issues.length === 0 ? (
-                  <p className="text-sm text-slate-500 dark:text-zinc-400">이슈가 없습니다. 이 항목은 기준 품질 데이터로 사용할 수 있습니다.</p>
+                  <p className="text-sm text-slate-500">이슈가 없습니다. 현재 점수와 상태만 참고하면 됩니다.</p>
                 ) : (
                   <div className="space-y-2">
                     {item.issues.slice(0, 4).map((issue, index) => (
-                      <p key={`${item.id}-issue-${index}`} className="text-sm text-slate-600 dark:text-zinc-300">
+                      <p key={`${item.id}-issue-${index}`} className="text-sm text-slate-600">
                         {issueMessage(issue)}
                       </p>
                     ))}
@@ -362,42 +330,21 @@ export function ContentOpsManager({
               </div>
 
               <div className="space-y-2">
-                <p className="text-sm font-semibold text-slate-900 dark:text-zinc-100">패치 키</p>
-                <p className="text-sm text-slate-500 dark:text-zinc-400">
-                  {Object.keys(item.proposed_patch ?? {}).join(", ") || "none"}
-                </p>
+                <p className="text-sm font-semibold text-slate-900">수정 제안</p>
+                <p className="text-sm text-slate-500">{Object.keys(item.proposed_patch ?? {}).join(", ") || "없음"}</p>
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => runAction(`/content-ops/reviews/${item.id}/approve`, `리뷰 #${item.id}를 승인했습니다.`)}
-                  disabled={isPending}
-                >
+                <Button size="sm" variant="outline" onClick={() => runAction(`/content-ops/reviews/${item.id}/approve`, `리뷰 #${item.id}를 승인했습니다.`)} disabled={isPending}>
                   승인
                 </Button>
-                <Button
-                  size="sm"
-                  onClick={() => runAction(`/content-ops/reviews/${item.id}/apply`, `리뷰 #${item.id}를 적용했습니다.`)}
-                  disabled={isPending}
-                >
+                <Button size="sm" onClick={() => runAction(`/content-ops/reviews/${item.id}/apply`, `리뷰 #${item.id}를 적용했습니다.`)} disabled={isPending}>
                   적용
                 </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => runAction(`/content-ops/reviews/${item.id}/reject`, `리뷰 #${item.id}를 거절했습니다.`)}
-                  disabled={isPending}
-                >
-                  거절
+                <Button size="sm" variant="outline" onClick={() => runAction(`/content-ops/reviews/${item.id}/reject`, `리뷰 #${item.id}를 반려했습니다.`)} disabled={isPending}>
+                  반려
                 </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => runAction(`/content-ops/reviews/${item.id}/rerun`, `리뷰 #${item.id}를 다시 실행했습니다.`)}
-                  disabled={isPending}
-                >
+                <Button size="sm" variant="ghost" onClick={() => runAction(`/content-ops/reviews/${item.id}/rerun`, `리뷰 #${item.id}를 다시 실행했습니다.`)} disabled={isPending}>
                   재실행
                 </Button>
               </div>
