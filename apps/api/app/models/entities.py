@@ -56,6 +56,13 @@ class WorkflowStageType(str, enum.Enum):
     IMAGE_GENERATION = "image_generation"
     HTML_ASSEMBLY = "html_assembly"
     PUBLISHING = "publishing"
+    VIDEO_METADATA_GENERATION = "video_metadata_generation"
+    THUMBNAIL_GENERATION = "thumbnail_generation"
+    REEL_PACKAGING = "reel_packaging"
+    PLATFORM_PUBLISH = "platform_publish"
+    PERFORMANCE_REVIEW = "performance_review"
+    SEO_REWRITE = "seo_rewrite"
+    INDEXING_CHECK = "indexing_check"
 
 
 class LogLevel(str, enum.Enum):
@@ -119,6 +126,15 @@ class Blog(TimestampMixin, Base):
         back_populates="blog",
         cascade="all, delete-orphan",
         order_by="ContentReviewItem.updated_at.desc()",
+    )
+    managed_channels: Mapped[list["ManagedChannel"]] = relationship(
+        back_populates="linked_blog",
+        cascade="all, delete-orphan",
+        order_by="ManagedChannel.created_at.asc()",
+    )
+    content_items: Mapped[list["ContentItem"]] = relationship(
+        back_populates="blog",
+        order_by="ContentItem.created_at.desc()",
     )
 
 
@@ -220,6 +236,7 @@ class Job(TimestampMixin, Base):
         order_by="AIUsageEvent.created_at.asc()",
     )
     audit_logs: Mapped[list["AuditLog"]] = relationship(back_populates="job", cascade="all, delete-orphan")
+    content_items: Mapped[list["ContentItem"]] = relationship(back_populates="job")
 
 
 class Article(TimestampMixin, Base):
@@ -269,6 +286,7 @@ class Article(TimestampMixin, Base):
         cascade="all, delete-orphan",
         order_by="PublishQueueItem.created_at.desc()",
     )
+    content_items: Mapped[list["ContentItem"]] = relationship(back_populates="source_article")
 
     @property
     def usage_events(self) -> list["AIUsageEvent"]:
@@ -440,6 +458,72 @@ class SyncedBloggerPost(TimestampMixin, Base):
     synced_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now(), index=True)
 
     blog: Mapped[Blog] = relationship(back_populates="synced_blogger_posts")
+
+
+class GoogleIndexUrlState(TimestampMixin, Base):
+    __tablename__ = "google_index_url_states"
+    __table_args__ = (sa.UniqueConstraint("blog_id", "url", name="uq_google_index_url_states_blog_url"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    blog_id: Mapped[int] = mapped_column(sa.ForeignKey("blogs.id", ondelete="CASCADE"), nullable=False, index=True)
+    url: Mapped[str] = mapped_column(sa.String(1000), nullable=False, index=True)
+    canonical_url: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    index_status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="unknown", index=True)
+    index_coverage_state: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    index_state: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    verdict: Mapped[str | None] = mapped_column(sa.String(30), nullable=True)
+    last_crawl_time: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
+    last_notify_time: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
+    last_inspection_time: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    last_checked_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
+    last_publish_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
+    next_eligible_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
+    last_publish_success: Mapped[bool | None] = mapped_column(sa.Boolean, nullable=True)
+    last_publish_http_status: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    inspection_payload: Mapped[dict] = mapped_column(sa.JSON, nullable=False, default=dict)
+    metadata_payload: Mapped[dict] = mapped_column(sa.JSON, nullable=False, default=dict)
+    publish_payload: Mapped[dict] = mapped_column(sa.JSON, nullable=False, default=dict)
+
+    blog: Mapped[Blog] = relationship("Blog")
+
+
+class GoogleIndexRequestLog(Base):
+    __tablename__ = "google_index_request_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    blog_id: Mapped[int] = mapped_column(sa.ForeignKey("blogs.id", ondelete="CASCADE"), nullable=False, index=True)
+    url: Mapped[str] = mapped_column(sa.String(1000), nullable=False, index=True)
+    request_type: Mapped[str] = mapped_column(sa.String(30), nullable=False, index=True)
+    trigger_mode: Mapped[str] = mapped_column(sa.String(20), nullable=False, index=True)
+    is_force: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False)
+    success: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False, index=True)
+    http_status: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    request_payload: Mapped[dict] = mapped_column(sa.JSON, nullable=False, default=dict)
+    response_payload: Mapped[dict] = mapped_column(sa.JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False, index=True)
+
+    blog: Mapped[Blog] = relationship("Blog")
+
+
+class SearchConsolePageMetric(Base):
+    __tablename__ = "search_console_page_metrics"
+    __table_args__ = (sa.UniqueConstraint("blog_id", "url", name="uq_search_console_page_metrics_blog_url"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    blog_id: Mapped[int] = mapped_column(sa.ForeignKey("blogs.id", ondelete="CASCADE"), nullable=False, index=True)
+    url: Mapped[str] = mapped_column(sa.String(1000), nullable=False, index=True)
+    clicks: Mapped[float] = mapped_column(sa.Float, nullable=False, default=0)
+    impressions: Mapped[float] = mapped_column(sa.Float, nullable=False, default=0)
+    ctr: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    position: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    start_date: Mapped[date | None] = mapped_column(sa.Date, nullable=True)
+    end_date: Mapped[date | None] = mapped_column(sa.Date, nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False, index=True)
+    payload: Mapped[dict] = mapped_column(sa.JSON, nullable=False, default=dict)
+
+    blog: Mapped[Blog] = relationship("Blog")
 
 
 class TopicMemory(TimestampMixin, Base):
@@ -637,6 +721,21 @@ class ContentPlanSlot(TimestampMixin, Base):
 
 class AnalyticsArticleFact(TimestampMixin, Base):
     __tablename__ = "analytics_article_facts"
+    __table_args__ = (
+        sa.Index(
+            "ix_analytics_article_facts_blog_month_published_at",
+            "blog_id",
+            "month",
+            "published_at",
+        ),
+        sa.Index(
+            "ix_analytics_article_facts_blog_month_source_status",
+            "blog_id",
+            "month",
+            "source_type",
+            "status",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     blog_id: Mapped[int] = mapped_column(sa.ForeignKey("blogs.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -694,3 +793,232 @@ class AnalyticsBlogMonthlyReport(TimestampMixin, Base):
     most_overused_theme_name: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
     next_month_focus: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     report_summary: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+
+
+class ManagedChannel(TimestampMixin, Base):
+    __tablename__ = "managed_channels"
+    __table_args__ = (sa.UniqueConstraint("channel_id", name="uq_managed_channels_channel_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    provider: Mapped[str] = mapped_column(sa.String(30), nullable=False, index=True)
+    channel_id: Mapped[str] = mapped_column(sa.String(120), nullable=False, index=True)
+    display_name: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    remote_resource_id: Mapped[str | None] = mapped_column(sa.String(255), nullable=True, index=True)
+    linked_blog_id: Mapped[int | None] = mapped_column(sa.ForeignKey("blogs.id", ondelete="SET NULL"), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="attention", index=True)
+    base_url: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    primary_category: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
+    purpose: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    capabilities: Mapped[list] = mapped_column(sa.JSON, nullable=False, default=list)
+    oauth_state: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="not_configured")
+    quota_state: Mapped[dict] = mapped_column(sa.JSON, nullable=False, default=dict)
+    channel_metadata: Mapped[dict] = mapped_column("metadata", sa.JSON, nullable=False, default=dict)
+    is_enabled: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
+
+    linked_blog: Mapped[Blog | None] = relationship(back_populates="managed_channels")
+    credentials: Mapped[list["PlatformCredential"]] = relationship(
+        back_populates="managed_channel",
+        cascade="all, delete-orphan",
+        order_by="PlatformCredential.created_at.desc()",
+    )
+    content_items: Mapped[list["ContentItem"]] = relationship(
+        back_populates="managed_channel",
+        cascade="all, delete-orphan",
+        order_by="ContentItem.created_at.desc()",
+    )
+    publication_records: Mapped[list["PublicationRecord"]] = relationship(
+        back_populates="managed_channel",
+        cascade="all, delete-orphan",
+        order_by="PublicationRecord.created_at.desc()",
+    )
+    metric_facts: Mapped[list["MetricFact"]] = relationship(
+        back_populates="managed_channel",
+        cascade="all, delete-orphan",
+        order_by="MetricFact.snapshot_at.desc()",
+    )
+    agent_workers: Mapped[list["AgentWorker"]] = relationship(
+        back_populates="managed_channel",
+        cascade="all, delete-orphan",
+        order_by="AgentWorker.created_at.asc()",
+    )
+    agent_runs: Mapped[list["AgentRun"]] = relationship(
+        back_populates="managed_channel",
+        cascade="all, delete-orphan",
+        order_by="AgentRun.created_at.desc()",
+    )
+
+
+class PlatformCredential(TimestampMixin, Base):
+    __tablename__ = "platform_credentials"
+    __table_args__ = (sa.UniqueConstraint("provider", "credential_key", name="uq_platform_credentials_provider_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    managed_channel_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("managed_channels.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    provider: Mapped[str] = mapped_column(sa.String(30), nullable=False, index=True)
+    credential_key: Mapped[str] = mapped_column(sa.String(120), nullable=False, index=True)
+    subject: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    token_type: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="Bearer")
+    scopes: Mapped[list] = mapped_column(sa.JSON, nullable=False, default=list)
+    access_token_encrypted: Mapped[str] = mapped_column(sa.Text, nullable=False, default="")
+    refresh_token_encrypted: Mapped[str] = mapped_column(sa.Text, nullable=False, default="")
+    expires_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    refresh_metadata: Mapped[dict] = mapped_column(sa.JSON, nullable=False, default=dict)
+    is_valid: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False)
+    last_error: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+
+    managed_channel: Mapped[ManagedChannel | None] = relationship(back_populates="credentials")
+
+
+class ContentItem(TimestampMixin, Base):
+    __tablename__ = "content_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    managed_channel_id: Mapped[int] = mapped_column(sa.ForeignKey("managed_channels.id", ondelete="CASCADE"), nullable=False, index=True)
+    idempotency_key: Mapped[str] = mapped_column(sa.String(120), nullable=False, default="", index=True)
+    blog_id: Mapped[int | None] = mapped_column(sa.ForeignKey("blogs.id", ondelete="SET NULL"), nullable=True, index=True)
+    job_id: Mapped[int | None] = mapped_column(sa.ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True, index=True)
+    source_article_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("articles.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    content_type: Mapped[str] = mapped_column(sa.String(50), nullable=False, index=True)
+    lifecycle_status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="draft", index=True)
+    title: Mapped[str] = mapped_column(sa.String(500), nullable=False, default="")
+    description: Mapped[str] = mapped_column(sa.Text, nullable=False, default="")
+    body_text: Mapped[str] = mapped_column(sa.Text, nullable=False, default="")
+    asset_manifest: Mapped[dict] = mapped_column(sa.JSON, nullable=False, default=dict)
+    brief_payload: Mapped[dict] = mapped_column("brief", sa.JSON, nullable=False, default=dict)
+    review_notes: Mapped[list] = mapped_column(sa.JSON, nullable=False, default=list)
+    approval_status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="pending", index=True)
+    scheduled_for: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
+    last_feedback: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    blocked_reason: Mapped[str | None] = mapped_column(sa.String(120), nullable=True, index=True)
+    last_score: Mapped[dict] = mapped_column(sa.JSON, nullable=False, default=dict)
+    created_by_agent: Mapped[str | None] = mapped_column(sa.String(120), nullable=True)
+
+    managed_channel: Mapped[ManagedChannel] = relationship(back_populates="content_items")
+    blog: Mapped[Blog | None] = relationship(back_populates="content_items")
+    job: Mapped[Job | None] = relationship(back_populates="content_items")
+    source_article: Mapped[Article | None] = relationship(back_populates="content_items")
+    publication_records: Mapped[list["PublicationRecord"]] = relationship(
+        back_populates="content_item",
+        cascade="all, delete-orphan",
+        order_by="PublicationRecord.created_at.desc()",
+    )
+    metric_facts: Mapped[list["MetricFact"]] = relationship(
+        back_populates="content_item",
+        cascade="all, delete-orphan",
+        order_by="MetricFact.snapshot_at.desc()",
+    )
+    agent_runs: Mapped[list["AgentRun"]] = relationship(
+        back_populates="content_item",
+        cascade="all, delete-orphan",
+        order_by="AgentRun.created_at.desc()",
+    )
+
+
+class PublicationRecord(TimestampMixin, Base):
+    __tablename__ = "publication_records"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    content_item_id: Mapped[int] = mapped_column(sa.ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False, index=True)
+    managed_channel_id: Mapped[int] = mapped_column(sa.ForeignKey("managed_channels.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(sa.String(30), nullable=False, index=True)
+    remote_id: Mapped[str | None] = mapped_column(sa.String(255), nullable=True, index=True)
+    remote_url: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    target_state: Mapped[str] = mapped_column(sa.String(40), nullable=False, default="publish", index=True)
+    publish_status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="draft", index=True)
+    error_code: Mapped[str | None] = mapped_column(sa.String(50), nullable=True, index=True)
+    scheduled_for: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    response_payload: Mapped[dict] = mapped_column(sa.JSON, nullable=False, default=dict)
+
+    content_item: Mapped[ContentItem] = relationship(back_populates="publication_records")
+    managed_channel: Mapped[ManagedChannel] = relationship(back_populates="publication_records")
+
+
+class MetricFact(TimestampMixin, Base):
+    __tablename__ = "metric_facts"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    managed_channel_id: Mapped[int] = mapped_column(sa.ForeignKey("managed_channels.id", ondelete="CASCADE"), nullable=False, index=True)
+    content_item_id: Mapped[int | None] = mapped_column(sa.ForeignKey("content_items.id", ondelete="CASCADE"), nullable=True, index=True)
+    provider: Mapped[str] = mapped_column(sa.String(30), nullable=False, index=True)
+    metric_scope: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="content", index=True)
+    metric_name: Mapped[str] = mapped_column(sa.String(100), nullable=False, index=True)
+    value: Mapped[float] = mapped_column(sa.Float, nullable=False, default=0)
+    normalized_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    dimension_key: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
+    dimension_value: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    snapshot_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, index=True)
+    metric_payload: Mapped[dict] = mapped_column("payload", sa.JSON, nullable=False, default=dict)
+
+    managed_channel: Mapped[ManagedChannel] = relationship(back_populates="metric_facts")
+    content_item: Mapped[ContentItem | None] = relationship(back_populates="metric_facts")
+
+
+class AgentWorker(TimestampMixin, Base):
+    __tablename__ = "agent_workers"
+    __table_args__ = (sa.UniqueConstraint("worker_key", name="uq_agent_workers_worker_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    managed_channel_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("managed_channels.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    worker_key: Mapped[str] = mapped_column(sa.String(120), nullable=False, index=True)
+    display_name: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    role_name: Mapped[str] = mapped_column(sa.String(120), nullable=False, index=True)
+    runtime_kind: Mapped[str] = mapped_column(sa.String(30), nullable=False, index=True)
+    queue_name: Mapped[str] = mapped_column(sa.String(120), nullable=False, default="default")
+    concurrency_limit: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="idle", index=True)
+    config_payload: Mapped[dict] = mapped_column(sa.JSON, nullable=False, default=dict)
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+
+    managed_channel: Mapped[ManagedChannel | None] = relationship(back_populates="agent_workers")
+    runs: Mapped[list["AgentRun"]] = relationship(back_populates="worker", order_by="AgentRun.created_at.desc()")
+
+
+class AgentRun(TimestampMixin, Base):
+    __tablename__ = "agent_runs"
+    __table_args__ = (sa.UniqueConstraint("run_key", name="uq_agent_runs_run_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    managed_channel_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("managed_channels.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    content_item_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("content_items.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    worker_id: Mapped[int | None] = mapped_column(sa.ForeignKey("agent_workers.id", ondelete="SET NULL"), nullable=True, index=True)
+    run_key: Mapped[str] = mapped_column(sa.String(120), nullable=False, index=True)
+    runtime_kind: Mapped[str] = mapped_column(sa.String(30), nullable=False, index=True)
+    assigned_role: Mapped[str] = mapped_column(sa.String(120), nullable=False, index=True)
+    provider_model: Mapped[str | None] = mapped_column(sa.String(120), nullable=True)
+    status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="queued", index=True)
+    priority: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=50)
+    timeout_seconds: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=900)
+    retry_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    max_retries: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=3)
+    started_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    prompt_snapshot: Mapped[str] = mapped_column(sa.Text, nullable=False, default="")
+    response_snapshot: Mapped[str] = mapped_column(sa.Text, nullable=False, default="")
+    log_lines: Mapped[list] = mapped_column(sa.JSON, nullable=False, default=list)
+    error_message: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+
+    managed_channel: Mapped[ManagedChannel | None] = relationship(back_populates="agent_runs")
+    content_item: Mapped[ContentItem | None] = relationship(back_populates="agent_runs")
+    worker: Mapped[AgentWorker | None] = relationship(back_populates="runs")

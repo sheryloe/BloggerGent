@@ -1,11 +1,15 @@
 ﻿from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
+import os
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
+from pathlib import Path
 import re
 from typing import Any, Sequence
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlsplit
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -63,11 +67,28 @@ QUALITY_COLUMNS = [
     "similarity_score",
     "seo_score",
     "geo_score",
+    "ctr_score",
+    "dbs_score",
+    "dbs_grade",
+    "dbs_confidence",
+    "dbs_version",
     "rewrite_attempts",
     "last_audited_at",
     "topic_cluster",
     "topic_angle",
     "most_similar_url",
+]
+
+BACKUP_META_COLUMNS = [
+    "backup_batch_id",
+    "backup_moved_at",
+    "backup_source_tab",
+    "backup_reason",
+    "backup_reason_detail",
+    "canonical_key",
+    "source_status_at_backup",
+    "source_hash",
+    "raw_row_json",
 ]
 
 COLUMN_LABELS_KO = {
@@ -99,9 +120,23 @@ COLUMN_LABELS_KO = {
     "most_similar_url": "유사 URL",
     "seo_score": "SEO 점수",
     "geo_score": "GEO 점수",
+    "ctr_score": "CTR 점수",
+    "dbs_score": "DBS 점수",
+    "dbs_grade": "DBS 등급",
+    "dbs_confidence": "DBS 신뢰도",
+    "dbs_version": "DBS 버전",
     "quality_status": "품질 상태",
     "rewrite_attempts": "재작성 횟수",
     "last_audited_at": "최종 점검일시",
+    "backup_batch_id": "백업 배치 ID",
+    "backup_moved_at": "백업 이동시각",
+    "backup_source_tab": "백업 원본 탭",
+    "backup_reason": "백업 사유",
+    "backup_reason_detail": "백업 상세 사유",
+    "canonical_key": "정합 키",
+    "source_status_at_backup": "백업 시 상태",
+    "source_hash": "원본 해시",
+    "raw_row_json": "원본 행 JSON",
 }
 
 COLUMN_ALIASES = {
@@ -255,6 +290,24 @@ def _build_merged_header(
     return merged_header
 
 
+def _canonical_url_key(value: str) -> str:
+    raw = unquote(_safe_str(value)).strip()
+    if not raw:
+        return ""
+    if raw.startswith("http://") or raw.startswith("https://"):
+        parsed = urlsplit(raw)
+        host = _safe_str(parsed.netloc).lower()
+        path = _safe_str(parsed.path).rstrip("/")
+        if host and path:
+            return f"{host}{path}"
+        return (host or path).lower()
+    return raw.rstrip("/").lower()
+
+
+def _is_live_status(value: str) -> bool:
+    return _safe_str(value).lower() in {"published", "live"}
+
+
 def _merge_record_key(record: dict[str, str], *, key_columns: Sequence[str]) -> str:
     for key in key_columns:
         normalized_key = _safe_str(key)
@@ -262,8 +315,13 @@ def _merge_record_key(record: dict[str, str], *, key_columns: Sequence[str]) -> 
         if not candidate:
             continue
         if normalized_key == "url":
-            return unquote(candidate).rstrip("/")
-        return candidate
+            canonical_url = _canonical_url_key(candidate)
+            if canonical_url:
+                return canonical_url
+            continue
+        if normalized_key in {"slug", "title"}:
+            return candidate.casefold()
+        return candidate.strip()
     return ""
 
 
@@ -425,6 +483,126 @@ def _sort_sheet_records(records: list[dict[str, str]]) -> list[dict[str, str]]:
         return rank, 1, -timestamp, title
 
     return sorted(records, key=_sort_key)
+
+
+def _records_from_sheet_rows(rows: list[list[str]] | None) -> tuple[list[str], list[dict[str, str]]]:
+    normalized_rows = list(rows or [])
+    header_raw = [column for column in (normalized_rows[0] if normalized_rows else []) if _safe_str(column)]
+    header: list[str] = []
+    for column in header_raw:
+        normalized_column = _normalize_column_key(column)
+        if normalized_column and normalized_column not in header:
+            header.append(normalized_column)
+    records: list[dict[str, str]] = []
+    if not header:
+        return header, records
+    for row in normalized_rows[1:]:
+        record = {
+            header[index]: _safe_str(row[index] if index < len(row) else "")
+            for index in range(len(header))
+        }
+        if any(_safe_str(value) for value in record.values()):
+            records.append(_hydrate_summary_alias(record))
+    return header, records
+
+
+def _prefer_live_record(candidate: dict[str, str], current: dict[str, str]) -> bool:
+    cand_published = _safe_str(candidate.get("published_at"))
+    curr_published = _safe_str(current.get("published_at"))
+    if bool(cand_published) != bool(curr_published):
+        return bool(cand_published)
+    cand_updated = _parse_datetime_text(candidate.get("updated_at"))
+    curr_updated = _parse_datetime_text(current.get("updated_at"))
+    if cand_updated is not None and curr_updated is not None and cand_updated != curr_updated:
+        return cand_updated > curr_updated
+    if cand_updated is not None and curr_updated is None:
+        return True
+    if cand_updated is None and curr_updated is not None:
+        return False
+    cand_has_url = bool(_safe_str(candidate.get("url")))
+    curr_has_url = bool(_safe_str(current.get("url")))
+    if cand_has_url != curr_has_url:
+        return cand_has_url
+    return _safe_str(candidate.get("title")) < _safe_str(current.get("title"))
+
+
+def _build_backup_columns(base_columns: Sequence[str], quality_columns: Sequence[str]) -> list[str]:
+    columns: list[str] = []
+    for column in [*BACKUP_META_COLUMNS, *base_columns, *quality_columns]:
+        normalized = _normalize_column_key(_safe_str(column))
+        if normalized and normalized not in columns:
+            columns.append(normalized)
+    return columns
+
+
+def _backup_report_path(*, tab_name: str, batch_id: str) -> str:
+    storage_root = Path(os.environ.get("STORAGE_ROOT", "storage"))
+    report_dir = storage_root / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = re.sub(r"[^0-9A-Za-z가-힣_-]+", "-", _safe_str(tab_name)).strip("-") or "sheet"
+    path = report_dir / f"sheet-live-backup-{safe_name}-{batch_id}.json"
+    return str(path.resolve())
+
+
+def _write_backup_report(
+    *,
+    tab_name: str,
+    backup_tab_name: str,
+    batch_id: str,
+    backup_rows: list[dict[str, str]],
+) -> str:
+    report_path = _backup_report_path(tab_name=tab_name, batch_id=batch_id)
+    payload = {
+        "generated_at": _format_datetime(datetime.now(UTC), timezone_name="UTC"),
+        "batch_id": batch_id,
+        "tab": tab_name,
+        "backup_tab": backup_tab_name,
+        "rows": backup_rows,
+    }
+    Path(report_path).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return report_path
+
+
+def _append_backup_rows(
+    db: Session,
+    *,
+    sheet_id: str,
+    backup_tab_name: str,
+    backup_rows: list[dict[str, str]],
+    backup_columns: Sequence[str],
+) -> int:
+    if not backup_rows:
+        return 0
+    _ensure_sheet_tab_exists(db, sheet_id=sheet_id, tab_name=backup_tab_name)
+    existing_rows = _read_sheet_rows(db, sheet_id=sheet_id, tab_name=backup_tab_name)
+    existing_header, existing_records = _records_from_sheet_rows(existing_rows)
+    if not existing_header:
+        existing_header = [_normalize_column_key(column) for column in backup_columns if _normalize_column_key(column)]
+    merged_header = _build_merged_header(existing_header=existing_header, base_columns=backup_columns, quality_columns=())
+
+    dedupe_key_set: set[str] = set()
+    for record in existing_records:
+        key = f"{_safe_str(record.get('canonical_key'))}|{_safe_str(record.get('source_hash'))}"
+        if key:
+            dedupe_key_set.add(key)
+
+    appended = 0
+    for record in backup_rows:
+        dedupe_key = f"{_safe_str(record.get('canonical_key'))}|{_safe_str(record.get('source_hash'))}"
+        if dedupe_key and dedupe_key in dedupe_key_set:
+            continue
+        if dedupe_key:
+            dedupe_key_set.add(dedupe_key)
+        existing_records.append(record)
+        appended += 1
+
+    rendered_rows: list[list[str]] = [[_display_column_label(column) for column in merged_header]]
+    for record in existing_records:
+        rendered_rows.append([_safe_str(record.get(column)) for column in merged_header])
+
+    _clear_sheet_tab(db, sheet_id=sheet_id, tab_name=backup_tab_name)
+    _write_sheet_rows(db, sheet_id=sheet_id, tab_name=backup_tab_name, rows=rendered_rows)
+    return appended
 
 def _infer_editorial_category(
     *,
@@ -1188,9 +1366,202 @@ def sync_google_sheet_quality_tab(
     quality_columns: Sequence[str] = QUALITY_COLUMNS,
     key_columns: Sequence[str] = ("url", "slug"),
     auto_format_enabled: bool = True,
+    strict_live_only: bool = False,
+    backup_tab_name: str | None = None,
 ) -> dict[str, str | int]:
     _ensure_sheet_tab_exists(db, sheet_id=sheet_id, tab_name=tab_name)
     existing_rows = _read_sheet_rows(db, sheet_id=sheet_id, tab_name=tab_name)
+    if strict_live_only:
+        existing_header, existing_records = _records_from_sheet_rows(existing_rows)
+        incoming_by_key: dict[str, dict[str, str]] = {}
+        for row_data in incoming_rows:
+            normalized_row = _hydrate_summary_alias(
+                {
+                    _normalize_column_key(_safe_str(key)): _safe_str(value)
+                    for key, value in row_data.items()
+                    if _safe_str(key)
+                }
+            )
+            if not _is_live_status(_safe_str(normalized_row.get("status"))):
+                continue
+            record_key = _merge_record_key(normalized_row, key_columns=key_columns)
+            if not record_key:
+                continue
+            current = incoming_by_key.get(record_key)
+            if current is None or _prefer_live_record(normalized_row, current):
+                incoming_by_key[record_key] = normalized_row
+
+        merged_header = _build_merged_header(
+            existing_header=existing_header or [_safe_str(column) for column in base_columns if _safe_str(column)],
+            base_columns=base_columns,
+            quality_columns=quality_columns,
+        )
+
+        batch_id = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+        backup_tab = _safe_str(backup_tab_name) or f"{tab_name}_BACKUP"
+        backup_columns = _build_backup_columns(base_columns, quality_columns)
+        now_kst = datetime.now(KST).replace(microsecond=0).isoformat()
+
+        existing_by_key: dict[str, list[dict[str, str]]] = {}
+        existing_orphans: list[dict[str, str]] = []
+        for record in existing_records:
+            record_key = _merge_record_key(record, key_columns=key_columns)
+            if record_key:
+                existing_by_key.setdefault(record_key, []).append(record)
+            else:
+                existing_orphans.append(record)
+
+        backup_rows: list[dict[str, str]] = []
+        removed_dead_count = 0
+        removed_duplicate_count = 0
+
+        for record in existing_orphans:
+            raw_row = {column: _safe_str(record.get(column)) for column in set([*base_columns, *quality_columns, *record.keys()])}
+            raw_json = json.dumps(raw_row, ensure_ascii=False, sort_keys=True)
+            source_hash = hashlib.sha256(raw_json.encode("utf-8")).hexdigest()[:16]
+            payload = {column: "" for column in backup_columns}
+            payload.update(
+                {
+                    "backup_batch_id": batch_id,
+                    "backup_moved_at": now_kst,
+                    "backup_source_tab": tab_name,
+                    "backup_reason": "orphan_sheet_row",
+                    "backup_reason_detail": "missing_identity_key",
+                    "canonical_key": "",
+                    "source_status_at_backup": _safe_str(record.get("status")),
+                    "source_hash": source_hash,
+                    "raw_row_json": raw_json,
+                }
+            )
+            for column in [*base_columns, *quality_columns]:
+                payload[_normalize_column_key(_safe_str(column))] = _safe_str(record.get(_normalize_column_key(_safe_str(column))))
+            backup_rows.append(payload)
+            removed_dead_count += 1
+
+        for record_key, records in existing_by_key.items():
+            if record_key in incoming_by_key:
+                duplicate_rows = records[1:] if len(records) > 1 else []
+                for record in duplicate_rows:
+                    raw_row = {column: _safe_str(record.get(column)) for column in set([*base_columns, *quality_columns, *record.keys()])}
+                    raw_json = json.dumps(raw_row, ensure_ascii=False, sort_keys=True)
+                    source_hash = hashlib.sha256(raw_json.encode("utf-8")).hexdigest()[:16]
+                    payload = {column: "" for column in backup_columns}
+                    payload.update(
+                        {
+                            "backup_batch_id": batch_id,
+                            "backup_moved_at": now_kst,
+                            "backup_source_tab": tab_name,
+                            "backup_reason": "duplicate_existing_row",
+                            "backup_reason_detail": "same_canonical_key",
+                            "canonical_key": record_key,
+                            "source_status_at_backup": _safe_str(record.get("status")),
+                            "source_hash": source_hash,
+                            "raw_row_json": raw_json,
+                        }
+                    )
+                    for column in [*base_columns, *quality_columns]:
+                        payload[_normalize_column_key(_safe_str(column))] = _safe_str(record.get(_normalize_column_key(_safe_str(column))))
+                    backup_rows.append(payload)
+                    removed_duplicate_count += 1
+                continue
+
+            for record in records:
+                raw_row = {column: _safe_str(record.get(column)) for column in set([*base_columns, *quality_columns, *record.keys()])}
+                raw_json = json.dumps(raw_row, ensure_ascii=False, sort_keys=True)
+                source_hash = hashlib.sha256(raw_json.encode("utf-8")).hexdigest()[:16]
+                status_at_backup = _safe_str(record.get("status"))
+                reason = "non_live_status" if not _is_live_status(status_at_backup) else "not_in_live_source"
+                payload = {column: "" for column in backup_columns}
+                payload.update(
+                    {
+                        "backup_batch_id": batch_id,
+                        "backup_moved_at": now_kst,
+                        "backup_source_tab": tab_name,
+                        "backup_reason": reason,
+                        "backup_reason_detail": "strict_live_only_mismatch",
+                        "canonical_key": record_key,
+                        "source_status_at_backup": status_at_backup,
+                        "source_hash": source_hash,
+                        "raw_row_json": raw_json,
+                    }
+                )
+                for column in [*base_columns, *quality_columns]:
+                    payload[_normalize_column_key(_safe_str(column))] = _safe_str(record.get(_normalize_column_key(_safe_str(column))))
+                backup_rows.append(payload)
+                removed_dead_count += 1
+
+        try:
+            backup_appended_count = _append_backup_rows(
+                db,
+                sheet_id=sheet_id,
+                backup_tab_name=backup_tab,
+                backup_rows=backup_rows,
+                backup_columns=backup_columns,
+            )
+        except Exception as exc:
+            return {
+                "status": "failed",
+                "tab": tab_name,
+                "backup_tab": backup_tab,
+                "sync_mode": "strict_live_only",
+                "reason": f"backup_failed:{exc}",
+                "live_source_count": len(incoming_rows),
+                "incoming_unique_count": len(incoming_by_key),
+                "existing_main_count_before": len(existing_records),
+                "removed_dead_count": removed_dead_count,
+                "removed_duplicate_count": removed_duplicate_count,
+                "written_main_count": 0,
+                "final_main_count": max(len(existing_rows) - 1, 0),
+                "count_match": False,
+                "mismatch_reason": "backup_write_failed",
+            }
+
+        backup_report = _write_backup_report(
+            tab_name=tab_name,
+            backup_tab_name=backup_tab,
+            batch_id=batch_id,
+            backup_rows=backup_rows,
+        )
+
+        strict_records = [_apply_priority_fields(record) for record in incoming_by_key.values()]
+        strict_records = _sort_sheet_records(strict_records)
+        strict_rows: list[list[str]] = [[_display_column_label(column) for column in merged_header]]
+        for record in strict_records:
+            strict_rows.append([_safe_str(record.get(column)) for column in merged_header])
+
+        _clear_sheet_tab(db, sheet_id=sheet_id, tab_name=tab_name)
+        _write_sheet_rows(db, sheet_id=sheet_id, tab_name=tab_name, rows=strict_rows)
+        if auto_format_enabled and strict_rows:
+            _apply_sheet_operational_format(
+                db,
+                sheet_id=sheet_id,
+                tab_name=tab_name,
+                header_row=strict_rows[0],
+                row_count=len(strict_rows),
+            )
+        final_count = max(len(strict_rows) - 1, 0)
+        expected_count = len(incoming_by_key)
+        count_match = final_count == expected_count
+        return {
+            "status": "ok" if count_match else "failed",
+            "tab": tab_name,
+            "backup_tab": backup_tab,
+            "sync_mode": "strict_live_only",
+            "live_source_count": len(incoming_rows),
+            "incoming_unique_count": expected_count,
+            "existing_main_count_before": len(existing_records),
+            "backup_appended_count": backup_appended_count,
+            "removed_dead_count": removed_dead_count,
+            "removed_duplicate_count": removed_duplicate_count,
+            "written_main_count": final_count,
+            "final_main_count": final_count,
+            "count_match": count_match,
+            "mismatch_reason": "" if count_match else "final_count_mismatch",
+            "backup_report": backup_report,
+            "rows": final_count,
+            "columns": len(merged_header),
+        }
+
     merged_rows = merge_sheet_rows_with_existing(
         existing_rows=existing_rows,
         incoming_rows=incoming_rows,
@@ -1275,7 +1646,7 @@ def _build_blogger_rows(db: Session, *, profile_key: str) -> tuple[list[list[str
 
 def _build_cloudflare_rows(db: Session) -> tuple[list[list[str]], int]:
     from app.services.cloudflare_channel_service import list_cloudflare_posts
-    from app.services.content_ops_service import compute_seo_geo_scores, compute_similarity_analysis
+    from app.services.content_ops_service import compute_dbs_score, compute_seo_geo_scores, compute_similarity_analysis
 
     columns = [*CLOUDFLARE_SNAPSHOT_COLUMNS, *QUALITY_COLUMNS]
     rows = [[_display_column_label(column) for column in columns]]
@@ -1341,6 +1712,19 @@ def _build_cloudflare_rows(db: Session) -> tuple[list[list[str]], int]:
             record["most_similar_url"] = _safe_str(similarity_payload.get("most_similar_url"))
             record["seo_score"] = str(int(score_payload["seo_score"]))
             record["geo_score"] = str(int(score_payload["geo_score"]))
+            record["ctr_score"] = str(int(score_payload.get("ctr_score") or 0))
+            dbs_payload = compute_dbs_score(
+                seo_score=float(score_payload["seo_score"]),
+                geo_score=float(score_payload["geo_score"]),
+                ctr_score=float(score_payload.get("ctr_score") or 0),
+                plain_text_length=int(score_payload.get("plain_text_length") or 0),
+                sentence_count=int(score_payload.get("sentence_count") or 0),
+                excerpt_length=int(score_payload.get("excerpt_length") or 0),
+            )
+            record["dbs_score"] = f"{float(dbs_payload.get('dbs_score') or 0):.1f}"
+            record["dbs_grade"] = _safe_str(dbs_payload.get("dbs_grade"))
+            record["dbs_confidence"] = f"{float(dbs_payload.get('dbs_confidence') or 0):.1f}"
+            record["dbs_version"] = _safe_str(dbs_payload.get("dbs_version"))
             record["quality_status"] = "ok" if record["status"] in {"published", "live"} else "DISLIVE"
 
     records.sort(
@@ -1478,5 +1862,3 @@ def sync_google_sheet_snapshot(db: Session, *, initial: bool = False) -> dict:
         "cloudflare_tab": cloudflare_tab,
         "tab_results": tab_results,
     }
-
-

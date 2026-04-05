@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    project_name: str = "Bloggent"
+    project_name: str = "Donggr AutoBloggent"
     api_v1_prefix: str = "/api/v1"
     database_url: str = "postgresql+psycopg2://bloggent:bloggent@postgres:5432/bloggent"
     redis_url: str = "redis://redis:6379/0"
@@ -45,14 +45,16 @@ class Settings(BaseSettings):
     mystery_schedule_interval_hours: int = 2
     mystery_topics_per_run: int = 1
     quality_gate_enabled: bool = True
-    quality_gate_similarity_threshold: float = 70.0
-    quality_gate_min_seo_score: int = 60
+    quality_gate_similarity_threshold: float = 65.0
+    quality_gate_min_seo_score: int = 70
     quality_gate_min_geo_score: int = 60
+    quality_gate_min_ctr_score: int = 60
     travel_blossom_cap_ratio: float = 0.2
     cloudflare_blossom_cap_ratio: float = 0.2
     travel_daily_topic_mix_counts: str = "{}"
     cloudflare_daily_topic_mix_counts: str = "{}"
     cloudflare_inline_images_enabled: bool = True
+    cloudflare_require_cover_image: bool = True
     default_publish_mode: str = "draft"
     provider_mode: str = "mock"
     topic_discovery_max_topics_per_run: int = 3
@@ -81,6 +83,12 @@ class Settings(BaseSettings):
     blogger_oauth_state: str = ""
     blogger_access_token: str = ""
     blogger_blog_id: str = ""
+    youtube_default_privacy_status: str = "private"
+    meta_graph_api_version: str = "v23.0"
+    instagram_client_id: str = ""
+    instagram_client_secret: str = ""
+    instagram_redirect_uri: str = ""
+    instagram_publish_api_enabled: bool = False
     blogger_playwright_enabled: bool = False
     blogger_playwright_auto_sync: bool = False
     blogger_playwright_cdp_url: str = "http://host.docker.internal:9223"

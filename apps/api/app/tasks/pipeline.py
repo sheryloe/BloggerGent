@@ -56,6 +56,7 @@ from app.services.providers.factory import (
     get_runtime_config,
     get_topic_provider,
 )
+from app.services.publish_trust_gate_service import assess_publish_trust_requirements, enforce_publish_trust_requirements
 from app.services.openai_usage_service import (
     FREE_TIER_DEFAULT_LARGE_TEXT_MODEL,
     route_openai_free_tier_text_model,
@@ -217,8 +218,8 @@ def _parse_float_setting(raw_value: str | float | int | None, fallback: float) -
 def _quality_gate_thresholds(settings_map: dict[str, str]) -> dict[str, float]:
     return {
         "enabled": 1.0 if _is_enabled_setting(settings_map.get("quality_gate_enabled"), default=True) else 0.0,
-        "similarity_threshold": _parse_float_setting(settings_map.get("quality_gate_similarity_threshold"), 70.0),
-        "min_seo_score": _parse_float_setting(settings_map.get("quality_gate_min_seo_score"), 60.0),
+        "similarity_threshold": _parse_float_setting(settings_map.get("quality_gate_similarity_threshold"), 65.0),
+        "min_seo_score": _parse_float_setting(settings_map.get("quality_gate_min_seo_score"), 70.0),
         "min_geo_score": _parse_float_setting(settings_map.get("quality_gate_min_geo_score"), 60.0),
     }
 
@@ -468,6 +469,28 @@ def _blogger_inline_collage_enabled(settings_map: dict[str, str], blog) -> bool:
     return False
 
 
+def _append_blogger_seo_trust_guard(prompt: str, *, blog, current_date: str) -> str:
+    profile_key = str(getattr(blog, "profile_key", "") or "").strip().lower()
+    if profile_key not in {"korea_travel", "world_mystery"}:
+        return prompt
+
+    common_rules = [
+        "[SEO trust + source integrity guard]",
+        f'- Include one explicit absolute-date timestamp line: "As of {current_date}".',
+        "- Add one dedicated section that separates confirmed facts from unverified details.",
+        "- Add one dedicated section for source/verification path with 2-5 concrete source channels.",
+        '- If no verifiable source URL exists, explicitly say "No verified source URL yet".',
+        "- Never present assumptions, rumors, or secondary reposts as confirmed facts.",
+        "- Avoid clickbait superlatives unless directly supported by verifiable evidence.",
+    ]
+    if profile_key == "world_mystery":
+        common_rules.append("- For SCP or fiction-universe topics, clearly label fiction context near the top.")
+    if profile_key == "korea_travel":
+        common_rules.append("- For schedule, price, entry, and transport details, use recheck wording when uncertain.")
+
+    return f"{prompt}\n\n" + "\n".join(common_rules) + "\n"
+
+
 def _append_no_inline_image_rule(prompt: str) -> str:
     return (
         f"{prompt}\n\n"
@@ -552,6 +575,10 @@ def _assess_blogger_quality_gate(
         min_seo_score=float(thresholds["min_seo_score"]),
         min_geo_score=float(thresholds["min_geo_score"]),
     )
+    trust_assessment = assess_publish_trust_requirements(article_body)
+    for trust_reason in trust_assessment.get("reasons", []):
+        if trust_reason not in reasons:
+            reasons.append(str(trust_reason))
     return {
         "similarity_score": round(similarity_score, 1),
         "most_similar_url": most_similar_url,
@@ -560,6 +587,7 @@ def _assess_blogger_quality_gate(
         "reasons": reasons,
         "passed": len(reasons) == 0,
         "plain_text_length": int(seo_geo.get("plain_text_length", 0) or 0),
+        "trust_gate": trust_assessment,
     }
 
 
@@ -1755,6 +1783,11 @@ def _publish_article(
     scheduled_for: datetime | None,
 ) -> tuple[dict, dict, str]:
     labels = ensure_article_editorial_labels(db, article)
+    publish_content = (article.assembled_html or article.html_article or "").strip()
+    enforce_publish_trust_requirements(
+        publish_content,
+        context=f"blogger_job_{job.id}_article_{article.id}",
+    )
     should_schedule = (
         job.publish_mode == PublishMode.PUBLISH
         and scheduled_for is not None
@@ -1867,6 +1900,11 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
         editorial_category_key=topic_editorial_key,
         editorial_category_label=topic_editorial_label,
         editorial_category_guidance=topic_editorial_guidance,
+    )
+    rendered_article_prompt = _append_blogger_seo_trust_guard(
+        rendered_article_prompt,
+        blog=blog,
+        current_date=datetime.now(_resolve_schedule_timezone(settings_map)).date().isoformat(),
     )
     rendered_article_prompt = _append_no_inline_image_rule(rendered_article_prompt)
     merge_prompt(db, job, article_step.stage_type.value, rendered_article_prompt)

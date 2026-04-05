@@ -10,9 +10,10 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings as app_settings
 from app.db.base import Base
-from app.models.entities import Blog, BlogTheme, ContentPlanDay, ContentPlanSlot, PublishMode, WorkflowStageType
+from app.models.entities import Blog, BlogTheme, ContentItem, ContentPlanDay, ContentPlanSlot, PublicationRecord, PublishMode, WorkflowStageType
 from app.services import planner_service
 from app.services.blog_service import stage_supports_prompt
+from app.services.platform_service import ensure_managed_channels
 from app.services.settings_service import get_settings_map, upsert_settings
 
 
@@ -178,3 +179,87 @@ def test_slot_create_update_and_generate_use_category_key(db: Session, monkeypat
 
 def test_publishing_stage_stays_non_prompt() -> None:
     assert stage_supports_prompt(WorkflowStageType.PUBLISHING) is False
+
+
+def test_run_slot_generation_routes_youtube_to_workspace_queue(db: Session) -> None:
+    ensure_managed_channels(db)
+    plan_day = ContentPlanDay(
+        channel_id="youtube:main",
+        blog_id=None,
+        plan_date=date(2026, 4, 2),
+        target_post_count=1,
+        status="planned",
+    )
+    db.add(plan_day)
+    db.flush()
+    slot = ContentPlanSlot(
+        plan_day_id=plan_day.id,
+        category_key="long-form",
+        category_name="Long-form",
+        scheduled_for=datetime(2026, 4, 2, 12, 0, 0),
+        slot_order=1,
+        status="brief_ready",
+        brief_topic="AI workflow automation",
+        brief_audience="solo operator",
+        result_payload={},
+    )
+    db.add(slot)
+    db.commit()
+
+    generated = planner_service.run_slot_generation(db, slot.id)
+    assert generated.status == "generated"
+    assert generated.result_status == "blocked_asset"
+    refreshed_slot = db.query(ContentPlanSlot).filter(ContentPlanSlot.id == slot.id).one()
+    content_item_id = int(refreshed_slot.result_payload["content_item_id"])
+
+    content_item = db.get(ContentItem, content_item_id)
+    assert content_item is not None
+    assert content_item.content_type == "youtube_video"
+    assert content_item.lifecycle_status == "blocked_asset"
+    assert content_item.blocked_reason == "missing_video_file_path"
+
+    publication = (
+        db.query(PublicationRecord)
+        .filter(PublicationRecord.content_item_id == content_item_id)
+        .order_by(PublicationRecord.id.desc())
+        .first()
+    )
+    assert publication is None
+
+
+def test_run_slot_generation_routes_instagram_reel_to_workspace_queue(db: Session) -> None:
+    ensure_managed_channels(db)
+    plan_day = ContentPlanDay(
+        channel_id="instagram:main",
+        blog_id=None,
+        plan_date=date(2026, 4, 3),
+        target_post_count=1,
+        status="planned",
+    )
+    db.add(plan_day)
+    db.flush()
+    slot = ContentPlanSlot(
+        plan_day_id=plan_day.id,
+        category_key="reel",
+        category_name="Reels",
+        scheduled_for=datetime(2026, 4, 3, 15, 0, 0),
+        slot_order=1,
+        status="brief_ready",
+        brief_topic="short-form teaser",
+        brief_audience="social followers",
+        result_payload={},
+    )
+    db.add(slot)
+    db.commit()
+
+    generated = planner_service.run_slot_generation(db, slot.id)
+    assert generated.status == "generated"
+    assert generated.result_status == "blocked_asset"
+    refreshed_slot = db.query(ContentPlanSlot).filter(ContentPlanSlot.id == slot.id).one()
+    content_item_id = int(refreshed_slot.result_payload["content_item_id"])
+
+    content_item = db.get(ContentItem, content_item_id)
+    assert content_item is not None
+    assert content_item.content_type == "instagram_reel"
+    assert content_item.lifecycle_status == "blocked_asset"
+    assert content_item.blocked_reason == "missing_instagram_video_url"

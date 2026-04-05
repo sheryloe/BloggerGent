@@ -23,6 +23,8 @@ class ContentItemType(str, enum.Enum):
 
 class ContentItemStatus(str, enum.Enum):
     DRAFT = "draft"
+    READY_TO_PUBLISH = "ready_to_publish"
+    BLOCKED_ASSET = "blocked_asset"
     QUEUED = "queued"
     REVIEW = "review"
     APPROVED = "approved"
@@ -669,6 +671,7 @@ class IntegratedArchiveItemRead(BaseModel):
     provider: str
     channel_id: str
     channel_name: str
+    category_slug: str | None = None
     remote_id: str
     provider_status: str
     title: str
@@ -676,6 +679,11 @@ class IntegratedArchiveItemRead(BaseModel):
     published_url: str | None = None
     thumbnail_url: str | None = None
     labels: list[str] = Field(default_factory=list)
+    seo_score: float | None = None
+    geo_score: float | None = None
+    ctr: float | None = None
+    index_status: str = "unknown"
+    quality_status: str | None = None
     published_at: str | None = None
     updated_at: str | None = None
     status: str
@@ -1312,7 +1320,9 @@ class PublicationRecordRead(BaseModel):
     provider: ChannelProvider | str
     remote_id: str | None = None
     remote_url: str | None = None
+    target_state: str = "publish"
     publish_status: str
+    error_code: str | None = None
     scheduled_for: datetime | None = None
     published_at: datetime | None = None
     response_payload: dict = Field(default_factory=dict)
@@ -1340,6 +1350,7 @@ class MetricFactRead(BaseModel):
 class ContentItemRead(BaseModel):
     id: int
     managed_channel_id: int
+    idempotency_key: str = ""
     channel_id: str
     provider: ChannelProvider | str
     blog_id: int | None = None
@@ -1356,6 +1367,7 @@ class ContentItemRead(BaseModel):
     approval_status: str = "pending"
     scheduled_for: datetime | None = None
     last_feedback: str | None = None
+    blocked_reason: str | None = None
     last_score: dict = Field(default_factory=dict)
     created_by_agent: str | None = None
     latest_publication: PublicationRecordRead | None = None
@@ -1367,6 +1379,7 @@ class ContentItemRead(BaseModel):
 
 class ContentItemCreate(BaseModel):
     channel_id: str = Field(min_length=3)
+    idempotency_key: str | None = Field(default=None, min_length=3, max_length=120)
     content_type: ContentItemType | str
     title: str = Field(min_length=1, max_length=500)
     description: str = ""
@@ -1390,6 +1403,7 @@ class ContentItemUpdate(BaseModel):
     review_notes: list | None = None
     scheduled_for: datetime | None = None
     last_feedback: str | None = None
+    blocked_reason: str | None = None
     last_score: dict | None = None
 
 

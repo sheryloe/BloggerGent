@@ -228,7 +228,7 @@ def metrics(db, today: str) -> dict[str, object]:
         "active_publish_queue": int(
             db.scalar(
                 select(func.count(PublishQueueItem.id)).where(
-                    PublishQueueItem.status.in_(("queued", "scheduled", "processing"))
+                    PublishQueueItem.status.in_(("queued", "scheduled", "processing", "retry-required"))
                 )
             )
             or 0
@@ -262,7 +262,7 @@ def quality_thresholds(settings_map: dict[str, str]) -> dict[str, object]:
     return {
         "enabled": is_true(settings_map.get("quality_gate_enabled"), True),
         "similarity_threshold": safe_float(settings_map.get("quality_gate_similarity_threshold"), 70.0),
-        "min_seo_score": safe_float(settings_map.get("quality_gate_min_seo_score"), 60.0),
+        "min_seo_score": safe_float(settings_map.get("quality_gate_min_seo_score"), 70.0),
         "min_geo_score": safe_float(settings_map.get("quality_gate_min_geo_score"), 60.0),
     }
 

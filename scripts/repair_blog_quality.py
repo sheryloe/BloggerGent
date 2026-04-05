@@ -354,8 +354,9 @@ def attach_generated_image(db, article: Article, prompt: str, model_name: str) -
     file_path, public_url, delivery_meta = save_public_binary(
         db,
         subdir="images",
-        filename=f"{article.slug}.png",
+        filename=f"{article.slug}.webp",
         content=image_bytes,
+        provider_override="cloudflare_r2",
     )
 
     image = article.image

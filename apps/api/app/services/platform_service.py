@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import hashlib
+import json
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -476,8 +478,10 @@ def list_content_items(
     lifecycle_status: str | None = None,
     content_type: str | None = None,
     limit: int = 50,
+    ensure_channels: bool = True,
 ) -> list[ContentItem]:
-    ensure_managed_channels(db)
+    if ensure_channels:
+        ensure_managed_channels(db)
     query = (
         select(ContentItem)
         .options(
@@ -512,18 +516,59 @@ def create_content_item(
     brief_payload: dict | None = None,
     scheduled_for: datetime | None = None,
     created_by_agent: str | None = None,
+    idempotency_key: str | None = None,
+    lifecycle_status: str = "draft",
+    blocked_reason: str | None = None,
 ) -> ContentItem:
+    normalized_title = str(title or "").strip()
+    normalized_description = str(description or "").strip()
+    normalized_body = str(body_text or "").strip()
+    normalized_schedule = scheduled_for.isoformat() if scheduled_for is not None else None
+    normalized_agent = str(created_by_agent or "").strip()
+    explicit_key = str(idempotency_key or "").strip()
+    if explicit_key:
+        resolved_idempotency_key = explicit_key[:120]
+    else:
+        raw = json.dumps(
+            {
+                "channel_id": channel.channel_id,
+                "content_type": str(content_type or "").strip(),
+                "title": normalized_title,
+                "description": normalized_description,
+                "body_text": normalized_body,
+                "scheduled_for": normalized_schedule,
+                "created_by_agent": normalized_agent,
+                "asset_manifest": asset_manifest or {},
+                "brief_payload": brief_payload or {},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        resolved_idempotency_key = f"auto:{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:48]}"
+
+    existing = db.execute(
+        select(ContentItem)
+        .where(ContentItem.managed_channel_id == channel.id)
+        .where(ContentItem.idempotency_key == resolved_idempotency_key)
+        .limit(1)
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+
     item = ContentItem(
         managed_channel_id=channel.id,
+        idempotency_key=resolved_idempotency_key,
         blog_id=channel.linked_blog_id,
         content_type=content_type,
-        lifecycle_status="draft",
+        lifecycle_status=lifecycle_status,
         title=title,
         description=description,
         body_text=body_text,
         asset_manifest=asset_manifest or {},
         brief_payload=brief_payload or {},
         scheduled_for=scheduled_for,
+        blocked_reason=blocked_reason,
         created_by_agent=created_by_agent,
     )
     db.add(item)
@@ -546,6 +591,7 @@ def update_content_item(
     review_notes: list | None = None,
     scheduled_for: datetime | None = None,
     last_feedback: str | None = None,
+    blocked_reason: str | None = None,
     last_score: dict | None = None,
 ) -> ContentItem:
     if lifecycle_status is not None:
@@ -568,6 +614,8 @@ def update_content_item(
         item.scheduled_for = scheduled_for
     if last_feedback is not None:
         item.last_feedback = last_feedback
+    if blocked_reason is not None:
+        item.blocked_reason = blocked_reason
     if last_score is not None:
         item.last_score = last_score
     db.add(item)
@@ -576,11 +624,18 @@ def update_content_item(
     return item
 
 
-def list_agent_workers(db: Session, *, channel_id: str | None = None, runtime_kind: str | None = None) -> list[AgentWorker]:
-    ensure_managed_channels(db)
+def list_agent_workers(
+    db: Session,
+    *,
+    channel_id: str | None = None,
+    runtime_kind: str | None = None,
+    ensure_channels: bool = True,
+) -> list[AgentWorker]:
+    if ensure_channels:
+        ensure_managed_channels(db)
     query = (
         select(AgentWorker)
-        .options(selectinload(AgentWorker.managed_channel), selectinload(AgentWorker.runs))
+        .options(selectinload(AgentWorker.managed_channel))
         .order_by(AgentWorker.created_at.asc(), AgentWorker.id.asc())
     )
     if channel_id:
@@ -652,8 +707,10 @@ def list_agent_runs(
     channel_id: str | None = None,
     status: str | None = None,
     limit: int = 100,
+    ensure_channels: bool = True,
 ) -> list[AgentRun]:
-    ensure_managed_channels(db)
+    if ensure_channels:
+        ensure_managed_channels(db)
     query = (
         select(AgentRun)
         .options(
@@ -739,8 +796,8 @@ def update_agent_run(
 
 def get_agent_runtime_health(db: Session) -> dict:
     ensure_managed_channels(db)
-    workers = list_agent_workers(db)
-    runs = list_agent_runs(db, limit=200)
+    workers = list_agent_workers(db, ensure_channels=False)
+    runs = list_agent_runs(db, limit=200, ensure_channels=False)
     worker_status = Counter(worker.status for worker in workers)
     run_status = Counter(run.status for run in runs)
     last_run = runs[0].created_at if runs else None
@@ -758,7 +815,9 @@ def get_agent_runtime_health(db: Session) -> dict:
 
 def serialize_channel(channel: ManagedChannel) -> dict:
     role_counter = Counter(worker.role_name for worker in channel.agent_workers)
-    pending_items = sum(1 for item in channel.content_items if item.lifecycle_status in {"draft", "review", "scheduled"})
+    pending_items = sum(
+        1 for item in channel.content_items if item.lifecycle_status in {"draft", "review", "scheduled", "ready_to_publish", "blocked_asset"}
+    )
     failed_items = sum(1 for item in channel.content_items if item.lifecycle_status in {"failed", "blocked"})
     live_workers = sum(1 for worker in channel.agent_workers if worker.status in {"busy", "running"})
     latest_credential = next((item for item in channel.credentials if item.provider == channel.provider), None)
@@ -773,7 +832,7 @@ def serialize_channel(channel: ManagedChannel) -> dict:
         "posts_count": len(channel.publication_records),
         "categories_count": len(set(role_counter.keys())) or 1,
         "prompts_count": len(DEFAULT_AGENT_PACKS.get(channel.provider, ())),
-        "planner_supported": channel.provider in {"blogger", "cloudflare"},
+        "planner_supported": channel.provider in {"blogger", "cloudflare", "youtube", "instagram"},
         "analytics_supported": True,
         "prompt_flow_supported": True,
         "capabilities": list(channel.capabilities or []),
@@ -798,6 +857,7 @@ def serialize_content_item(item: ContentItem) -> dict:
         "id": item.id,
         "channel_id": item.managed_channel.channel_id,
         "managed_channel_id": item.managed_channel_id,
+        "idempotency_key": item.idempotency_key,
         "provider": item.managed_channel.provider,
         "blog_id": item.blog_id,
         "job_id": item.job_id,
@@ -813,6 +873,7 @@ def serialize_content_item(item: ContentItem) -> dict:
         "approval_status": item.approval_status,
         "scheduled_for": item.scheduled_for,
         "last_feedback": item.last_feedback,
+        "blocked_reason": item.blocked_reason,
         "last_score": latest_score,
         "created_by_agent": item.created_by_agent,
         "latest_publication": serialize_publication_record(latest_publication) if latest_publication else None,
@@ -831,7 +892,9 @@ def serialize_publication_record(record: PublicationRecord | None) -> dict | Non
         "provider": record.provider,
         "remote_id": record.remote_id,
         "remote_url": record.remote_url,
+        "target_state": record.target_state,
         "publish_status": record.publish_status,
+        "error_code": record.error_code,
         "scheduled_for": record.scheduled_for,
         "published_at": record.published_at,
         "response_payload": record.response_payload,

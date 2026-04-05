@@ -20,16 +20,14 @@ if str(REPO_ROOT_PATH) not in sys.path:
 
 from scripts.package_common import REPO_ROOT, STORAGE_ROOT, SessionLocal, now_iso, write_json
 
-from app.models.entities import JobStatus, PublishMode
-from app.services.article_service import ensure_article_editorial_labels
+from app.models.entities import JobStatus
 from app.services.cloudflare_channel_service import (
     _load_daily_counter,
     _select_weighted_daily_categories_from_counts,
     _serialize_daily_counter,
     generate_cloudflare_posts,
 )
-from app.services.job_service import increment_attempt, load_job, record_failure, set_status
-from app.services.providers.factory import get_blogger_provider
+from app.services.job_service import increment_attempt, load_job, record_failure
 from app.services.settings_service import get_settings_map, upsert_settings
 from app.tasks.pipeline import (
     DuplicateContentError,
@@ -63,6 +61,10 @@ class BloggerSlot:
     publish_status: str | None = None
     published_url: str | None = None
     error: str | None = None
+    error_code: str | None = None
+    error_cause: str | None = None
+    retry_state: str | None = None
+    manual_action_required: bool = False
 
 
 @dataclass(slots=True)
@@ -287,80 +289,26 @@ def run_job_sync(job_id: int) -> dict[str, Any]:
         db.close()
 
 
-def fallback_publish_without_hero(*, job_id: int, scheduled_for_utc: str) -> dict[str, Any]:
-    db = SessionLocal()
-    try:
-        job = load_job(db, job_id)
-        if not job or not job.article or not job.blog:
-            raise ValueError(f"fallback publish target is incomplete: job={job_id}")
-        article = job.article
-        blog = job.blog
-        labels = ensure_article_editorial_labels(db, article, commit=False)
-        provider = get_blogger_provider(db, blog)
-        if not getattr(provider, "access_token", ""):
-            raise ValueError("blogger provider is not ready for live publish")
-        set_status(db, job, JobStatus.PUBLISHING, f"{blog.name} fallback publishing without hero image.")
-        article.assembled_html = article.html_article or article.assembled_html
-        db.add(article)
-        db.commit()
-        summary, raw_payload = provider.publish(
-            title=article.title,
-            content=article.assembled_html or article.html_article or "",
-            labels=labels,
-            meta_description=article.meta_description or "",
-            slug=article.slug,
-            publish_mode=PublishMode.DRAFT,
-        )
-        publish_summary, publish_payload = provider.publish_draft(
-            str(summary.get("id") or ""),
-            publish_date=scheduled_for_utc,
-        )
-        blogger_post = _upsert_blogger_post(
-            db,
-            job_id=job.id,
-            blog_id=blog.id,
-            article_id=article.id,
-            summary=publish_summary,
-            raw_payload={"create": raw_payload, "publish": publish_payload, "fallback_without_hero": True},
-        )
-        set_status(
-            db,
-            job,
-            JobStatus.COMPLETED,
-            f"{blog.name} fallback publish completed without hero image.",
-            {
-                "article_id": article.id,
-                "post_status": blogger_post.post_status.value,
-                "published_url": blogger_post.published_url,
-                "scheduled_for": blogger_post.scheduled_for.isoformat() if blogger_post.scheduled_for else None,
-            },
-        )
-        return {
-            "job_id": job_id,
-            "job_status": JobStatus.COMPLETED.value,
-            "article_id": article.id,
-            "article_title": article.title,
-            "publish_status": blogger_post.post_status.value,
-            "published_url": blogger_post.published_url,
-            "scheduled_for": blogger_post.scheduled_for.isoformat() if blogger_post.scheduled_for else None,
-        }
-    except Exception as exc:  # noqa: BLE001
-        db.rollback()
-        job = load_job(db, job_id)
-        if job:
-            record_failure(db, job, exc)
-        return {"job_id": job_id, "job_status": "failed", "error": str(exc)}
-    finally:
-        db.close()
-
-
 def should_retry_topic_generation(error: str | None) -> bool:
     message = str(error or "")
     return "400 Bad Request" in message and "chat/completions" in message
 
 
-def should_use_r2_fallback(error: str | None) -> bool:
-    return "Cloudflare R2 upload failed." in str(error or "")
+def should_mark_retry_required(error: str | None) -> bool:
+    message = str(error or "")
+    return "Cloudflare R2 upload failed." in message or "Cloudflare integration asset upload failed." in message
+
+
+def build_retry_required_result(*, job_id: int, error: str | None) -> dict[str, Any]:
+    return {
+        "job_id": job_id,
+        "job_status": "retry-required",
+        "error": str(error or "").strip() or "Cloudflare R2 upload failed.",
+        "error_code": "cloudflare_r2_upload_failed",
+        "error_cause": "hero_image_upload",
+        "retry_state": "retry-required",
+        "manual_action_required": False,
+    }
 
 
 def queue_blogger_slot(slot: BloggerSlot) -> BloggerSlot:
@@ -387,8 +335,8 @@ def queue_blogger_slot(slot: BloggerSlot) -> BloggerSlot:
         db.close()
 
     result = run_job_sync(slot.job_id)
-    if should_use_r2_fallback(result.get("error")):
-        result = fallback_publish_without_hero(job_id=slot.job_id, scheduled_for_utc=slot.scheduled_for_utc)
+    if should_mark_retry_required(result.get("error")):
+        result = build_retry_required_result(job_id=slot.job_id, error=result.get("error"))
     elif should_retry_topic_generation(result.get("error")):
         retry_db = SessionLocal()
         try:
@@ -407,8 +355,8 @@ def queue_blogger_slot(slot: BloggerSlot) -> BloggerSlot:
             if retry_job_ids:
                 slot.job_id = int(retry_job_ids[0])
                 result = run_job_sync(slot.job_id)
-                if should_use_r2_fallback(result.get("error")):
-                    result = fallback_publish_without_hero(job_id=slot.job_id, scheduled_for_utc=slot.scheduled_for_utc)
+                if should_mark_retry_required(result.get("error")):
+                    result = build_retry_required_result(job_id=slot.job_id, error=result.get("error"))
         finally:
             retry_db.close()
 
@@ -418,6 +366,10 @@ def queue_blogger_slot(slot: BloggerSlot) -> BloggerSlot:
     slot.publish_status = result.get("publish_status")
     slot.published_url = result.get("published_url")
     slot.error = result.get("error")
+    slot.error_code = result.get("error_code")
+    slot.error_cause = result.get("error_cause")
+    slot.retry_state = result.get("retry_state")
+    slot.manual_action_required = bool(result.get("manual_action_required"))
     return slot
 
 

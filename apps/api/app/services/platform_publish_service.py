@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import mimetypes
+import random
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -16,6 +18,15 @@ from app.services.settings_service import get_settings_map
 YOUTUBE_UPLOAD_INIT_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
 YOUTUBE_THUMBNAIL_UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/thumbnails/set"
 INSTAGRAM_GRAPH_BASE_URL = "https://graph.facebook.com/{version}"
+INSTAGRAM_REQUIRED_PUBLISH_SCOPES = {"instagram_content_publish", "pages_show_list", "pages_read_engagement"}
+PUBLISH_SUCCESS_STATUSES = {"published", "uploaded_private"}
+PUBLISH_INFLIGHT_STATUSES = {"queued", "publishing"}
+PUBLISH_TARGET_STATE = "publish"
+ERROR_CODE_MISSING_ASSET = "MISSING_ASSET"
+ERROR_CODE_AUTH_EXPIRED = "AUTH_EXPIRED"
+ERROR_CODE_CAPABILITY_BLOCKED = "CAPABILITY_BLOCKED"
+ERROR_CODE_RATE_LIMITED = "RATE_LIMITED"
+ERROR_CODE_PROVIDER_ERROR = "PROVIDER_ERROR"
 
 
 class PlatformPublishError(Exception):
@@ -65,10 +76,33 @@ def _append_publication_record(
     *,
     item: ContentItem,
     publish_status: str,
+    target_state: str = PUBLISH_TARGET_STATE,
+    error_code: str | None = None,
     remote_id: str | None = None,
     remote_url: str | None = None,
     response_payload: dict | None = None,
 ) -> ContentItem:
+    if publish_status in {"queued", "publishing"}:
+        existing = (
+            db.execute(
+                select(PublicationRecord)
+                .where(PublicationRecord.content_item_id == item.id)
+                .where(PublicationRecord.provider == item.managed_channel.provider)
+                .where(PublicationRecord.target_state == target_state)
+                .where(PublicationRecord.publish_status.in_(tuple(sorted(PUBLISH_INFLIGHT_STATUSES))))
+                .order_by(PublicationRecord.created_at.desc(), PublicationRecord.id.desc())
+                .limit(1)
+            )
+            .scalars()
+            .first()
+        )
+        if existing is not None:
+            item.lifecycle_status = "queued"
+            db.add(item)
+            db.commit()
+            db.refresh(item)
+            return item
+
     published_at = datetime.now(UTC) if publish_status in {"published", "uploaded_private"} else None
     record = PublicationRecord(
         content_item_id=item.id,
@@ -76,7 +110,9 @@ def _append_publication_record(
         provider=item.managed_channel.provider,
         remote_id=remote_id,
         remote_url=remote_url,
+        target_state=target_state,
         publish_status=publish_status,
+        error_code=error_code,
         scheduled_for=item.scheduled_for,
         published_at=published_at,
         response_payload=response_payload or {},
@@ -87,6 +123,24 @@ def _append_publication_record(
     db.commit()
     db.refresh(item)
     return item
+
+
+def _latest_publication_record(db: Session, item: ContentItem) -> PublicationRecord | None:
+    if item.publication_records:
+        for record in item.publication_records:
+            if record.target_state == PUBLISH_TARGET_STATE:
+                return record
+    return (
+        db.execute(
+            select(PublicationRecord)
+            .where(PublicationRecord.content_item_id == item.id)
+            .where(PublicationRecord.target_state == PUBLISH_TARGET_STATE)
+            .order_by(PublicationRecord.created_at.desc(), PublicationRecord.id.desc())
+            .limit(1)
+        )
+        .scalars()
+        .first()
+    )
 
 
 def _youtube_privacy_status(db: Session) -> str:
@@ -101,20 +155,6 @@ def _channel_capabilities(channel: ManagedChannel) -> set[str]:
     return {str(item).strip() for item in (channel.capabilities or []) if str(item).strip()}
 
 
-def _instagram_live_publish_enabled(db: Session, channel: ManagedChannel) -> bool:
-    values = get_settings_map(db)
-    publish_enabled = str(values.get("instagram_publish_api_enabled") or str(settings.instagram_publish_api_enabled).lower()).strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    if not publish_enabled:
-        return False
-    capabilities = _channel_capabilities(channel)
-    return any(capability in capabilities for capability in {"instagram_live_publish", "live_publish"})
-
-
 def _append_failure_record(
     db: Session,
     *,
@@ -122,13 +162,64 @@ def _append_failure_record(
     publish_status: str,
     message: str,
     detail: str | None = None,
+    error_code: str | None = None,
+    failure_status_code: int | None = None,
     response_payload: dict | None = None,
 ) -> ContentItem:
     payload = dict(response_payload or {})
     payload["message"] = message
     if detail:
         payload["detail"] = detail
-    return _append_publication_record(db, item=item, publish_status=publish_status, response_payload=payload)
+    if error_code:
+        payload["error_code"] = error_code
+    if failure_status_code is not None:
+        payload["failure_status_code"] = int(failure_status_code)
+    return _append_publication_record(
+        db,
+        item=item,
+        target_state=PUBLISH_TARGET_STATE,
+        publish_status=publish_status,
+        error_code=error_code,
+        response_payload=payload,
+    )
+
+
+def _classify_publish_failure(exc: Exception) -> tuple[str, str]:
+    detail = str(getattr(exc, "detail", "") or str(exc) or "").strip()
+    detail_lower = detail.lower()
+    status_code = int(getattr(exc, "status_code", 0) or 0)
+
+    if isinstance(exc, PlatformOAuthError) or status_code in {401, 403}:
+        return ERROR_CODE_AUTH_EXPIRED, detail or "oauth_error"
+    if (
+        "publish_capability" in detail_lower
+        or "permissions_unverified" in detail_lower
+        or "publish_api_disabled" in detail_lower
+        or "capability" in detail_lower
+    ):
+        return ERROR_CODE_CAPABILITY_BLOCKED, detail or "capability_blocked"
+    if status_code == 429 or "quota" in detail_lower or "rate limit" in detail_lower:
+        return ERROR_CODE_RATE_LIMITED, detail or "rate_limited"
+    if detail_lower.startswith("missing_") or "missing_" in detail_lower or "file not found" in detail_lower:
+        return ERROR_CODE_MISSING_ASSET, detail or "missing_required_asset"
+    return ERROR_CODE_PROVIDER_ERROR, detail or "platform_publish_failed"
+
+
+def content_item_missing_asset_reason(item: ContentItem, *, asset_manifest: dict | None = None) -> str | None:
+    provider = item.managed_channel.provider
+    manifest = dict(asset_manifest if asset_manifest is not None else (item.asset_manifest or {}))
+    if provider == "youtube":
+        if not str(manifest.get("video_file_path") or "").strip():
+            return "missing_video_file_path"
+        return None
+    if provider == "instagram":
+        if item.content_type == "instagram_reel":
+            if not str(manifest.get("video_url") or "").strip():
+                return "missing_instagram_video_url"
+            return None
+        if not str(manifest.get("image_url") or "").strip():
+            return "missing_instagram_image_url"
+    return None
 
 
 def _youtube_tags(item: ContentItem) -> list[str]:
@@ -138,21 +229,178 @@ def _youtube_tags(item: ContentItem) -> list[str]:
     return []
 
 
+def _resolve_youtube_privacy_status(db: Session, item: ContentItem, *, asset_manifest: dict) -> str:
+    raw_privacy = str((item.brief_payload or {}).get("privacy_status") or asset_manifest.get("privacy_status") or "").strip().lower()
+    if raw_privacy:
+        if raw_privacy not in {"private", "public", "unlisted"}:
+            raise PlatformPublishError(
+                "YouTube privacy_status must be one of private|public|unlisted.",
+                detail="invalid_privacy_status",
+                status_code=400,
+            )
+        return raw_privacy
+    return _youtube_privacy_status(db)
+
+
+def _validate_youtube_tags(item: ContentItem) -> None:
+    if not isinstance(item.brief_payload, dict):
+        return
+    raw_tags = item.brief_payload.get("tags")
+    if raw_tags is None:
+        return
+    if not isinstance(raw_tags, list):
+        raise PlatformPublishError(
+            "YouTube tags must be provided as an array.",
+            detail="invalid_tags_payload",
+            status_code=400,
+        )
+
+
+def _validate_youtube_publish_input(item: ContentItem, *, video_file: Path) -> None:
+    if not str(item.title or "").strip():
+        raise PlatformPublishError("YouTube content requires a non-empty title.", detail="missing_title", status_code=400)
+    if video_file.stat().st_size <= 0:
+        raise PlatformPublishError(
+            "YouTube content requires a non-empty video file.",
+            detail="video_file_empty",
+            status_code=400,
+        )
+
+
+def _preflight_content_item_for_queue(db: Session, item: ContentItem) -> None:
+    provider = item.managed_channel.provider
+    missing_reason = content_item_missing_asset_reason(item)
+    if missing_reason:
+        raise PlatformPublishError(
+            "Content item is missing required publish assets.",
+            detail=missing_reason,
+            status_code=400,
+        )
+    if provider == "youtube":
+        asset_manifest = dict(item.asset_manifest or {})
+        video_file_path = str(asset_manifest.get("video_file_path") or "").strip()
+        video_file = _resolve_local_path(video_file_path)
+        _validate_youtube_publish_input(item, video_file=video_file)
+        _validate_youtube_tags(item)
+        _resolve_youtube_privacy_status(db, item, asset_manifest=asset_manifest)
+        return
+
+    if provider == "instagram":
+        return
+
+
+def _credential_scope_set(channel: ManagedChannel) -> set[str]:
+    credential = next((record for record in (channel.credentials or []) if record.provider == channel.provider and record.is_valid), None)
+    if credential is None:
+        return set()
+    return {str(scope).strip() for scope in (credential.scopes or []) if str(scope).strip()}
+
+
+def _instagram_publish_gate_result(db: Session, channel: ManagedChannel) -> tuple[bool, str]:
+    values = get_settings_map(db)
+    publish_enabled = str(values.get("instagram_publish_api_enabled") or str(settings.instagram_publish_api_enabled).lower()).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if not publish_enabled:
+        return False, "instagram_publish_api_disabled"
+
+    capabilities = _channel_capabilities(channel)
+    if not any(capability in capabilities for capability in {"instagram_live_publish", "live_publish"}):
+        return False, "instagram_publish_capability_missing"
+
+    scopes = _credential_scope_set(channel)
+    if not INSTAGRAM_REQUIRED_PUBLISH_SCOPES.issubset(scopes):
+        return False, "instagram_publish_permissions_unverified"
+
+    return True, "ok"
+
+
+def _instagram_poll_window_seconds(db: Session) -> tuple[int, float, float]:
+    values = get_settings_map(db)
+    try:
+        max_seconds = max(int(str(values.get("instagram_reel_publish_poll_seconds") or "120").strip()), 15)
+    except (TypeError, ValueError):
+        max_seconds = 120
+    try:
+        interval_seconds = max(float(str(values.get("instagram_reel_publish_poll_interval_seconds") or "3").strip()), 1.0)
+    except (TypeError, ValueError):
+        interval_seconds = 3.0
+    try:
+        max_interval_seconds = max(
+            float(str(values.get("instagram_reel_publish_poll_max_interval_seconds") or "20").strip()),
+            interval_seconds,
+        )
+    except (TypeError, ValueError):
+        max_interval_seconds = max(20.0, interval_seconds)
+    return max_seconds, interval_seconds, max_interval_seconds
+
+
+def _poll_instagram_reel_container_ready(
+    db: Session,
+    *,
+    channel_id: str,
+    creation_id: str,
+) -> dict:
+    max_seconds, interval_seconds, max_interval_seconds = _instagram_poll_window_seconds(db)
+    started = time.monotonic()
+    attempts = 0
+    next_sleep_seconds = interval_seconds
+    while (time.monotonic() - started) < max_seconds:
+        attempts += 1
+        status_response = authorized_platform_request(
+            db,
+            channel_id=channel_id,
+            method="GET",
+            url=_instagram_graph_url(f"/{creation_id}"),
+            params={"fields": "id,status_code,status"},
+            timeout=60.0,
+        )
+        status_payload = _parse_response_payload(status_response)
+        if not status_response.is_success:
+            raise PlatformPublishError(
+                "Instagram reel container status check failed.",
+                detail=_response_detail(status_payload, status_response.text),
+                status_code=status_response.status_code,
+            )
+        status_code = str(status_payload.get("status_code") or status_payload.get("status") or "").strip().upper()
+        if status_code in {"FINISHED", "PUBLISHED", "READY"}:
+            return {"status": "ready", "attempts": attempts, "payload": status_payload}
+        if status_code in {"ERROR", "EXPIRED", "FAILED"}:
+            raise PlatformPublishError(
+                "Instagram reel container is not publishable.",
+                detail=f"media_not_ready:container_status={status_code}",
+                status_code=400,
+            )
+        jitter = random.uniform(0.0, min(0.75, next_sleep_seconds * 0.2))
+        sleep_seconds = min(next_sleep_seconds, max_interval_seconds) + jitter
+        time.sleep(sleep_seconds)
+        next_sleep_seconds = min(next_sleep_seconds * 1.8, max_interval_seconds)
+
+    raise PlatformPublishError(
+        "Instagram reel container polling timed out.",
+        detail=f"media_not_ready:container_not_ready_after_{max_seconds}s",
+        status_code=504,
+    )
+
+
 def _upload_youtube_video(db: Session, item: ContentItem) -> ContentItem:
     asset_manifest = dict(item.asset_manifest or {})
     video_file_path = str(asset_manifest.get("video_file_path") or "").strip()
     if not video_file_path:
-        raise PlatformPublishError("YouTube content requires asset_manifest.video_file_path")
+        raise PlatformPublishError(
+            "YouTube content requires asset_manifest.video_file_path.",
+            detail="missing_video_file_path",
+            status_code=400,
+        )
 
     video_file = _resolve_local_path(video_file_path)
+    _validate_youtube_publish_input(item, video_file=video_file)
+    _validate_youtube_tags(item)
     mime_type = mimetypes.guess_type(video_file.name)[0] or "video/mp4"
-    privacy_status = str(
-        (item.brief_payload or {}).get("privacy_status")
-        or asset_manifest.get("privacy_status")
-        or _youtube_privacy_status(db)
-    ).strip().lower()
-    if privacy_status not in {"private", "public", "unlisted"}:
-        privacy_status = "private"
+    privacy_status = _resolve_youtube_privacy_status(db, item, asset_manifest=asset_manifest)
 
     init_response = authorized_platform_request(
         db,
@@ -254,12 +502,15 @@ def _instagram_graph_url(path: str) -> str:
 
 
 def _publish_instagram_content(db: Session, item: ContentItem) -> ContentItem:
-    if not _instagram_live_publish_enabled(db, item.managed_channel):
+    publish_allowed, block_reason = _instagram_publish_gate_result(db, item.managed_channel)
+    if not publish_allowed:
         return _append_publication_record(
             db,
             item=item,
             publish_status="blocked",
-            response_payload={"reason": "instagram_publish_capability_disabled"},
+            target_state=PUBLISH_TARGET_STATE,
+            error_code=ERROR_CODE_CAPABILITY_BLOCKED,
+            response_payload={"reason": block_reason, "error_code": ERROR_CODE_CAPABILITY_BLOCKED},
         )
 
     remote_account_id = str(item.managed_channel.remote_resource_id or "").strip()
@@ -307,6 +558,14 @@ def _publish_instagram_content(db: Session, item: ContentItem) -> ContentItem:
     if not creation_id:
         raise PlatformPublishError("Instagram publish container id is missing.", status_code=502)
 
+    reel_poll_payload: dict = {}
+    if item.content_type == "instagram_reel":
+        reel_poll_payload = _poll_instagram_reel_container_ready(
+            db,
+            channel_id=item.managed_channel.channel_id,
+            creation_id=creation_id,
+        )
+
     publish_response = authorized_platform_request(
         db,
         channel_id=item.managed_channel.channel_id,
@@ -342,14 +601,25 @@ def _publish_instagram_content(db: Session, item: ContentItem) -> ContentItem:
     return _append_publication_record(
         db,
         item=item,
+        target_state=PUBLISH_TARGET_STATE,
         publish_status="published",
         remote_id=media_id or creation_id,
         remote_url=permalink,
-        response_payload={"container": container_result, "publish": publish_result},
+        response_payload={"container": container_result, "container_poll": reel_poll_payload, "publish": publish_result},
     )
 
 
 def publish_content_item_now(db: Session, item: ContentItem) -> ContentItem:
+    latest = _latest_publication_record(db, item)
+    if latest is not None and latest.publish_status in PUBLISH_SUCCESS_STATUSES:
+        target_status = "review" if latest.publish_status == "uploaded_private" else "published"
+        if item.lifecycle_status != target_status:
+            item.lifecycle_status = target_status
+            db.add(item)
+            db.commit()
+            db.refresh(item)
+        return item
+
     if item.managed_channel.provider == "youtube":
         return _upload_youtube_video(db, item)
     if item.managed_channel.provider == "instagram":
@@ -358,11 +628,40 @@ def publish_content_item_now(db: Session, item: ContentItem) -> ContentItem:
 
 
 def mark_content_item_publish_queued(db: Session, item: ContentItem) -> ContentItem:
+    latest = _latest_publication_record(db, item)
+    if latest is not None:
+        if latest.publish_status in PUBLISH_INFLIGHT_STATUSES:
+            if item.lifecycle_status != "queued":
+                item.lifecycle_status = "queued"
+                db.add(item)
+                db.commit()
+                db.refresh(item)
+            return item
+        if latest.publish_status in PUBLISH_SUCCESS_STATUSES:
+            target_status = "review" if latest.publish_status == "uploaded_private" else "published"
+            if item.lifecycle_status != target_status:
+                item.lifecycle_status = target_status
+                db.add(item)
+                db.commit()
+                db.refresh(item)
+            return item
+
+    missing_reason = content_item_missing_asset_reason(item)
+    if missing_reason:
+        item.lifecycle_status = "blocked_asset"
+        item.blocked_reason = missing_reason
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        return item
+
+    _preflight_content_item_for_queue(db, item)
     return _append_publication_record(
         db,
         item=item,
+        target_state=PUBLISH_TARGET_STATE,
         publish_status="queued",
-        response_payload={"queued_from": "workspace"},
+        response_payload={"queued_from": "workspace", "idempotency_key": item.idempotency_key},
     )
 
 
@@ -398,12 +697,15 @@ def process_platform_publish_queue(db: Session, *, limit: int = 10) -> dict:
         try:
             updated = publish_content_item_now(db, item)
         except (PlatformPublishError, PlatformOAuthError) as exc:
+            error_code, normalized_detail = _classify_publish_failure(exc)
             updated = _append_failure_record(
                 db,
                 item=item,
                 publish_status="failed",
                 message=exc.message if hasattr(exc, "message") else "platform_publish_failed",
-                detail=getattr(exc, "detail", None),
+                detail=normalized_detail,
+                error_code=error_code,
+                failure_status_code=getattr(exc, "status_code", None),
                 response_payload={"queued_record_id": latest_publication.id},
             )
             processed.append(
@@ -412,7 +714,9 @@ def process_platform_publish_queue(db: Session, *, limit: int = 10) -> dict:
                     "channel_id": updated.managed_channel.channel_id,
                     "provider": updated.managed_channel.provider,
                     "status": "failed",
-                    "detail": getattr(exc, "detail", str(exc)),
+                    "error_code": error_code,
+                    "failure_code": error_code,
+                    "detail": normalized_detail,
                 }
             )
             continue

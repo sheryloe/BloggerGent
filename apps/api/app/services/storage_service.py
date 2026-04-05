@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 import base64
 import hashlib
 import hmac
+import io
 import mimetypes
 import time
 from datetime import datetime, timezone
@@ -11,6 +12,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
 import httpx
+from PIL import Image
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -940,55 +942,68 @@ def _upload_to_cloudflare_r2(
         if object_key
         else _cloudflare_r2_object_key(filename=filename, prefix=prefix)
     )
-    content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    ext = Path(filename).suffix.lower()
+    content_type = mimetypes.guess_type(filename)[0] or {
+        ".webp": "image/webp",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".avif": "image/avif",
+    }.get(ext, "application/octet-stream")
+    direct_upload_error: ProviderRuntimeError | None = None
 
     if account_id and bucket and access_key_id and secret_access_key:
         if not public_base_url:
-            raise ProviderRuntimeError(
+            direct_upload_error = ProviderRuntimeError(
                 provider="cloudflare_r2",
                 status_code=422,
                 message="Cloudflare R2 public base URL is missing.",
                 detail="Set cloudflare_r2_public_base_url to the img.<domain> custom domain.",
             )
-
-        headers = _build_r2_authorization_headers(
-            method="PUT",
-            account_id=account_id,
-            bucket=bucket,
-            object_key=object_key,
-            access_key_id=access_key_id,
-            secret_access_key=secret_access_key,
-            payload=content,
-            extra_headers={
-                "Content-Type": content_type,
-                "Cache-Control": "public, max-age=31536000, immutable",
-            },
-        )
-        response = httpx.put(
-            _r2_endpoint_url(account_id=account_id, bucket=bucket, object_key=object_key),
-            content=content,
-            headers=headers,
-            timeout=120.0,
-        )
-        if not response.is_success:
-            raise ProviderRuntimeError(
+        else:
+            headers = _build_r2_authorization_headers(
+                method="PUT",
+                account_id=account_id,
+                bucket=bucket,
+                object_key=object_key,
+                access_key_id=access_key_id,
+                secret_access_key=secret_access_key,
+                payload=content,
+                extra_headers={
+                    "Content-Type": content_type,
+                    "Cache-Control": "public, max-age=31536000, immutable",
+                },
+            )
+            response = httpx.put(
+                _r2_endpoint_url(account_id=account_id, bucket=bucket, object_key=object_key),
+                content=content,
+                headers=headers,
+                timeout=120.0,
+            )
+            if response.is_success:
+                original_url = _cloudflare_r2_original_url(public_base_url=public_base_url, object_key=object_key)
+                return original_url, {
+                    "bucket": bucket,
+                    "object_key": object_key,
+                    "etag": str(response.headers.get("etag") or "").strip('"'),
+                    "content_type": content_type,
+                    "public_base_url": public_base_url,
+                    "public_url": original_url,
+                }
+            direct_upload_error = ProviderRuntimeError(
                 provider="cloudflare_r2",
                 status_code=response.status_code,
                 message="Cloudflare R2 upload failed.",
                 detail=response.text,
             )
-
-        original_url = _cloudflare_r2_original_url(public_base_url=public_base_url, object_key=object_key)
-        return original_url, {
-            "bucket": bucket,
-            "object_key": object_key,
-            "etag": str(response.headers.get("etag") or "").strip('"'),
-            "content_type": content_type,
-            "public_base_url": public_base_url,
-            "public_url": original_url,
-        }
+            if not integration_base_url or not integration_token or response.status_code not in {401, 403}:
+                raise direct_upload_error
 
     if not integration_base_url or not integration_token:
+        fallback_detail = (
+            f" Direct upload error: {direct_upload_error.detail}" if direct_upload_error is not None else ""
+        )
         raise ProviderRuntimeError(
             provider="cloudflare_r2",
             status_code=422,
@@ -997,6 +1012,7 @@ def _upload_to_cloudflare_r2(
                 "Set cloudflare_account_id, cloudflare_r2_bucket, cloudflare_r2_access_key_id, "
                 "and cloudflare_r2_secret_access_key, or configure cloudflare_blog_api_base_url "
                 "and cloudflare_blog_m2m_token for integration proxy uploads."
+                + fallback_detail
             ),
         )
 
@@ -1078,6 +1094,16 @@ def _upload_to_cloudflare_r2(
         "content_type": content_type,
         "public_base_url": resolved_public_base_url,
         "public_url": resolved_public_url,
+        "upload_path": "integration_fallback" if direct_upload_error is not None else "integration",
+        "direct_upload_error": (
+            {
+                "status_code": direct_upload_error.status_code,
+                "message": direct_upload_error.message,
+                "detail": direct_upload_error.detail,
+            }
+            if direct_upload_error is not None
+            else None
+        ),
         "integration_response": payload,
     }
 
@@ -1438,29 +1464,44 @@ def _base_delivery_metadata(*, provider: str, local_public_url: str) -> dict:
     }
 
 
+def _normalize_binary_for_filename(*, content: bytes, filename: str) -> bytes:
+    if Path(filename).suffix.lower() != ".webp":
+        return content
+    try:
+        with Image.open(io.BytesIO(content)) as loaded:
+            output = io.BytesIO()
+            converted = loaded if loaded.mode in {"RGB", "RGBA"} else loaded.convert("RGB")
+            converted.save(output, format="WEBP", quality=88, method=6)
+            return output.getvalue()
+    except Exception:  # noqa: BLE001
+        return content
+
+
 def save_public_binary(
     db: Session,
     *,
     subdir: str,
     filename: str,
     content: bytes,
+    provider_override: str | None = None,
 ) -> tuple[str, str, dict]:
     values = get_settings_map(db)
     local_base_url = _resolve_local_public_base_url(values)
+    normalized_content = _normalize_binary_for_filename(content=content, filename=filename)
     file_path, local_public_url = save_binary(
         subdir=subdir,
         filename=filename,
-        content=content,
+        content=normalized_content,
         public_base_url=local_base_url,
     )
-    provider = (values.get("public_image_provider") or "local").strip().lower()
+    provider = (provider_override or values.get("public_image_provider") or "local").strip().lower()
     delivery_meta = _base_delivery_metadata(provider=provider, local_public_url=local_public_url)
 
     if provider == "cloudflare_r2":
         public_url, _, provider_delivery = upload_binary_to_cloudflare_r2(
             db,
             filename=filename,
-            content=content,
+            content=normalized_content,
         )
         provider_delivery.update(delivery_meta)
         provider_delivery["public_url"] = public_url
@@ -1470,14 +1511,14 @@ def save_public_binary(
         public_url, _, provider_delivery = upload_binary_to_cloudinary(
             db,
             filename=filename,
-            content=content,
+            content=normalized_content,
         )
         provider_delivery.update(delivery_meta)
         provider_delivery["public_url"] = public_url
         return file_path, public_url, provider_delivery
 
     if provider == "github_pages":
-        public_url, upload_payload = _upload_to_github_pages(values=values, filename=filename, content=content)
+        public_url, upload_payload = _upload_to_github_pages(values=values, filename=filename, content=normalized_content)
         delivery_meta["github_pages"] = upload_payload
         delivery_meta["public_url"] = public_url
         return file_path, public_url, delivery_meta

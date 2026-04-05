@@ -18,6 +18,7 @@ from app.api.routes import (
     telegram,
     topics,
     training,
+    workspace,
 )
 
 api_router = APIRouter()
@@ -39,3 +40,4 @@ api_router.include_router(settings.router, prefix="/settings", tags=["settings"]
 api_router.include_router(settings.blogger_router, prefix="/blogger", tags=["blogger"])
 api_router.include_router(telegram.router, prefix="/telegram", tags=["telegram"])
 api_router.include_router(training.router, prefix="/training", tags=["training"])
+api_router.include_router(workspace.router)

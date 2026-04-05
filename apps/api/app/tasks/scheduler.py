@@ -10,8 +10,11 @@ from app.models.entities import WorkflowStageType
 from app.services.blog_service import enforce_free_tier_model_policy, get_workflow_step, list_active_blogs
 from app.services.cloudflare_channel_service import run_cloudflare_daily_schedule
 from app.services.content_ops_service import sync_live_content_reviews
+from app.services.metric_ingestion_service import run_workspace_metric_sync_schedule
+from app.services.google_indexing_service import run_google_indexing_schedule
 from app.services.google_sheet_service import sync_google_sheet_snapshot
 from app.services.publishing_service import process_publish_queue_batch
+from app.services.platform_publish_service import process_platform_publish_queue
 from app.services.settings_service import get_settings_map, upsert_settings
 from app.services.telegram_service import poll_telegram_ops_commands, send_telegram_error_notification
 from app.services.training_service import (
@@ -331,6 +334,8 @@ def run_scheduler_tick() -> dict:
         profile_runs: list[dict] = []
         run_marker_updates: dict[str, str] = {}
         cloudflare_daily_result: dict | None = None
+        google_indexing_result: dict | None = None
+        workspace_metric_sync_result: dict | None = None
         sheet_sync_result: dict | None = None
         training_schedule_result: dict | None = None
 
@@ -519,6 +524,34 @@ def run_scheduler_tick() -> dict:
                 context={"current_time": current_time, "timezone": str(tz)},
             )
 
+        try:
+            google_indexing_result = run_google_indexing_schedule(db, now=now.astimezone(timezone.utc))
+        except Exception as exc:  # noqa: BLE001
+            db.rollback()
+            google_indexing_result = {"status": "failed", "detail": str(exc)}
+            send_telegram_error_notification(
+                db,
+                title="Google indexing schedule failed",
+                detail=str(exc),
+                context={"current_time": current_time, "timezone": str(tz)},
+            )
+
+        try:
+            workspace_metric_sync_result = run_workspace_metric_sync_schedule(
+                db,
+                now=now.astimezone(timezone.utc),
+                refresh_indexing=False,
+            )
+        except Exception as exc:  # noqa: BLE001
+            db.rollback()
+            workspace_metric_sync_result = {"status": "failed", "detail": str(exc)}
+            send_telegram_error_notification(
+                db,
+                title="Workspace metric sync failed",
+                detail=str(exc),
+                context={"current_time": current_time, "timezone": str(tz)},
+            )
+
         sheet_sync_enabled = settings_map.get("sheet_sync_enabled", "false").lower() == "true"
         expected_day = (settings_map.get("sheet_sync_day") or "SUNDAY").strip().upper() or "SUNDAY"
         expected_time = (settings_map.get("sheet_sync_time") or "13:00").strip() or "13:00"
@@ -594,6 +627,8 @@ def run_scheduler_tick() -> dict:
             "timezone": str(tz),
             "profile_runs": profile_runs,
             "cloudflare_daily": cloudflare_daily_result,
+            "google_indexing": google_indexing_result,
+            "workspace_metrics": workspace_metric_sync_result,
             "sheet_sync": sheet_sync_result,
             "training_schedule": training_schedule_result,
         }
@@ -610,7 +645,13 @@ def process_publish_queue() -> dict:
             return {"status": "disabled", "reason": "automation_master_disabled"}
         if settings_map.get("automation_publish_queue_enabled", "false").lower() != "true":
             return {"status": "disabled", "reason": "automation_publish_queue_disabled"}
-        return process_publish_queue_batch(db)
+        blogger_result = process_publish_queue_batch(db)
+        workspace_result = process_platform_publish_queue(db)
+        return {
+            "status": "ok",
+            "blogger": blogger_result,
+            "workspace": workspace_result,
+        }
     finally:
         db.close()
 

@@ -14,7 +14,8 @@ from app.services.settings_service import get_settings_map, upsert_settings
 BLOGGER_SCOPE = "https://www.googleapis.com/auth/blogger"
 SEARCH_CONSOLE_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly"
 ANALYTICS_SCOPE = "https://www.googleapis.com/auth/analytics.readonly"
-GOOGLE_OAUTH_SCOPES = (BLOGGER_SCOPE, SEARCH_CONSOLE_SCOPE, ANALYTICS_SCOPE)
+INDEXING_SCOPE = "https://www.googleapis.com/auth/indexing"
+GOOGLE_OAUTH_SCOPES = (BLOGGER_SCOPE, SEARCH_CONSOLE_SCOPE, ANALYTICS_SCOPE, INDEXING_SCOPE)
 
 AUTH_BASE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -39,6 +40,10 @@ def get_granted_google_scopes(values: dict[str, str] | None = None) -> list[str]
     if not raw_scope:
         return []
     return [scope for scope in raw_scope.split() if scope]
+
+
+def has_granted_google_scope(scope: str, values: dict[str, str] | None = None) -> bool:
+    return scope in set(get_granted_google_scopes(values))
 
 
 def get_blogger_redirect_uri(values: dict[str, str] | None = None) -> str:

@@ -35,8 +35,19 @@ if hasattr(sys.stdout, "reconfigure"):
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.entities import Article, Blog, PostStatus  # noqa: E402
 from app.services.article_service import estimate_reading_time, sanitize_blog_html  # noqa: E402
-from app.services.cloudflare_channel_service import _sync_cloudflare_quality_rows, list_cloudflare_posts  # noqa: E402
-from app.services.content_ops_service import compute_seo_geo_scores, compute_similarity_analysis, normalize_similarity_text  # noqa: E402
+from app.services.cloudflare_channel_service import (  # noqa: E402
+    _integration_data_or_raise,
+    _integration_request,
+    _sync_cloudflare_quality_rows,
+    list_cloudflare_posts,
+)
+from app.services.content_ops_service import (  # noqa: E402
+    compute_blog_dbs_summary,
+    compute_dbs_score,
+    compute_seo_geo_scores,
+    compute_similarity_analysis,
+    normalize_similarity_text,
+)
 from app.services.google_sheet_service import (  # noqa: E402
     BLOGGER_SNAPSHOT_COLUMNS,
     QUALITY_COLUMNS,
@@ -306,6 +317,19 @@ def _apply_similarity_and_scores(rows: list[dict[str, Any]], *, rewrite_threshol
             )
             row["seo_score"] = str(int(score_payload["seo_score"]))
             row["geo_score"] = str(int(score_payload["geo_score"]))
+            row["ctr_score"] = str(int(score_payload.get("ctr_score") or 0))
+            dbs_payload = compute_dbs_score(
+                seo_score=float(score_payload["seo_score"]),
+                geo_score=float(score_payload["geo_score"]),
+                ctr_score=float(score_payload.get("ctr_score") or 0),
+                plain_text_length=int(score_payload.get("plain_text_length") or 0),
+                sentence_count=int(score_payload.get("sentence_count") or 0),
+                excerpt_length=int(score_payload.get("excerpt_length") or 0),
+            )
+            row["dbs_score"] = f"{float(dbs_payload.get('dbs_score') or 0):.1f}"
+            row["dbs_grade"] = _safe_str(dbs_payload.get("dbs_grade"))
+            row["dbs_confidence"] = f"{float(dbs_payload.get('dbs_confidence') or 0):.1f}"
+            row["dbs_version"] = _safe_str(dbs_payload.get("dbs_version"))
             if row["status"] != "published":
                 row["quality_status"] = "DISLIVE"
             elif row["profile"] == "world_mystery" and float(row["similarity_score"]) >= rewrite_threshold:
@@ -628,67 +652,112 @@ def _run_rewrite_loop(
 def _prepare_cloudflare_rows() -> list[dict[str, Any]]:
     with SessionLocal() as db:
         posts = list_cloudflare_posts(db)
-    rows: list[dict[str, Any]] = []
-    for index, post in enumerate(posts, start=1):
-        excerpt = _safe_str(post.get("excerpt"))
-        title = _safe_str(post.get("title"))
-        body_html = f"<p>{excerpt}</p>" if excerpt else "<p></p>"
-        category_name = _safe_str(post.get("category_name"))
-        category_slug = _safe_str(post.get("category_slug"))
-        category_cell = category_name or _safe_str(post.get("channel_name"))
-        status_value = _safe_str(post.get("status")).lower() or "published"
-        created_at = _normalize_datetime_text(post.get("created_at"))
-        updated_at = _normalize_datetime_text(post.get("updated_at"))
-        published_at = _normalize_datetime_text(post.get("published_at"))
-        if not published_at and status_value in {"published", "live"}:
-            published_at = updated_at or created_at
-        rows.append(
-            {
-                "key": f"cf-{index}",
-                "remote_id": _safe_str(post.get("remote_id")),
-                "published_at": published_at,
-                "created_at": created_at,
-                "updated_at": updated_at,
-                "category": category_cell,
-                "category_slug": category_slug,
-                "title": title,
-                "url": _safe_str(post.get("published_url")),
-                "excerpt": excerpt,
-                "labels": ", ".join(_safe_str(label) for label in (post.get("labels") or []) if _safe_str(label)),
-                "status": status_value,
-                "topic_cluster": category_slug or category_cell or "cloudflare",
-                "topic_angle": "channel_post",
-                "body_html": body_html,
-            }
-        )
+        rows: list[dict[str, Any]] = []
+        for index, post in enumerate(posts, start=1):
+            status_value = _safe_str(post.get("status")).lower() or "published"
+            if status_value not in {"published", "live"}:
+                continue
 
-    similarity_map = compute_similarity_analysis(
-        [
-            {
-                "key": row["key"],
-                "title": row["title"],
-                "body_html": row["body_html"],
-                "url": row["url"],
-            }
-            for row in rows
-        ]
-    )
-    for row in rows:
-        similarity_payload = similarity_map.get(row["key"], {"similarity_score": 0.0, "most_similar_url": ""})
-        score_payload = compute_seo_geo_scores(
-            title=row["title"],
-            html_body=row["body_html"],
-            excerpt=row["excerpt"],
-            faq_section=[],
+            remote_id = _safe_str(post.get("remote_id"))
+            detail: dict[str, Any] = {}
+            if remote_id:
+                try:
+                    response = _integration_request(
+                        db,
+                        method="GET",
+                        path=f"/api/integrations/posts/{remote_id}",
+                        timeout=60.0,
+                    )
+                    data = _integration_data_or_raise(response)
+                    detail = data if isinstance(data, dict) else {}
+                except Exception:  # noqa: BLE001
+                    detail = {}
+
+            excerpt = _safe_str(detail.get("excerpt") or post.get("excerpt"))
+            title = _safe_str(detail.get("title") or post.get("title"))
+            body_source = _safe_str(
+                detail.get("content")
+                or detail.get("contentMarkdown")
+                or detail.get("content_markdown")
+                or detail.get("excerpt")
+                or post.get("excerpt")
+            )
+            if not body_source:
+                body_html = "<p></p>"
+            elif "<" in body_source and ">" in body_source:
+                body_html = body_source
+            else:
+                body_html = f"<p>{body_source}</p>"
+
+            category_name = _safe_str(post.get("category_name"))
+            category_slug = _safe_str(post.get("category_slug"))
+            category_cell = category_name or _safe_str(post.get("channel_name"))
+            created_at = _normalize_datetime_text(post.get("created_at"))
+            updated_at = _normalize_datetime_text(post.get("updated_at"))
+            published_at = _normalize_datetime_text(post.get("published_at"))
+            if not published_at and status_value in {"published", "live"}:
+                published_at = updated_at or created_at
+            rows.append(
+                {
+                    "key": f"cf-{index}",
+                    "profile": "cloudflare",
+                    "remote_id": remote_id,
+                    "published_at": published_at,
+                    "created_at": created_at,
+                    "updated_at": updated_at,
+                    "category": category_cell,
+                    "category_slug": category_slug,
+                    "title": title,
+                    "url": _safe_str(post.get("published_url")),
+                    "excerpt": excerpt,
+                    "labels": ", ".join(_safe_str(label) for label in (post.get("labels") or []) if _safe_str(label)),
+                    "status": status_value,
+                    "topic_cluster": category_slug or category_cell or "cloudflare",
+                    "topic_angle": "channel_post",
+                    "body_html": body_html,
+                }
+            )
+
+        similarity_map = compute_similarity_analysis(
+            [
+                {
+                    "key": row["key"],
+                    "title": row["title"],
+                    "body_html": row["body_html"],
+                    "url": row["url"],
+                }
+                for row in rows
+            ]
         )
-        row["similarity_score"] = f"{float(similarity_payload.get('similarity_score', 0.0)):.1f}"
-        row["most_similar_url"] = _safe_str(similarity_payload.get("most_similar_url"))
-        row["seo_score"] = str(int(score_payload["seo_score"]))
-        row["geo_score"] = str(int(score_payload["geo_score"]))
-        row["quality_status"] = "ok" if row["status"] in {"published", "live"} else "DISLIVE"
-        row["rewrite_attempts"] = "0"
-        row["last_audited_at"] = datetime.now(QUALITY_TIMEZONE).replace(microsecond=0).isoformat()
-    return rows
+        for row in rows:
+            similarity_payload = similarity_map.get(row["key"], {"similarity_score": 0.0, "most_similar_url": ""})
+            score_payload = compute_seo_geo_scores(
+                title=row["title"],
+                html_body=row["body_html"],
+                excerpt=row["excerpt"],
+                faq_section=[],
+            )
+            dbs_payload = compute_dbs_score(
+                seo_score=float(score_payload["seo_score"]),
+                geo_score=float(score_payload["geo_score"]),
+                ctr_score=float(score_payload.get("ctr_score") or 0),
+                plain_text_length=int(score_payload.get("plain_text_length") or 0),
+                sentence_count=int(score_payload.get("sentence_count") or 0),
+                excerpt_length=int(score_payload.get("excerpt_length") or 0),
+            )
+            row["similarity_score"] = f"{float(similarity_payload.get('similarity_score', 0.0)):.1f}"
+            row["most_similar_url"] = _safe_str(similarity_payload.get("most_similar_url"))
+            row["seo_score"] = str(int(score_payload["seo_score"]))
+            row["geo_score"] = str(int(score_payload["geo_score"]))
+            row["ctr_score"] = str(int(score_payload.get("ctr_score") or 0))
+            row["dbs_score"] = f"{float(dbs_payload.get('dbs_score') or 0):.1f}"
+            row["dbs_grade"] = _safe_str(dbs_payload.get("dbs_grade"))
+            row["dbs_confidence"] = f"{float(dbs_payload.get('dbs_confidence') or 0):.1f}"
+            row["dbs_version"] = _safe_str(dbs_payload.get("dbs_version"))
+            row["quality_status"] = "ok"
+            row["rewrite_attempts"] = "0"
+            row["last_audited_at"] = datetime.now(QUALITY_TIMEZONE).replace(microsecond=0).isoformat()
+        return rows
 
 
 def _sheet_payload_for_blogger(rows: list[dict[str, Any]], *, profile: str) -> list[dict[str, str]]:
@@ -723,6 +792,11 @@ def _sheet_payload_for_blogger(rows: list[dict[str, Any]], *, profile: str) -> l
                 "most_similar_url": _safe_str(row["most_similar_url"]),
                 "seo_score": _safe_str(row["seo_score"]),
                 "geo_score": _safe_str(row["geo_score"]),
+                "ctr_score": _safe_str(row["ctr_score"]),
+                "dbs_score": _safe_str(row["dbs_score"]),
+                "dbs_grade": _safe_str(row["dbs_grade"]),
+                "dbs_confidence": _safe_str(row["dbs_confidence"]),
+                "dbs_version": _safe_str(row["dbs_version"]),
                 "quality_status": _safe_str(row["quality_status"]),
                 "rewrite_attempts": _safe_str(row["rewrite_attempts"]),
                 "last_audited_at": _safe_str(row["last_audited_at"]),
@@ -754,6 +828,11 @@ def _sheet_payload_for_cloudflare(rows: list[dict[str, Any]]) -> list[dict[str, 
                 "most_similar_url": _safe_str(row["most_similar_url"]),
                 "seo_score": _safe_str(row["seo_score"]),
                 "geo_score": _safe_str(row["geo_score"]),
+                "ctr_score": _safe_str(row["ctr_score"]),
+                "dbs_score": _safe_str(row["dbs_score"]),
+                "dbs_grade": _safe_str(row["dbs_grade"]),
+                "dbs_confidence": _safe_str(row["dbs_confidence"]),
+                "dbs_version": _safe_str(row["dbs_version"]),
                 "quality_status": _safe_str(row["quality_status"]),
                 "rewrite_attempts": _safe_str(row["rewrite_attempts"]),
                 "last_audited_at": _safe_str(row["last_audited_at"]),
@@ -783,6 +862,8 @@ def _sync_sheet_rows(
             quality_columns=QUALITY_COLUMNS,
             key_columns=("url", "slug"),
             auto_format_enabled=auto_format_enabled,
+            strict_live_only=True,
+            backup_tab_name=f"{config['travel_tab']}_BACKUP",
         )
         mystery_result = sync_google_sheet_quality_tab(
             db,
@@ -793,10 +874,14 @@ def _sync_sheet_rows(
             quality_columns=QUALITY_COLUMNS,
             key_columns=("url", "slug"),
             auto_format_enabled=auto_format_enabled,
+            strict_live_only=True,
+            backup_tab_name=f"{config['mystery_tab']}_BACKUP",
         )
         cloudflare_result = _sync_cloudflare_quality_rows(
             db,
             rows=_sheet_payload_for_cloudflare(cloudflare_rows),
+            strict_live_only=True,
+            backup_tab_name=f"{config['cloudflare_tab']}_BACKUP",
         )
         return {
             "status": "ok",
@@ -807,7 +892,14 @@ def _sync_sheet_rows(
         }
 
 
-def _write_report(*, args: argparse.Namespace, rows: list[dict[str, Any]], outcomes: dict[int, dict[str, Any]], sheet_result: dict[str, Any]) -> dict[str, str]:
+def _write_report(
+    *,
+    args: argparse.Namespace,
+    rows: list[dict[str, Any]],
+    cloudflare_rows: list[dict[str, Any]],
+    outcomes: dict[int, dict[str, Any]],
+    sheet_result: dict[str, Any],
+) -> dict[str, str]:
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     json_path = REPORT_DIR / f"{args.report_prefix}-{stamp}.json"
@@ -819,13 +911,20 @@ def _write_report(*, args: argparse.Namespace, rows: list[dict[str, Any]], outco
         "summary": {
             "total_rows": len(rows),
             "published_rows": len([row for row in rows if row["status"] == "published"]),
+            "cloudflare_live_rows": len(cloudflare_rows),
             "rewrite_required_rows": len([row for row in rows if row["quality_status"] == "rewrite_required"]),
             "updated_rows": len([item for item in outcomes.values() if item.get("status") == "updated"]),
             "manual_review_required_rows": len([item for item in outcomes.values() if item.get("status") == "manual_review_required"]),
         },
+        "dbs_summary": {
+            "korea_travel": compute_blog_dbs_summary([row for row in rows if row.get("profile") == "korea_travel"]),
+            "world_mystery": compute_blog_dbs_summary([row for row in rows if row.get("profile") == "world_mystery"]),
+            "cloudflare": compute_blog_dbs_summary(cloudflare_rows),
+        },
         "rewrite_outcomes": outcomes,
         "sheet_sync": sheet_result,
         "rows": rows,
+        "cloudflare_rows": cloudflare_rows,
     }
     json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -835,6 +934,7 @@ def _write_report(*, args: argparse.Namespace, rows: list[dict[str, Any]], outco
         f"- generated_at: {payload['generated_at']}",
         f"- total_rows: {payload['summary']['total_rows']}",
         f"- published_rows: {payload['summary']['published_rows']}",
+        f"- cloudflare_live_rows: {payload['summary']['cloudflare_live_rows']}",
         f"- rewrite_required_rows: {payload['summary']['rewrite_required_rows']}",
         f"- updated_rows: {payload['summary']['updated_rows']}",
         f"- manual_review_required_rows: {payload['summary']['manual_review_required_rows']}",
@@ -858,13 +958,13 @@ def _write_report(*, args: argparse.Namespace, rows: list[dict[str, Any]], outco
 def main() -> int:
     args = parse_args()
 
-    rows = _load_article_rows(profile=None, published_only=args.published_only, limit=args.limit)
+    rows = _load_article_rows(profile=None, published_only=True, limit=args.limit)
     _apply_similarity_and_scores(rows, rewrite_threshold=float(args.rewrite_threshold))
 
     rewrite_outcomes: dict[int, dict[str, Any]] = {}
     if args.execute:
         rewrite_outcomes = _run_rewrite_loop(rows=rows, args=args)
-        rows = _load_article_rows(profile=None, published_only=args.published_only, limit=args.limit)
+        rows = _load_article_rows(profile=None, published_only=True, limit=args.limit)
         _apply_similarity_and_scores(rows, rewrite_threshold=float(args.rewrite_threshold))
         for row in rows:
             outcome = rewrite_outcomes.get(int(row["article_id"]))
@@ -878,7 +978,13 @@ def main() -> int:
     if args.sync_sheet:
         sheet_result = _sync_sheet_rows(blogger_rows=rows, cloudflare_rows=cloudflare_rows)
 
-    report_paths = _write_report(args=args, rows=rows, outcomes=rewrite_outcomes, sheet_result=sheet_result)
+    report_paths = _write_report(
+        args=args,
+        rows=rows,
+        cloudflare_rows=cloudflare_rows,
+        outcomes=rewrite_outcomes,
+        sheet_result=sheet_result,
+    )
     print(
         json.dumps(
             {

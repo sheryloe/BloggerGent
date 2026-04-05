@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -14,8 +15,10 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from slugify import slugify
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.entities import Blog, SyncedBloggerPost
 from app.services.audit_service import add_log
 from app.services.openai_usage_service import (
     FREE_TIER_DEFAULT_LARGE_TEXT_MODEL,
@@ -23,6 +26,7 @@ from app.services.openai_usage_service import (
     route_openai_free_tier_text_model,
 )
 from app.services.providers.factory import get_article_provider, get_image_provider, get_runtime_config, get_topic_provider
+from app.services.publish_trust_gate_service import assess_publish_trust_requirements
 from app.services.settings_service import get_settings_map, upsert_settings
 
 DEFAULT_CATEGORY_SCHEDULE_TIME = "00:00"
@@ -407,9 +411,10 @@ def _quality_gate_thresholds(values: dict[str, str]) -> dict[str, float]:
     enabled = _is_enabled(values.get("quality_gate_enabled"), default=True)
     return {
         "enabled": 1.0 if enabled else 0.0,
-        "similarity_threshold": _safe_float(values.get("quality_gate_similarity_threshold"), 70.0),
-        "min_seo_score": _safe_float(values.get("quality_gate_min_seo_score"), 60.0),
+        "similarity_threshold": _safe_float(values.get("quality_gate_similarity_threshold"), 65.0),
+        "min_seo_score": _safe_float(values.get("quality_gate_min_seo_score"), 70.0),
         "min_geo_score": _safe_float(values.get("quality_gate_min_geo_score"), 60.0),
+        "min_ctr_score": _safe_float(values.get("quality_gate_min_ctr_score"), 60.0),
     }
 
 
@@ -418,9 +423,11 @@ def _quality_gate_fail_reasons(
     similarity_score: float,
     seo_score: float,
     geo_score: float,
+    ctr_score: float,
     similarity_threshold: float,
     min_seo_score: float,
     min_geo_score: float,
+    min_ctr_score: float,
 ) -> list[str]:
     reasons: list[str] = []
     if similarity_score >= similarity_threshold:
@@ -429,6 +436,8 @@ def _quality_gate_fail_reasons(
         reasons.append("seo_below_min")
     if geo_score < min_geo_score:
         reasons.append("geo_below_min")
+    if ctr_score < min_ctr_score:
+        reasons.append("ctr_below_min")
     return reasons
 
 
@@ -714,6 +723,71 @@ def _render_bullets(items: tuple[str, ...]) -> str:
     return "\n".join(f"- {item}" for item in items)
 
 
+def _is_mysteria_story_category(*, category_id: str, category_slug: str) -> bool:
+    lowered = f"{category_id} {category_slug}".casefold()
+    return (
+        "cat-world-mysteria-story" in lowered
+        or "mysteria" in lowered
+        or "mystery" in lowered
+    )
+
+
+def _build_mysteria_blogger_source_block(
+    db: Session,
+    *,
+    category_id: str,
+    category_slug: str,
+    pair_size: int = 2,
+    preview_limit: int = 6,
+) -> str:
+    if not _is_mysteria_story_category(category_id=category_id, category_slug=category_slug):
+        return ""
+
+    intro_lines = [
+        "[미스테리아 스토리 소스 운영 컨셉]",
+        "- 이 카테고리는 Blogger 원본 소스를 한국어 문화권 맥락에 맞게 재가공하는 방식으로 작성합니다.",
+        "- DB 소스 큐는 오래된 글부터(ascending) 순서대로 읽고, 한 회차에 2개씩(source pair) 묶어 사용합니다.",
+        "- 단순 직역 금지: 사실 관계/출처는 유지하고 한국 독자 기준의 맥락, 용어, 설명 순서로 재구성합니다.",
+        "- source pair에서 겹치는 사실은 교차 검증 포인트로 정리하고, 상충 내용은 분리 표기합니다.",
+        "- 본문에서 원문 표현을 길게 복사하지 말고, 검증 가능한 사실 중심의 한국어 다큐멘터리 톤으로 씁니다.",
+    ]
+
+    try:
+        blog_ids = (
+            db.execute(
+                select(Blog.id)
+                .where(Blog.profile_key == "world_mystery")
+                .order_by(Blog.is_active.desc(), Blog.id.desc())
+            )
+            .scalars()
+            .all()
+        )
+        if not blog_ids:
+            return "\n".join(intro_lines) + "\n"
+
+        source_rows = db.execute(
+            select(SyncedBloggerPost.title, SyncedBloggerPost.url)
+            .where(SyncedBloggerPost.blog_id.in_(blog_ids))
+            .order_by(SyncedBloggerPost.published_at.asc().nullslast(), SyncedBloggerPost.id.asc())
+            .limit(max(preview_limit, pair_size * 2))
+        ).all()
+        if not source_rows:
+            return "\n".join(intro_lines) + "\n"
+
+        intro_lines.append("- 현재 source queue 미리보기(오래된 순):")
+        for index, row in enumerate(source_rows, start=1):
+            title = str(row[0] or "").strip()
+            url = str(row[1] or "").strip() or "URL 없음"
+            if not title:
+                continue
+            intro_lines.append(f"  - source_{index}: {title} ({url})")
+        intro_lines.append("- 글 생성 시 source_1 + source_2를 우선 pair로 사용하고, 다음 회차는 source_3 + source_4로 진행합니다.")
+    except Exception:  # noqa: BLE001
+        return "\n".join(intro_lines) + "\n"
+
+    return "\n".join(intro_lines) + "\n"
+
+
 def _shared_structure_rules() -> str:
     return """[공통 원칙]
 - 한국 문화/여행 블로그의 실전형 구조를 따르되, 모든 글을 같은 패턴으로 찍어내지 않습니다.
@@ -916,6 +990,27 @@ def list_cloudflare_categories(db: Session) -> list[dict]:
 
 
 def list_cloudflare_posts(db: Session) -> list[dict]:
+    def _optional_float(value: Any) -> float | None:
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _resolve_index_status(post_payload: dict[str, Any]) -> str:
+        direct = str(post_payload.get("index_status") or post_payload.get("indexStatus") or "").strip()
+        if direct:
+            return direct
+        index_payload = post_payload.get("index")
+        if isinstance(index_payload, dict):
+            nested = str(index_payload.get("status") or index_payload.get("indexStatus") or "").strip()
+            if nested:
+                return nested
+        return "unknown"
+
     values = get_settings_map(db)
     posts = _list_remote_posts(values)
     public_site_base = _public_site_base_url(values)
@@ -927,6 +1022,9 @@ def list_cloudflare_posts(db: Session) -> list[dict]:
         slug = str(post.get("slug") or "").strip()
         remote_id = str(post.get("id") or slug).strip()
         category = post.get("category") if isinstance(post.get("category"), dict) else {}
+        quality_payload = post.get("quality") if isinstance(post.get("quality"), dict) else {}
+        analytics_payload = post.get("analytics") if isinstance(post.get("analytics"), dict) else {}
+        index_payload = post.get("index") if isinstance(post.get("index"), dict) else {}
         remote_public_url = str(post.get("publicUrl") or post.get("public_url") or post.get("url") or "").strip()
         published_url = remote_public_url or (f"{public_site_base}/ko/post/{quote(slug)}" if public_site_base and slug else None)
         tags = post.get("tags") if isinstance(post.get("tags"), list) else []
@@ -936,6 +1034,36 @@ def list_cloudflare_posts(db: Session) -> list[dict]:
         published_at = str(post.get("publishedAt") or post.get("published_at") or "").strip()
         if not published_at and status_value.lower() in {"published", "live"}:
             published_at = updated_at or created_at
+        seo_score = _optional_float(
+            post.get("seo_score")
+            or post.get("seoScore")
+            or quality_payload.get("seo_score")
+            or quality_payload.get("seoScore")
+        )
+        geo_score = _optional_float(
+            post.get("geo_score")
+            or post.get("geoScore")
+            or quality_payload.get("geo_score")
+            or quality_payload.get("geoScore")
+        )
+        ctr = _optional_float(
+            post.get("ctr")
+            or post.get("clickThroughRate")
+            or analytics_payload.get("ctr")
+            or analytics_payload.get("clickThroughRate")
+        )
+        quality_status = str(
+            post.get("quality_status")
+            or post.get("qualityStatus")
+            or quality_payload.get("status")
+            or "",
+        ).strip() or None
+        index_status = str(
+            post.get("index_status")
+            or post.get("indexStatus")
+            or index_payload.get("status")
+            or _resolve_index_status(post)
+        ).strip() or "unknown"
         items.append(
             {
                 "provider": "cloudflare",
@@ -954,6 +1082,11 @@ def list_cloudflare_posts(db: Session) -> list[dict]:
                     for tag in tags
                     if isinstance(tag, dict) and str(tag.get("name") or "").strip()
                 ],
+                "seo_score": seo_score,
+                "geo_score": geo_score,
+                "ctr": ctr,
+                "index_status": index_status,
+                "quality_status": quality_status,
                 "published_at": published_at,
                 "created_at": created_at,
                 "updated_at": updated_at,
@@ -1189,6 +1322,10 @@ def _is_enabled(value: str | bool | None, *, default: bool = False) -> bool:
 
 def _cloudflare_inline_images_enabled(values: dict[str, str]) -> bool:
     return _is_enabled(values.get("cloudflare_inline_images_enabled"), default=False)
+
+
+def _cloudflare_require_cover_image(values: dict[str, str]) -> bool:
+    return _is_enabled(values.get("cloudflare_require_cover_image"), default=True)
 
 
 def _select_weighted_daily_categories(
@@ -1650,6 +1787,40 @@ def _append_no_inline_image_rule(prompt: str) -> str:
     )
 
 
+def _append_cloudflare_seo_trust_guard(prompt: str, *, category_slug: str, current_date: str) -> str:
+    guard_lines = [
+        "[SEO trust + source integrity guard]",
+        f"- Include one explicit timestamp line near the top: 기준 시각: {current_date} (Asia/Seoul).",
+        "- Include one section that clearly separates 확인된 사실 and 미확인 정보.",
+        "- Include one source/verification section with 2-5 concrete references or official channels.",
+        "- If no verifiable URL exists, explicitly write: 확인 가능한 공식 URL 없음(작성 시점 기준).",
+        "- Do not present rumors or repost claims as confirmed facts.",
+        "- Avoid exaggerated or absolute claims unless verifiable evidence is provided.",
+        "- Follow a fixed SEO/GEO/CTR-friendly section order.",
+        "- Required section order: 핵심 요약 -> 확인된 사실 -> 미확인 정보/가정 -> 전개 시나리오 -> 행동 체크리스트 -> 출처/확인 경로 -> FAQ.",
+        "- Keep at least 4 top-level sections and at least 2 sub-sections.",
+        "- In the first 220 characters, state target reader and what they can decide after reading.",
+        "- Avoid vague prose. Prefer concrete entities, dates, and actionable checkpoints.",
+    ]
+
+    if category_slug in {"주식의-흐름", "크립토의-흐름", "동그리의-생각"}:
+        guard_lines.append("- For forward-looking analysis, label scenarios as possibilities, not certainties.")
+    if category_slug in {"문화와-공간", "축제와-현장", "여행과-기록"}:
+        guard_lines.append("- For schedule/price/entry details, use recheck wording when uncertain.")
+    if category_slug == "미스테리아-스토리":
+        guard_lines.append("- Separate documented records, claims, and retellings in different blocks.")
+
+    if _is_mysteria_story_category(category_id="", category_slug=category_slug):
+        guard_lines.extend(
+            [
+                "- For mysteria-story, enforce source-pair workflow from Blogger origin posts (2 items per run).",
+                "- Keep Korean localization natural and culturally adapted, not literal translation tone.",
+            ]
+        )
+
+    return f"{prompt}\n\n" + "\n".join(guard_lines) + "\n"
+
+
 def _append_hero_only_visual_rule(prompt: str) -> str:
     return (
         f"{prompt}\n\n"
@@ -1824,6 +1995,18 @@ def _prepare_markdown_body(title: str, body: str) -> str:
     if cleaned.startswith("# "):
         return cleaned
     return f"# {title}\n\n{cleaned}"
+
+
+def _hash_image_bytes(image_bytes: bytes | None) -> str:
+    if not image_bytes:
+        return ""
+    return hashlib.sha256(image_bytes).hexdigest()
+
+
+def _is_inline_duplicate(cover_hash: str, inline_bytes: bytes | None) -> bool:
+    if not cover_hash or not inline_bytes:
+        return False
+    return _hash_image_bytes(inline_bytes) == cover_hash
 
 
 def _strip_generated_body_images(body_markdown: str) -> str:
@@ -2121,6 +2304,48 @@ def _build_prompt_map(bundle: dict, category_id: str) -> dict[str, str]:
     return mapping
 
 
+SEO_GEO_CTR_STRUCTURE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("missing_summary_section", ("핵심 요약", "요약", "tl;dr")),
+    ("missing_confirmed_section", ("확인된 사실", "검증된 사실", "confirmed")),
+    ("missing_unconfirmed_section", ("미확인", "검증 필요", "불확실", "가정", "주장/증언", "unconfirmed")),
+    ("missing_scenario_section", ("시나리오", "전개 가능성", "향후 전개", "impact scenario")),
+    ("missing_checklist_section", ("체크리스트", "실행 포인트", "행동 포인트", "action checklist")),
+    ("missing_sources_section", ("출처/확인 경로", "출처", "참고 링크", "source/verification")),
+)
+
+
+def _assess_seo_geo_ctr_structure(body_markdown: str) -> dict[str, Any]:
+    body = str(body_markdown or "")
+    lowered = body.casefold()
+    reasons: list[str] = []
+    checks: dict[str, bool] = {}
+
+    for reason, markers in SEO_GEO_CTR_STRUCTURE_RULES:
+        passed = any(marker.casefold() in lowered for marker in markers)
+        checks[reason] = passed
+        if not passed:
+            reasons.append(reason)
+
+    h2_html_count = len(re.findall(r"(?is)<h2\b", body))
+    h3_html_count = len(re.findall(r"(?is)<h3\b", body))
+    h2_md_count = len(re.findall(r"(?m)^##\s+", body))
+    h3_md_count = len(re.findall(r"(?m)^###\s+", body))
+    h2_count = h2_html_count + h2_md_count
+    h3_count = h3_html_count + h3_md_count
+    has_depth = h2_count >= 4 and h3_count >= 2
+    checks["section_depth"] = has_depth
+    if not has_depth:
+        reasons.append("missing_seo_geo_ctr_section_depth")
+
+    return {
+        "passed": len(reasons) == 0,
+        "reasons": reasons,
+        "checks": checks,
+        "h2_count": h2_count,
+        "h3_count": h3_count,
+    }
+
+
 def _assess_cloudflare_quality_gate(
     *,
     title: str,
@@ -2166,14 +2391,25 @@ def _assess_cloudflare_quality_gate(
     )
     seo_score = float(seo_geo.get("seo_score", 0) or 0)
     geo_score = float(seo_geo.get("geo_score", 0) or 0)
+    ctr_score = float(seo_geo.get("ctr_score", 0) or 0)
     reasons = _quality_gate_fail_reasons(
         similarity_score=similarity_score,
         seo_score=seo_score,
         geo_score=geo_score,
+        ctr_score=ctr_score,
         similarity_threshold=float(thresholds["similarity_threshold"]),
         min_seo_score=float(thresholds["min_seo_score"]),
         min_geo_score=float(thresholds["min_geo_score"]),
+        min_ctr_score=float(thresholds["min_ctr_score"]),
     )
+    trust_assessment = assess_publish_trust_requirements(body_markdown)
+    for trust_reason in trust_assessment.get("reasons", []):
+        if trust_reason not in reasons:
+            reasons.append(str(trust_reason))
+    structure_assessment = _assess_seo_geo_ctr_structure(body_markdown)
+    for structure_reason in structure_assessment.get("reasons", []):
+        if structure_reason not in reasons:
+            reasons.append(str(structure_reason))
     return {
         "passed": len(reasons) == 0,
         "reasons": reasons,
@@ -2181,6 +2417,9 @@ def _assess_cloudflare_quality_gate(
         "most_similar_url": most_similar_url,
         "seo_score": int(round(seo_score)),
         "geo_score": int(round(geo_score)),
+        "ctr_score": int(round(ctr_score)),
+        "trust_gate": trust_assessment,
+        "structure_gate": structure_assessment,
     }
 
 
@@ -2194,7 +2433,13 @@ def _effective_quality_thresholds_for_category(category_slug: str, thresholds: d
     return effective
 
 
-def _sync_cloudflare_quality_rows(db: Session, *, rows: list[dict[str, str]]) -> dict[str, Any]:
+def _sync_cloudflare_quality_rows(
+    db: Session,
+    *,
+    rows: list[dict[str, str]],
+    strict_live_only: bool = False,
+    backup_tab_name: str | None = None,
+) -> dict[str, Any]:
     from app.services.google_sheet_service import (
         CLOUDFLARE_SNAPSHOT_COLUMNS,
         QUALITY_COLUMNS,
@@ -2214,33 +2459,41 @@ def _sync_cloudflare_quality_rows(db: Session, *, rows: list[dict[str, str]]) ->
     tab_name = _safe_tab_name(str(config.get("cloudflare_tab") or "").strip(), fallback="Cloudflare Blog")
     category_tabs_enabled = _is_enabled(config.get("cloudflare_category_tabs_enabled"), default=False)
     auto_format_enabled = _is_enabled(config.get("auto_format_enabled"), default=True)
+    live_rows = [row for row in rows if str(row.get("status") or "").strip().lower() in {"published", "live"}]
+
     if not sheet_id:
         return {"status": "skipped", "reason": "google_sheet_not_configured", "rows": 0, "tab": tab_name}
-    if not rows:
+    if not live_rows:
         return {"status": "skipped", "reason": "empty_rows", "rows": 0, "tab": tab_name}
 
     main_result = sync_google_sheet_quality_tab(
         db,
         sheet_id=sheet_id,
         tab_name=tab_name,
-        incoming_rows=rows,
+        incoming_rows=live_rows,
         base_columns=CLOUDFLARE_SNAPSHOT_COLUMNS,
         quality_columns=QUALITY_COLUMNS,
-        key_columns=("url", "remote_id", "title"),
+        key_columns=("remote_id", "url", "title"),
         auto_format_enabled=auto_format_enabled,
+        strict_live_only=strict_live_only,
+        backup_tab_name=backup_tab_name,
     )
 
     if not category_tabs_enabled:
-        return {
-            "status": "ok",
-            "tab": tab_name,
-            "rows": int(main_result.get("rows", 0) or 0),
-            "category_tabs_enabled": False,
-            "category_tabs": [],
-        }
+        payload = dict(main_result if isinstance(main_result, dict) else {})
+        payload.update(
+            {
+                "status": str(payload.get("status") or "ok"),
+                "tab": str(payload.get("tab") or tab_name),
+                "rows": int(payload.get("rows", 0) or 0),
+                "category_tabs_enabled": False,
+                "category_tabs": [],
+            }
+        )
+        return payload
 
     grouped_rows: dict[str, list[dict[str, str]]] = {}
-    for row in rows:
+    for row in live_rows:
         category_slug = str(row.get("category_slug") or "").strip()
         category_name = str(row.get("category") or "").strip()
         group_key = category_slug or category_name
@@ -2268,8 +2521,10 @@ def _sync_cloudflare_quality_rows(db: Session, *, rows: list[dict[str, str]]) ->
             incoming_rows=group_rows,
             base_columns=CLOUDFLARE_SNAPSHOT_COLUMNS,
             quality_columns=QUALITY_COLUMNS,
-            key_columns=("url", "remote_id", "title"),
+            key_columns=("remote_id", "url", "title"),
             auto_format_enabled=auto_format_enabled,
+            strict_live_only=strict_live_only,
+            backup_tab_name=f"{candidate}_BACKUP" if strict_live_only else None,
         )
         category_results.append(
             {
@@ -2300,7 +2555,13 @@ def generate_cloudflare_posts(
 ) -> dict:
     normalized_per_category = max(1, min(int(per_category), 5))
     normalized_status = "published" if status.strip().lower() != "draft" else "draft"
-    current_date = datetime.now(timezone.utc).astimezone().date().isoformat()
+    settings_map = get_settings_map(db)
+    schedule_timezone = (settings_map.get("schedule_timezone") or DEFAULT_CATEGORY_TIMEZONE).strip() or DEFAULT_CATEGORY_TIMEZONE
+    try:
+        schedule_tz = ZoneInfo(schedule_timezone)
+    except Exception:  # noqa: BLE001
+        schedule_tz = ZoneInfo(DEFAULT_CATEGORY_TIMEZONE)
+    current_date = datetime.now(schedule_tz).date().isoformat()
 
     categories = [item for item in list_cloudflare_categories(db) if bool(item.get("isLeaf"))]
     if category_slugs:
@@ -2351,8 +2612,8 @@ def generate_cloudflare_posts(
         }
 
     runtime = get_runtime_config(db)
-    settings_map = get_settings_map(db)
     inline_images_enabled = _cloudflare_inline_images_enabled(settings_map)
+    require_cover_image = _cloudflare_require_cover_image(settings_map)
     topic_requested_model, article_requested_model, prompt_requested_model = _resolve_cloudflare_requested_models(
         settings_map=settings_map,
         runtime=runtime,
@@ -2471,6 +2732,17 @@ def generate_cloudflare_posts(
         topic_prompt_template = prompt_map.get("topic_discovery") or default_topic_prompt_template
         article_prompt_template = prompt_map.get("article_generation") or _default_prompt_for_stage(category, "article_generation")
         image_prompt_template = prompt_map.get("image_prompt_generation") or _default_prompt_for_stage(category, "image_prompt_generation")
+        mysteria_source_block = _build_mysteria_blogger_source_block(
+            db,
+            category_id=category_id,
+            category_slug=category_slug,
+            pair_size=2,
+            preview_limit=6,
+        )
+        if mysteria_source_block:
+            topic_prompt_template = f"{topic_prompt_template}\n\n{mysteria_source_block}"
+            article_prompt_template = f"{article_prompt_template}\n\n{mysteria_source_block}"
+            image_prompt_template = f"{image_prompt_template}\n\n{mysteria_source_block}"
         effective_quality_thresholds = _effective_quality_thresholds_for_category(category_slug, quality_thresholds)
 
         discovered_topics: list[dict[str, Any]] = []
@@ -2766,6 +3038,11 @@ def generate_cloudflare_posts(
                     keyword=keyword,
                     topic_count=requested_for_category,
                 ) + category_gate + planner_brief_block + _article_output_contract()
+                article_prompt = _append_cloudflare_seo_trust_guard(
+                    article_prompt,
+                    category_slug=category_slug,
+                    current_date=current_date,
+                )
                 article_prompt = _append_no_inline_image_rule(article_prompt)
                 article_model = article_requested_model
                 if runtime.provider_mode == "live":
@@ -2822,6 +3099,7 @@ def generate_cloudflare_posts(
                     "most_similar_url": "",
                     "seo_score": 0,
                     "geo_score": 0,
+                    "ctr_score": 0,
                     "attempt": 1,
                 }
                 quality_gate_payload = {
@@ -2834,11 +3112,13 @@ def generate_cloudflare_posts(
                         "most_similar_url": final_quality.get("most_similar_url"),
                         "seo_score": final_quality.get("seo_score"),
                         "geo_score": final_quality.get("geo_score"),
+                        "ctr_score": final_quality.get("ctr_score"),
                     },
                     "thresholds": {
                         "similarity_threshold": quality_thresholds.get("similarity_threshold"),
                         "min_seo_score": quality_thresholds.get("min_seo_score"),
                         "min_geo_score": effective_quality_thresholds.get("min_geo_score"),
+                        "min_ctr_score": quality_thresholds.get("min_ctr_score"),
                     },
                 }
                 if not quality_gate_payload["enabled"]:
@@ -2876,6 +3156,7 @@ def generate_cloudflare_posts(
                             "most_similar_url": str(final_quality.get("most_similar_url") or ""),
                             "seo_score": str(final_quality.get("seo_score") or ""),
                             "geo_score": str(final_quality.get("geo_score") or ""),
+                            "ctr_score": str(final_quality.get("ctr_score") or ""),
                             "quality_status": "quality_gate_failed",
                             "rewrite_attempts": str(len(quality_attempts)),
                             "last_audited_at": _utc_now_iso(),
@@ -2919,6 +3200,7 @@ def generate_cloudflare_posts(
                 cover_image_url = ""
                 image_warning = ""
                 image_bytes: bytes | None = None
+                cover_hash = ""
                 try:
                     image_bytes, _image_raw = image_provider.generate_image(visual_prompt, slug_candidate)
                 except Exception as primary_image_exc:
@@ -2927,6 +3209,7 @@ def generate_cloudflare_posts(
                         image_bytes, _image_raw = image_provider.generate_image(fallback_visual_prompt, slug_candidate)
                     except Exception as fallback_image_exc:
                         image_warning = f"image_generation_failed: {primary_image_exc}; fallback_failed: {fallback_image_exc}"
+                cover_hash = _hash_image_bytes(image_bytes)
                 if image_bytes:
                     try:
                         cover_image_url = _upload_integration_asset(
@@ -2939,22 +3222,68 @@ def generate_cloudflare_posts(
                     except Exception as asset_exc:  # noqa: BLE001
                         image_warning = f"cover_upload_failed: {asset_exc}"
 
+                if require_cover_image and not cover_image_url:
+                    failed_count += 1
+                    items.append(
+                        {
+                            "status": "failed",
+                            "keyword": keyword,
+                            "title": article_output.title,
+                            "category_id": category_id,
+                            "topic_novelty": topic_novelty,
+                            "quality_gate": quality_gate_payload,
+                            "error": "cover_image_missing",
+                            "image_warning": image_warning or "cover_image_missing",
+                        }
+                    )
+                    cloudflare_quality_rows.append(
+                        {
+                            "remote_id": "",
+                            "published_at": "",
+                            "created_at": "",
+                            "category": category_name,
+                            "category_slug": category_slug,
+                            "title": article_output.title,
+                            "url": "",
+                            "excerpt": article_output.excerpt,
+                            "labels": ", ".join(article_output.labels or []),
+                            "status": "failed",
+                            "updated_at": _utc_now_iso(),
+                            "topic_cluster": "",
+                            "topic_angle": "",
+                            "similarity_score": str(final_quality.get("similarity_score") or ""),
+                            "most_similar_url": str(final_quality.get("most_similar_url") or ""),
+                            "seo_score": str(final_quality.get("seo_score") or ""),
+                            "geo_score": str(final_quality.get("geo_score") or ""),
+                            "ctr_score": str(final_quality.get("ctr_score") or ""),
+                            "quality_status": "cover_image_missing",
+                            "rewrite_attempts": str(len(quality_attempts)),
+                            "last_audited_at": _utc_now_iso(),
+                        }
+                    )
+                    continue
+
                 body_markdown = _strip_generated_body_images(article_output.html_article)
                 inline_prompt = str(getattr(article_output, "inline_collage_prompt", "") or "").strip()
                 if inline_images_enabled and inline_prompt:
                     try:
                         inline_bytes, _inline_raw = image_provider.generate_image(inline_prompt, f"{slug_candidate}-inline-3x2")
-                        inline_url = _upload_integration_asset(
-                            db,
-                            post_slug=slug_candidate,
-                            alt_text=f"{title} inline collage",
-                            filename=f"{slug_candidate}-inline-3x2.png",
-                            image_bytes=inline_bytes,
-                        )
-                        body_markdown = _insert_markdown_inline_image(
-                            body_markdown,
-                            f"![{title} inline collage]({inline_url})",
-                        )
+                        if cover_image_url and _is_inline_duplicate(cover_hash, inline_bytes):
+                            image_warning = "; ".join(
+                                value for value in (image_warning, "inline_duplicate_skipped") if value
+                            )
+                        else:
+                            inline_url = _upload_integration_asset(
+                                db,
+                                post_slug=slug_candidate,
+                                alt_text=f"{title} inline collage",
+                                filename=f"{slug_candidate}-inline-3x2.png",
+                                image_bytes=inline_bytes,
+                            )
+                            body_markdown = _insert_markdown_inline_image(
+                                body_markdown,
+                                f"![{title} inline collage]({inline_url})",
+                            )
                     except Exception as inline_exc:  # noqa: BLE001
                         image_warning = "; ".join(
                             value
@@ -3055,6 +3384,7 @@ def generate_cloudflare_posts(
                         "most_similar_url": str(quality_gate_payload["scores"].get("most_similar_url") or ""),
                         "seo_score": str(quality_gate_payload["scores"].get("seo_score") or ""),
                         "geo_score": str(quality_gate_payload["scores"].get("geo_score") or ""),
+                        "ctr_score": str(quality_gate_payload["scores"].get("ctr_score") or ""),
                         "quality_status": "ok",
                         "rewrite_attempts": str(len(quality_attempts)),
                         "last_audited_at": _utc_now_iso(),
@@ -3090,6 +3420,7 @@ def generate_cloudflare_posts(
                         "most_similar_url": "",
                         "seo_score": "",
                         "geo_score": "",
+                        "ctr_score": "",
                         "quality_status": "failed",
                         "rewrite_attempts": "0",
                         "last_audited_at": _utc_now_iso(),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 from urllib.parse import urlencode, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -20,6 +21,14 @@ from app.services.blogger_oauth_service import (
     get_granted_google_scopes,
     list_blogger_blogs,
 )
+from app.services.platform_oauth_service import (
+    PlatformOAuthError,
+    build_platform_authorization_url,
+    complete_google_platform_oauth,
+    get_platform_web_return_url,
+    try_decode_platform_oauth_state,
+)
+from app.services.platform_service import list_managed_channels
 from app.services.blogger_sync_service import sync_connected_blogger_posts
 from app.services.google_reporting_service import list_analytics_properties, list_search_console_sites
 from app.services.model_policy_service import build_model_policy, validate_text_settings_payload
@@ -45,6 +54,18 @@ def _parse_int_setting(values: dict[str, str], key: str, *, minimum: int, maximu
         return
     if parsed < minimum or parsed > maximum:
         raise HTTPException(status_code=422, detail=f"{key} must be between {minimum} and {maximum}")
+
+
+def _parse_json_object_setting(values: dict[str, str], key: str) -> None:
+    if key not in values:
+        return
+    raw_value = (values.get(key) or "").strip() or "{}"
+    try:
+        parsed = json.loads(raw_value)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=422, detail=f"{key} must be a valid JSON object") from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=422, detail=f"{key} must be a JSON object")
 
 
 def _cloudflare_direct_upload_ready(values: dict[str, str]) -> bool:
@@ -102,6 +123,15 @@ def update_settings(payload: SettingUpdate, db: Session = Depends(get_db)):
     _parse_int_setting(payload.values, "cloudflare_daily_publish_interval_hours", minimum=1, maximum=24)
     _parse_int_setting(payload.values, "cloudflare_daily_publish_weekday_quota", minimum=0, maximum=24)
     _parse_int_setting(payload.values, "cloudflare_daily_publish_sunday_quota", minimum=0, maximum=24)
+    _parse_int_setting(payload.values, "google_indexing_daily_quota", minimum=1, maximum=10000)
+    _parse_int_setting(payload.values, "google_indexing_cooldown_days", minimum=1, maximum=60)
+    _parse_int_setting(payload.values, "workspace_metrics_sync_interval_hours", minimum=1, maximum=168)
+    _parse_int_setting(payload.values, "workspace_metrics_lookback_days", minimum=1, maximum=365)
+    _parse_json_object_setting(payload.values, "google_indexing_blog_quota_map")
+    if "google_indexing_policy_mode" in payload.values:
+        mode = (payload.values.get("google_indexing_policy_mode") or "").strip().lower()
+        if mode != "mixed":
+            raise HTTPException(status_code=422, detail="google_indexing_policy_mode must be mixed")
     try:
         validate_text_settings_payload(payload.values)
     except ValueError as exc:
@@ -216,7 +246,10 @@ def _append_public_image_warnings(values: dict[str, str], warnings: list[str]) -
 
 
 @blogger_router.get("/config")
-def get_blogger_settings(db: Session = Depends(get_db)) -> dict:
+def get_blogger_settings(
+    include_remote: bool = Query(default=False),
+    db: Session = Depends(get_db),
+) -> dict:
     values = get_settings_map(db)
     config = get_blogger_config(db)
     config["oauth_scopes"] = get_google_oauth_scopes()
@@ -228,6 +261,7 @@ def get_blogger_settings(db: Session = Depends(get_db)) -> dict:
     config["search_console_sites"] = []
     config["analytics_properties"] = []
     config["warnings"] = []
+    config["remote_loaded"] = include_remote
     _append_public_image_warnings(values, config["warnings"])
 
     try:
@@ -237,6 +271,14 @@ def get_blogger_settings(db: Session = Depends(get_db)) -> dict:
         config["authorization_url"] = None
         config["authorization_error"] = exc.detail
         config["warnings"].append(exc.detail)
+
+    if not include_remote:
+        config["available_blogs"] = []
+        config["connected"] = bool(
+            config.get("access_token_configured")
+            or config.get("refresh_token_configured")
+        )
+        return config
 
     try:
         config["available_blogs"] = list_blogger_blogs(db)
@@ -267,10 +309,21 @@ def update_blogger_settings(payload: SettingUpdate, db: Session = Depends(get_db
 
 
 @blogger_router.get("/oauth/start")
-def start_blogger_oauth(db: Session = Depends(get_db)):
+def start_blogger_oauth(
+    channel_id: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
     try:
-        authorization_url = build_blogger_authorization_url(db)
-    except BloggerOAuthError as exc:
+        resolved_channel_id = channel_id
+        if not resolved_channel_id:
+            primary_blogger_channel = next((item for item in list_managed_channels(db) if item.provider == "blogger"), None)
+            resolved_channel_id = primary_blogger_channel.channel_id if primary_blogger_channel else None
+
+        if resolved_channel_id:
+            authorization_url = build_platform_authorization_url(db, channel_id=resolved_channel_id)
+        else:
+            authorization_url = build_blogger_authorization_url(db)
+    except (BloggerOAuthError, PlatformOAuthError) as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     return RedirectResponse(url=authorization_url, status_code=307)
 
@@ -282,6 +335,38 @@ def complete_blogger_oauth(
     error: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
+    platform_state = try_decode_platform_oauth_state(state)
+    if platform_state and platform_state.get("provider") == "google":
+        channel_id = str(platform_state.get("channel_id") or "").strip() or None
+        base_url = get_platform_web_return_url(channel_id)
+        if error:
+            return RedirectResponse(
+                url=f"{base_url}&{urlencode({'platform_oauth': 'error', 'message': error})}" if "?" in base_url else f"{base_url}?{urlencode({'platform_oauth': 'error', 'message': error})}",
+                status_code=307,
+            )
+        if not code:
+            return RedirectResponse(
+                url=f"{base_url}&{urlencode({'platform_oauth': 'error', 'message': 'missing_code'})}" if "?" in base_url else f"{base_url}?{urlencode({'platform_oauth': 'error', 'message': 'missing_code'})}",
+                status_code=307,
+            )
+        try:
+            result = complete_google_platform_oauth(db, code=code, state=state)
+        except PlatformOAuthError as exc:
+            return RedirectResponse(
+                url=f"{base_url}&{urlencode({'platform_oauth': 'error', 'message': exc.detail})}" if "?" in base_url else f"{base_url}?{urlencode({'platform_oauth': 'error', 'message': exc.detail})}",
+                status_code=307,
+            )
+
+        if str(result.get("channel_id") or "").startswith("blogger:"):
+            sync_warnings = sync_connected_blogger_posts(db)
+            if sync_warnings:
+                logger.warning("Platform Blogger OAuth succeeded but synced post refresh had warnings: %s", " | ".join(sync_warnings))
+        success_query = {"platform_oauth": "success", "channel_id": result.get("channel_id", "")}
+        return RedirectResponse(
+            url=f"{base_url}&{urlencode(success_query)}" if "?" in base_url else f"{base_url}?{urlencode(success_query)}",
+            status_code=307,
+        )
+
     base_url = get_blogger_web_return_url()
     if error:
         return RedirectResponse(url=f"{base_url}?{urlencode({'blogger_oauth': 'error', 'message': error})}", status_code=307)

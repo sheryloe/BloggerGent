@@ -82,6 +82,7 @@ CONTENT_OVERVIEW_PROFILE_OPTIONS = {
     "korea_travel",
     "world_mystery",
 }
+DBS_VERSION = "dbs-v1"
 
 TRAVEL_CATEGORY_HINTS: dict[str, tuple[str, tuple[str, ...]]] = {
     "travel": ("Travel", ("travel", "trip", "route", "itinerary", "walk", "neighborhood", "local")),
@@ -393,6 +394,138 @@ def _heading_counts(html_value: str) -> tuple[int, int]:
 
 def _extract_links(html_value: str) -> list[str]:
     return [match.strip() for match in LINK_RE.findall(html_value or "") if match.strip()]
+
+
+def compute_ctr_score(*, title: str, excerpt: str | None = None, html_body: str | None = None) -> dict[str, Any]:
+    title_text = (title or "").strip()
+    excerpt_text = (excerpt or "").strip()
+    plain_body = _plain_text(html_body)
+    combined_text = f"{title_text} {excerpt_text} {plain_body[:600]}".strip().lower()
+    title_words = _tokenize_words(title_text)
+    title_length = len(title_text)
+
+    if 28 <= title_length <= 88 and 4 <= len(title_words) <= 14:
+        headline_fit = 30
+    elif 20 <= title_length <= 110 and len(title_words) >= 3:
+        headline_fit = 24
+    else:
+        headline_fit = 16
+
+    specificity_tokens = [
+        "2026",
+        "2025",
+        "guide",
+        "checklist",
+        "timeline",
+        "route",
+        "map",
+        "cost",
+        "budget",
+        "schedule",
+        "best",
+        "near",
+        "seoul",
+        "busan",
+        "korea",
+        "mystery",
+        "case",
+        "festival",
+        "museum",
+        "travel",
+        "가이드",
+        "체크리스트",
+        "타임라인",
+        "동선",
+        "코스",
+        "비용",
+        "예산",
+        "일정",
+        "서울",
+        "부산",
+        "한국",
+        "미스터리",
+        "사건",
+        "축제",
+        "박물관",
+        "여행",
+    ]
+    specificity_hits = len([token for token in specificity_tokens if token in combined_text])
+    if specificity_hits >= 5:
+        specificity_score = 25
+    elif specificity_hits >= 3:
+        specificity_score = 20
+    elif specificity_hits >= 1:
+        specificity_score = 15
+    else:
+        specificity_score = 10
+
+    intent_tokens = [
+        "how",
+        "why",
+        "what",
+        "where",
+        "when",
+        "best",
+        "top",
+        "guide",
+        "tips",
+        "checklist",
+        "timeline",
+        "review",
+        "how to",
+        "왜",
+        "무엇",
+        "어디",
+        "언제",
+        "가이드",
+        "팁",
+        "정리",
+        "비교",
+        "추천",
+        "후기",
+        "방법",
+    ]
+    intent_hits = len([token for token in intent_tokens if token in combined_text])
+    if intent_hits >= 4:
+        click_intent_score = 20
+    elif intent_hits >= 2:
+        click_intent_score = 16
+    elif intent_hits >= 1:
+        click_intent_score = 12
+    else:
+        click_intent_score = 8
+
+    if 70 <= len(excerpt_text) <= 180:
+        excerpt_support_score = 15
+    elif len(excerpt_text) >= 35:
+        excerpt_support_score = 11
+    else:
+        excerpt_support_score = 7
+
+    freshness_hits = len(re.findall(r"\b(?:18|19|20)\d{2}\b", combined_text)) + len(
+        re.findall(r"(?:\d{4}년|\d{1,2}월|봄|여름|가을|겨울)", combined_text)
+    )
+    if freshness_hits >= 2:
+        freshness_score = 10
+    elif freshness_hits == 1:
+        freshness_score = 7
+    else:
+        freshness_score = 4
+
+    ctr_score = _clamp_component(
+        headline_fit + specificity_score + click_intent_score + excerpt_support_score + freshness_score,
+        maximum=100,
+    )
+    return {
+        "ctr_score": ctr_score,
+        "ctr_breakdown": {
+            "headline_fit": headline_fit,
+            "specificity": specificity_score,
+            "click_intent": click_intent_score,
+            "excerpt_support": excerpt_support_score,
+            "freshness": freshness_score,
+        },
+    }
 
 
 def compute_seo_geo_scores(
@@ -716,9 +849,12 @@ def compute_seo_geo_scores(
         maximum=100,
     )
 
+    ctr_payload = compute_ctr_score(title=title, excerpt=excerpt, html_body=html_body)
+
     return {
         "seo_score": seo_score,
         "geo_score": geo_score,
+        "ctr_score": int(ctr_payload.get("ctr_score") or 0),
         "seo_breakdown": {
             "title_intent": title_score,
             "intro_topic_match": intro_score,
@@ -735,9 +871,182 @@ def compute_seo_geo_scores(
             "time_context": recency_score,
             "faq_summary": faq_score,
         },
+        "ctr_breakdown": dict(ctr_payload.get("ctr_breakdown") or {}),
         "plain_text_length": plain_length,
         "sentence_count": len(sentence_list),
         "excerpt_length": len((excerpt or "").strip()),
+    }
+
+
+def _dbs_grade(score: float) -> str:
+    value = float(score)
+    if value >= 85.0:
+        return "A"
+    if value >= 75.0:
+        return "B"
+    if value >= 65.0:
+        return "C"
+    if value >= 55.0:
+        return "D"
+    return "F"
+
+
+def compute_dbs_score(
+    *,
+    seo_score: float,
+    geo_score: float,
+    ctr_score: float,
+    plain_text_length: int,
+    sentence_count: int,
+    excerpt_length: int,
+) -> dict[str, Any]:
+    seo = _clamp_component(float(seo_score), minimum=0, maximum=100)
+    geo = _clamp_component(float(geo_score), minimum=0, maximum=100)
+    ctr = _clamp_component(float(ctr_score), minimum=0, maximum=100)
+
+    base = (0.40 * seo) + (0.35 * geo) + (0.25 * ctr)
+
+    thin_penalty = 10 if plain_text_length < 1200 else (5 if plain_text_length < 2000 else 0)
+    weak_excerpt_penalty = 3 if excerpt_length < 60 else (1 if excerpt_length < 90 else 0)
+    minimum_component = min(seo, geo, ctr)
+    imbalance_penalty = 8 if minimum_component < 50 else (4 if minimum_component < 60 else 0)
+    all_green_bonus = 4 if (seo >= 80 and geo >= 75 and ctr >= 70) else (2 if (seo >= 70 and geo >= 60 and ctr >= 60) else 0)
+
+    score = _clamp_component(
+        base - thin_penalty - weak_excerpt_penalty - imbalance_penalty + all_green_bonus,
+        minimum=0,
+        maximum=100,
+    )
+
+    content_factor = min(max(float(plain_text_length), 0.0) / 2500.0, 1.0)
+    sentence_factor = min(max(float(sentence_count), 0.0) / 18.0, 1.0)
+    excerpt_factor = 1.0 if excerpt_length >= 90 else (0.7 if excerpt_length >= 60 else 0.4)
+    confidence = round(
+        _clamp_component(
+            100.0 * ((0.50 * content_factor) + (0.30 * sentence_factor) + (0.20 * excerpt_factor)),
+            minimum=0.0,
+            maximum=100.0,
+        ),
+        1,
+    )
+    confidence_label = "high" if confidence >= 80 else ("medium" if confidence >= 60 else "low")
+
+    return {
+        "dbs_score": round(float(score), 1),
+        "dbs_grade": _dbs_grade(float(score)),
+        "dbs_confidence": confidence,
+        "dbs_confidence_label": confidence_label,
+        "dbs_version": DBS_VERSION,
+        "dbs_components": {
+            "seo_score": int(seo),
+            "geo_score": int(geo),
+            "ctr_score": int(ctr),
+        },
+        "dbs_adjustments": {
+            "thin_penalty": thin_penalty,
+            "weak_excerpt_penalty": weak_excerpt_penalty,
+            "imbalance_penalty": imbalance_penalty,
+            "all_green_bonus": all_green_bonus,
+        },
+    }
+
+
+def compute_blog_dbs_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    live_rows = [row for row in rows if _safe_str(row.get("status")).lower() in {"published", "live"}]
+    if not live_rows:
+        return {
+            "blog_dbs_score": 0.0,
+            "blog_dbs_grade": "F",
+            "blog_dbs_confidence": 0.0,
+            "post_count": 0,
+            "recent_90d_post_count": 0,
+            "weighted_post_avg": 0.0,
+            "gate_pass_rate": 0.0,
+            "consistency_score": 0.0,
+            "dbs_version": DBS_VERSION,
+        }
+
+    now_utc = _utc_now()
+
+    def _age_days(value: str) -> int:
+        raw = _safe_str(value)
+        if not raw:
+            return 9999
+        normalized = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return 9999
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        delta = now_utc - parsed.astimezone(timezone.utc)
+        return max(int(delta.days), 0)
+
+    weighted_sum = 0.0
+    total_weight = 0.0
+    scores: list[float] = []
+    confidence_values: list[float] = []
+    recent_90d = 0
+    gate_pass_count = 0
+
+    for row in live_rows:
+        score = float(row.get("dbs_score") or 0.0)
+        confidence = float(row.get("dbs_confidence") or 0.0)
+        age_days = _age_days(_safe_str(row.get("published_at")) or _safe_str(row.get("updated_at")) or _safe_str(row.get("created_at")))
+        recency_weight = 1.0 if age_days <= 30 else (0.8 if age_days <= 90 else (0.6 if age_days <= 180 else 0.4))
+        confidence_weight = max(min(confidence / 100.0, 1.0), 0.5)
+        weight = recency_weight * confidence_weight
+        weighted_sum += score * weight
+        total_weight += weight
+        scores.append(score)
+        confidence_values.append(confidence)
+        if age_days <= 90:
+            recent_90d += 1
+        seo = float(row.get("seo_score") or 0.0)
+        geo = float(row.get("geo_score") or 0.0)
+        ctr = float(row.get("ctr_score") or 0.0)
+        if seo >= 70.0 and geo >= 60.0 and ctr >= 60.0:
+            gate_pass_count += 1
+
+    weighted_post_avg = (weighted_sum / total_weight) if total_weight > 0 else 0.0
+    gate_pass_rate = (float(gate_pass_count) / float(len(live_rows))) * 100.0
+    if len(scores) >= 2:
+        mean_score = sum(scores) / float(len(scores))
+        variance = sum((score - mean_score) ** 2 for score in scores) / float(len(scores))
+        stddev = math.sqrt(variance)
+    else:
+        stddev = 0.0
+    consistency_score = _clamp_component(100.0 - (2.0 * stddev), minimum=0.0, maximum=100.0)
+    blog_dbs_score = _clamp_component(
+        (0.75 * weighted_post_avg) + (0.15 * gate_pass_rate) + (0.10 * consistency_score),
+        minimum=0.0,
+        maximum=100.0,
+    )
+
+    avg_post_confidence = (sum(confidence_values) / float(len(confidence_values))) if confidence_values else 0.0
+    sample_factor = min(float(len(live_rows)) / 30.0, 1.0)
+    freshness_factor = min(float(recent_90d) / 12.0, 1.0)
+    blog_confidence = _clamp_component(
+        100.0
+        * (
+            (0.60 * (avg_post_confidence / 100.0))
+            + (0.25 * sample_factor)
+            + (0.15 * freshness_factor)
+        ),
+        minimum=0.0,
+        maximum=100.0,
+    )
+
+    return {
+        "blog_dbs_score": round(float(blog_dbs_score), 1),
+        "blog_dbs_grade": _dbs_grade(float(blog_dbs_score)),
+        "blog_dbs_confidence": round(float(blog_confidence), 1),
+        "post_count": len(live_rows),
+        "recent_90d_post_count": int(recent_90d),
+        "weighted_post_avg": round(float(weighted_post_avg), 1),
+        "gate_pass_rate": round(float(gate_pass_rate), 1),
+        "consistency_score": round(float(consistency_score), 1),
+        "dbs_version": DBS_VERSION,
     }
 
 

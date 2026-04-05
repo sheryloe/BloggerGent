@@ -31,6 +31,7 @@ from app.services.blog_service import (
     update_blog_agent,
 )
 from app.services.cloudflare_channel_service import get_cloudflare_overview, get_cloudflare_prompt_bundle, save_cloudflare_prompt
+from app.services.workspace_service import get_managed_channel, list_managed_channels, list_platform_prompt_steps, serialize_managed_channel
 
 router = APIRouter(prefix="/channels", tags=["channels"])
 
@@ -39,7 +40,7 @@ def _parse_channel_id(channel_id: str) -> tuple[str, str]:
     if ":" not in channel_id:
         raise HTTPException(status_code=404, detail="Channel not found")
     provider, raw_id = channel_id.split(":", 1)
-    if provider not in {"blogger", "cloudflare"} or not raw_id:
+    if provider not in {"blogger", "cloudflare", "youtube", "instagram"} or not raw_id:
         raise HTTPException(status_code=404, detail="Channel not found")
     return provider, raw_id
 
@@ -136,30 +137,58 @@ def _build_cloudflare_flow(db: Session, channel_id: str) -> PromptFlowRead:
     )
 
 
+def _build_platform_flow(db: Session, channel_id: str) -> PromptFlowRead:
+    channel = get_managed_channel(db, channel_id)
+    if channel is None:
+        raise HTTPException(status_code=404, detail="Channel not found")
+    return PromptFlowRead(
+        channel_id=channel.channel_id,
+        channel_name=channel.display_name,
+        provider=channel.provider,
+        structure_editable=False,
+        content_editable=True,
+        available_stage_types=[],
+        steps=[
+            PromptFlowStepRead(
+                id=item["id"],
+                channel_id=channel.channel_id,
+                provider=channel.provider,
+                stage_type=item["stage_type"],
+                stage_label=item["stage_label"],
+                name=item["name"],
+                role_name=item["role_name"],
+                objective=item["objective"],
+                prompt_template=item["prompt_template"],
+                provider_hint=item["provider_hint"],
+                provider_model=item["provider_model"],
+                is_enabled=True,
+                is_required=item["stage_type"] == "platform_publish",
+                removable=item["stage_type"] != "platform_publish",
+                prompt_enabled=bool(item["prompt_template"]),
+                editable=False,
+                structure_editable=False,
+                content_editable=True,
+                sort_order=index * 10,
+            )
+            for index, item in enumerate(list_platform_prompt_steps(channel.provider), start=1)
+        ],
+    )
+
+
 @router.get("", response_model=list[ManagedChannelRead])
 def get_channels(db: Session = Depends(get_db)) -> list[ManagedChannelRead]:
     blogs = list_blogs(db)
     summary_map = get_blog_summary_map(db, [blog.id for blog in blogs]) if blogs else {}
-    channels: list[ManagedChannelRead] = []
-    for blog in blogs:
-        summary = asdict(summary_map[blog.id]) if blog.id in summary_map else {}
-        channels.append(
-            ManagedChannelRead(
-                provider="blogger",
-                channel_id=f"blogger:{blog.id}",
-                name=blog.name,
-                status="connected" if blog.blogger_blog_id else "attention",
-                base_url=blog.blogger_url,
-                primary_category=blog.content_category,
-                purpose=blog.content_brief or blog.target_audience,
-                posts_count=summary.get("published_posts", 0),
-                categories_count=len({step.stage_type for step in blog.agent_configs}) or 1,
-                prompts_count=len(list(blog.agent_configs)),
-                planner_supported=True,
-                analytics_supported=True,
-                prompt_flow_supported=True,
-            )
-        )
+    channels = [ManagedChannelRead(**serialize_managed_channel(channel)) for channel in list_managed_channels(db)]
+
+    for channel in channels:
+        if channel.provider != "blogger":
+            continue
+        raw_id = channel.channel_id.split(":", 1)[1]
+        blog_id = int(raw_id)
+        summary = asdict(summary_map[blog_id]) if blog_id in summary_map else {}
+        channel.posts_count = summary.get("published_posts", channel.posts_count)
+        channel.pending_items = max(channel.pending_items, summary.get("job_count", 0) - summary.get("completed_jobs", 0))
 
     overview = get_cloudflare_overview(db)
     channels.append(
@@ -177,6 +206,9 @@ def get_channels(db: Session = Depends(get_db)) -> list[ManagedChannelRead]:
             planner_supported=True,
             analytics_supported=True,
             prompt_flow_supported=True,
+            capabilities=["archive_publish", "analytics"],
+            oauth_state="connected" if overview.get("provider_status") == "connected" else "attention",
+            quota_state={"state": "unknown"},
         )
     )
     return channels
@@ -187,6 +219,8 @@ def get_channel_prompt_flow(channel_id: str, db: Session = Depends(get_db)) -> P
     provider, raw_id = _parse_channel_id(channel_id)
     if provider == "blogger":
         return _build_blogger_flow(db, channel_id, int(raw_id))
+    if provider in {"youtube", "instagram"}:
+        return _build_platform_flow(db, channel_id)
     return _build_cloudflare_flow(db, channel_id)
 
 

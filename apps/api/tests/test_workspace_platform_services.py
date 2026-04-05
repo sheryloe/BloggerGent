@@ -14,6 +14,7 @@ from app.models.entities import Blog, ContentItem, GoogleIndexUrlState, MetricFa
 from app.services import metric_ingestion_service
 from app.services import platform_oauth_service
 from app.services import platform_publish_service
+from app.services import workspace_service
 from app.services.platform_oauth_service import build_platform_authorization_url, complete_google_platform_oauth, refresh_platform_access_token
 from app.services.platform_publish_service import mark_content_item_publish_queued, process_platform_publish_queue
 from app.services.platform_service import (
@@ -268,8 +269,105 @@ def test_process_platform_publish_queue_uploads_youtube_video(db: Session, tmp_p
     assert requests[0][1] == platform_publish_service.YOUTUBE_UPLOAD_INIT_URL
 
 
+def test_mark_content_item_publish_queued_sets_blocked_asset_on_missing_youtube_asset(db: Session) -> None:
+    ensure_managed_channels(db)
+    channel = get_managed_channel_by_channel_id(db, "youtube:main")
+    assert channel is not None
+
+    item = create_content_item(
+        db,
+        channel=channel,
+        content_type="youtube_video",
+        title="Missing video path",
+        description="",
+        asset_manifest={},
+    )
+
+    queued = mark_content_item_publish_queued(db, item)
+    assert queued.lifecycle_status == "blocked_asset"
+    assert queued.blocked_reason == "missing_video_file_path"
+    publication_count = db.query(PublicationRecord).filter(PublicationRecord.content_item_id == item.id).count()
+    assert publication_count == 0
+
+
+def test_mark_content_item_publish_queued_is_idempotent_after_success(db: Session) -> None:
+    ensure_managed_channels(db)
+    channel = get_managed_channel_by_channel_id(db, "youtube:main")
+    assert channel is not None
+
+    item = create_content_item(
+        db,
+        channel=channel,
+        content_type="youtube_video",
+        title="Already published",
+        description="",
+    )
+    db.add(
+        PublicationRecord(
+            content_item_id=item.id,
+            managed_channel_id=channel.id,
+            provider="youtube",
+            remote_id="video-100",
+            remote_url="https://www.youtube.com/watch?v=video-100",
+            publish_status="published",
+            published_at=datetime.now(UTC),
+            response_payload={},
+        )
+    )
+    db.commit()
+
+    queued = mark_content_item_publish_queued(db, item)
+    publication_count = db.query(PublicationRecord).filter(PublicationRecord.content_item_id == item.id).count()
+
+    assert queued.id == item.id
+    assert queued.lifecycle_status == "published"
+    assert publication_count == 1
+
+
+def test_process_platform_publish_queue_writes_failure_code_for_oauth_error(
+    db: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_managed_channels(db)
+    channel = get_managed_channel_by_channel_id(db, "youtube:main")
+    assert channel is not None
+
+    video_file = tmp_path / "sample.mp4"
+    video_file.write_bytes(b"video-bytes")
+    item = create_content_item(
+        db,
+        channel=channel,
+        content_type="youtube_video",
+        title="OAuth failure sample",
+        description="",
+        asset_manifest={"video_file_path": str(video_file)},
+    )
+    mark_content_item_publish_queued(db, item)
+
+    def _raise_oauth_error(*_args, **_kwargs):
+        raise platform_oauth_service.PlatformOAuthError("oauth failed", detail="token_expired", status_code=401)
+
+    monkeypatch.setattr(platform_publish_service, "authorized_platform_request", _raise_oauth_error)
+    result = process_platform_publish_queue(db, limit=5)
+
+    latest_publication = (
+        db.query(PublicationRecord)
+        .filter(PublicationRecord.content_item_id == item.id)
+        .order_by(PublicationRecord.id.desc())
+        .first()
+    )
+    assert result["processed_count"] == 1
+    assert result["processed"][0]["error_code"] == "AUTH_EXPIRED"
+    assert latest_publication is not None
+    assert latest_publication.publish_status == "failed"
+    assert latest_publication.error_code == "AUTH_EXPIRED"
+    assert latest_publication.response_payload.get("error_code") == "AUTH_EXPIRED"
+
+
 def test_process_platform_publish_queue_blocks_instagram_without_live_capability(db: Session) -> None:
     ensure_managed_channels(db)
+    upsert_settings(db, {"instagram_publish_api_enabled": "true"})
     channel = get_managed_channel_by_channel_id(db, "instagram:main")
     assert channel is not None
 
@@ -294,7 +392,103 @@ def test_process_platform_publish_queue_blocks_instagram_without_live_capability
     assert result["processed_count"] == 1
     assert latest_publication is not None
     assert latest_publication.publish_status == "blocked"
-    assert latest_publication.response_payload["reason"] == "instagram_publish_capability_disabled"
+    assert latest_publication.error_code == "CAPABILITY_BLOCKED"
+    assert latest_publication.response_payload["reason"] == "instagram_publish_capability_missing"
+
+
+def test_instagram_reel_poll_uses_exponential_backoff(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    sleep_calls: list[float] = []
+    status_queue = ["IN_PROGRESS", "IN_PROGRESS", "FINISHED"]
+
+    monkeypatch.setattr(platform_publish_service, "_instagram_poll_window_seconds", lambda _db: (60, 1.0, 10.0))
+    monkeypatch.setattr(platform_publish_service.random, "uniform", lambda _a, _b: 0.0)
+    monkeypatch.setattr(platform_publish_service.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+
+    def _fake_authorized_request(_db, *, method: str, **_kwargs):
+        assert method == "GET"
+        status_code = status_queue.pop(0)
+        return FakeResponse(200, {"status_code": status_code})
+
+    monkeypatch.setattr(platform_publish_service, "authorized_platform_request", _fake_authorized_request)
+    payload = platform_publish_service._poll_instagram_reel_container_ready(
+        db,
+        channel_id="instagram:main",
+        creation_id="178900",
+    )
+
+    assert payload["status"] == "ready"
+    assert payload["attempts"] == 3
+    assert sleep_calls == [1.0, 1.8]
+
+
+def test_create_content_item_reuses_manual_idempotency_key(db: Session) -> None:
+    ensure_managed_channels(db)
+    channel = get_managed_channel_by_channel_id(db, "instagram:main")
+    assert channel is not None
+
+    first = create_content_item(
+        db,
+        channel=channel,
+        content_type="instagram_image",
+        title="First title",
+        idempotency_key="manual-ig-key",
+    )
+    second = create_content_item(
+        db,
+        channel=channel,
+        content_type="instagram_image",
+        title="Second title ignored",
+        idempotency_key="manual-ig-key",
+    )
+
+    assert first.id == second.id
+    assert second.title == "First title"
+
+
+def test_workspace_content_item_asset_flow_transitions_to_ready_then_queued(
+    db: Session,
+    tmp_path: Path,
+) -> None:
+    ensure_managed_channels(db)
+    channel = get_managed_channel_by_channel_id(db, "youtube:main")
+    assert channel is not None
+
+    item = create_content_item(
+        db,
+        channel=channel,
+        content_type="youtube_video",
+        title="Asset flow",
+        description="",
+        asset_manifest={},
+    )
+    blocked = mark_content_item_publish_queued(db, item)
+    assert blocked.lifecycle_status == "blocked_asset"
+    assert blocked.blocked_reason == "missing_video_file_path"
+
+    video_file = tmp_path / "ready.mp4"
+    video_file.write_bytes(b"video-bytes")
+    refreshed_item = db.get(ContentItem, item.id)
+    assert refreshed_item is not None
+    ready_payload = workspace_service.update_content_item(
+        db,
+        refreshed_item,
+        asset_manifest={"video_file_path": str(video_file)},
+    )
+    assert ready_payload["lifecycle_status"] == "ready_to_publish"
+    assert ready_payload.get("blocked_reason") in {"", None}
+
+    queue_target = db.get(ContentItem, item.id)
+    assert queue_target is not None
+    queued_payload = workspace_service.queue_content_item_publish(db, queue_target)
+    assert queued_payload["lifecycle_status"] == "queued"
+    latest_publication = (
+        db.query(PublicationRecord)
+        .filter(PublicationRecord.content_item_id == item.id)
+        .order_by(PublicationRecord.id.desc())
+        .first()
+    )
+    assert latest_publication is not None
+    assert latest_publication.publish_status == "queued"
 
 
 def test_sync_blogger_channel_metrics_writes_metric_facts(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:

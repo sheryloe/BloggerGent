@@ -16,11 +16,21 @@ from app.services.blogger_editor_service import (
 from app.services.article_service import ensure_article_editorial_labels
 from app.services.html_assembler import assemble_article_html
 from app.services.providers.factory import get_blogger_provider
+from app.services.publish_trust_gate_service import enforce_publish_trust_requirements
 from app.services.related_posts import find_related_articles
 from app.services.settings_service import get_settings_map
 from app.services.storage_service import ensure_existing_public_image_url, is_private_asset_url, save_html
 from app.services.topic_guard_service import TopicGuardConflictError, rebuild_topic_memories_for_blog, validate_candidate_topic
 from app.services.usage_service import record_mock_usage
+
+RETRY_REQUIRED_STATUS = "retry-required"
+MANUAL_ACTION_STATUS = "needs-manual-action"
+ACTIVE_PUBLISH_QUEUE_STATUSES = {"queued", "scheduled", "processing", RETRY_REQUIRED_STATUS}
+RETRYABLE_PUBLISH_ERROR_CODES = {
+    "Cloudflare R2 upload failed.": "cloudflare_r2_upload_failed",
+    "Cloudflare integration asset upload failed.": "cloudflare_asset_upload_failed",
+}
+MAX_PUBLISH_RETRY_ATTEMPTS = 3
 
 
 def load_article_for_publish(db: Session, article_id: int) -> Article | None:
@@ -162,8 +172,7 @@ def rebuild_article_html(db: Session, article: Article, hero_image_url: str) -> 
 
 
 def get_active_publish_queue_item(article: Article) -> PublishQueueItem | None:
-    active_statuses = {"queued", "scheduled", "processing"}
-    return next((item for item in article.publish_queue_items or [] if item.status in active_statuses), None)
+    return next((item for item in article.publish_queue_items or [] if item.status in ACTIVE_PUBLISH_QUEUE_STATUSES), None)
 
 
 def _publish_interval_seconds(db: Session) -> int:
@@ -181,7 +190,7 @@ def _next_available_publish_time(db: Session, *, blog_id: int, requested_time: d
         select(PublishQueueItem)
         .where(
             PublishQueueItem.blog_id == blog_id,
-            PublishQueueItem.status.in_(["queued", "scheduled", "processing", "completed"]),
+            PublishQueueItem.status.in_(["queued", "scheduled", "processing", RETRY_REQUIRED_STATUS, "completed"]),
         )
         .order_by(PublishQueueItem.not_before.desc(), PublishQueueItem.completed_at.desc(), PublishQueueItem.id.desc())
     ).scalars().first()
@@ -286,6 +295,10 @@ def perform_publish_now(db: Session, *, article: Article, queue_item: PublishQue
     assembled_html = rebuild_article_html(db, article, hero_image_url)
     if not (assembled_html or "").strip():
         raise ValueError("Assembled HTML is missing for this article")
+    enforce_publish_trust_requirements(
+        assembled_html,
+        context=f"publish_queue_article_{article.id}",
+    )
 
     provider = get_blogger_provider(db, article.blog)
     if getattr(provider, "access_token", "") and is_private_asset_url(hero_image_url):
@@ -364,6 +377,19 @@ def perform_publish_now(db: Session, *, article: Article, queue_item: PublishQue
     return load_article_for_publish(db, article.id) or refreshed
 
 
+def _classify_publish_error(exc: Exception) -> tuple[str, bool]:
+    message = str(exc).strip()
+    for marker, error_code in RETRYABLE_PUBLISH_ERROR_CODES.items():
+        if marker in message:
+            return error_code, True
+    return "publish_failed", False
+
+
+def _publish_retry_delay(attempt_count: int) -> timedelta:
+    minutes = min(15 * max(attempt_count, 1), 180)
+    return timedelta(minutes=minutes)
+
+
 def process_publish_queue_item(db: Session, queue_item_id: int) -> PublishQueueItem | None:
     queue_item = db.execute(
         select(PublishQueueItem)
@@ -378,7 +404,7 @@ def process_publish_queue_item(db: Session, queue_item_id: int) -> PublishQueueI
     ).scalar_one_or_none()
     if not queue_item:
         return None
-    if queue_item.status in {"completed", "cancelled"}:
+    if queue_item.status in {"completed", "cancelled", MANUAL_ACTION_STATUS}:
         return queue_item
     if queue_item.not_before > datetime.now(timezone.utc):
         return queue_item
@@ -398,12 +424,56 @@ def process_publish_queue_item(db: Session, queue_item_id: int) -> PublishQueueI
     except (TopicGuardConflictError, ValueError) as exc:
         queue_item.status = "failed"
         queue_item.last_error = str(exc)
+        queue_item.response_payload = {
+            **dict(queue_item.response_payload or {}),
+            "last_error_code": "publish_validation_failed",
+            "last_error_cause": str(exc),
+            "last_error_at": datetime.now(timezone.utc).isoformat(),
+        }
         db.add(queue_item)
         db.commit()
         return queue_item
     except Exception as exc:  # noqa: BLE001
-        queue_item.status = "failed"
+        error_code, retryable = _classify_publish_error(exc)
         queue_item.last_error = str(exc)
+        payload = {
+            **dict(queue_item.response_payload or {}),
+            "last_error_code": error_code,
+            "last_error_cause": str(exc),
+            "last_error_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if retryable:
+            if queue_item.attempt_count < MAX_PUBLISH_RETRY_ATTEMPTS:
+                retry_at = datetime.now(timezone.utc) + _publish_retry_delay(queue_item.attempt_count)
+                queue_item.status = RETRY_REQUIRED_STATUS
+                queue_item.not_before = retry_at
+                payload.update(
+                    {
+                        "retry_state": RETRY_REQUIRED_STATUS,
+                        "retry_attempt_count": queue_item.attempt_count,
+                        "retry_scheduled_for": retry_at.isoformat(),
+                        "manual_action_required": False,
+                    }
+                )
+            else:
+                queue_item.status = MANUAL_ACTION_STATUS
+                payload.update(
+                    {
+                        "retry_state": MANUAL_ACTION_STATUS,
+                        "retry_attempt_count": queue_item.attempt_count,
+                        "manual_action_required": True,
+                    }
+                )
+        else:
+            queue_item.status = "failed"
+            payload.update(
+                {
+                    "retry_state": "failed",
+                    "retry_attempt_count": queue_item.attempt_count,
+                    "manual_action_required": False,
+                }
+            )
+        queue_item.response_payload = payload
         db.add(queue_item)
         db.commit()
         return queue_item
@@ -414,7 +484,7 @@ def process_publish_queue_batch(db: Session) -> dict:
     due_items = db.execute(
         select(PublishQueueItem)
         .where(
-            PublishQueueItem.status.in_(["queued", "scheduled"]),
+            PublishQueueItem.status.in_(["queued", "scheduled", RETRY_REQUIRED_STATUS]),
             PublishQueueItem.not_before <= now,
         )
         .order_by(PublishQueueItem.not_before.asc(), PublishQueueItem.created_at.asc())

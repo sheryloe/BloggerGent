@@ -25,7 +25,10 @@ from app.services.cloudflare_channel_service import (
     list_cloudflare_categories,
 )
 from app.services.job_service import create_job
+from app.services.platform_publish_service import content_item_missing_asset_reason
+from app.services.platform_service import create_content_item as create_platform_content_item
 from app.services.settings_service import get_settings_map
+from app.services.workspace_service import get_managed_channel, list_channel_categories
 from app.tasks.pipeline import run_job
 
 BLOGGER_CATEGORY_PRESETS: dict[str, list[tuple[str, str, int, str]]] = {
@@ -253,7 +256,7 @@ def _parse_channel_id(channel_id: str) -> tuple[str, str]:
     if ":" not in normalized:
         raise ValueError("channel_id must include provider prefix")
     provider, raw_id = normalized.split(":", 1)
-    if provider not in {"blogger", "cloudflare"} or not raw_id.strip():
+    if provider not in {"blogger", "cloudflare", "youtube", "instagram"} or not raw_id.strip():
         raise ValueError("unsupported channel_id")
     return provider, raw_id.strip()
 
@@ -287,6 +290,29 @@ def _resolve_channel_context(
             channel_name=blog.name,
             categories=categories,
             blog=blog,
+        )
+
+    if provider in {"youtube", "instagram"}:
+        channel = get_managed_channel(db, normalized_channel_id)
+        if channel is None:
+            raise ValueError("managed channel not found")
+        categories = [
+            PlannerCategoryDefinition(
+                key=item["key"],
+                name=item["name"],
+                weight=max(int(item.get("weight") or 1), 1),
+                color=item.get("color"),
+                sort_order=int(item.get("sort_order") or 0),
+                is_active=bool(item.get("is_active", True)),
+            )
+            for item in list_channel_categories(channel)
+        ]
+        return PlannerChannelContext(
+            channel_id=normalized_channel_id,
+            provider=provider,
+            channel_name=channel.display_name,
+            categories=categories,
+            blog=channel.linked_blog,
         )
 
     overview = get_cloudflare_overview(db)
@@ -895,6 +921,73 @@ def _run_cloudflare_slot_generation(db: Session, slot: ContentPlanSlot) -> None:
     db.commit()
 
 
+def _resolve_platform_content_type(slot: ContentPlanSlot, provider: str) -> str:
+    if provider == "youtube":
+        return "youtube_video"
+    category_key = (_slot_category_key(slot) or "").strip().lower()
+    return "instagram_reel" if category_key == "reel" else "instagram_image"
+
+
+def _run_platform_slot_generation(db: Session, slot: ContentPlanSlot, *, provider: str) -> None:
+    managed_channel = get_managed_channel(db, slot.plan_day.channel_id)
+    if managed_channel is None:
+        raise ValueError("managed channel context is missing")
+
+    category_key = _slot_category_key(slot) or "general"
+    category_name = _slot_category_name(slot) or category_key
+    title_seed = (slot.brief_topic or "").strip() or f"{managed_channel.display_name} {category_name}"
+    description = (slot.brief_audience or "").strip()
+    if slot.brief_extra_context:
+        description = (f"{description}\n{slot.brief_extra_context}").strip()
+
+    brief_payload = {
+        "planner_mode": True,
+        "planner_slot_id": slot.id,
+        "category_key": category_key,
+        "category_name": category_name,
+        "topic": slot.brief_topic,
+        "audience": slot.brief_audience,
+        "information_level": slot.brief_information_level,
+        "extra_context": slot.brief_extra_context,
+        "scheduled_for": slot.scheduled_for.isoformat() if slot.scheduled_for else None,
+    }
+    content_item = create_platform_content_item(
+        db,
+        channel=managed_channel,
+        content_type=_resolve_platform_content_type(slot, provider),
+        title=title_seed,
+        description=description,
+        body_text="",
+        asset_manifest={},
+        brief_payload=brief_payload,
+        scheduled_for=slot.scheduled_for,
+        created_by_agent="planner",
+        idempotency_key=f"planner-slot:{provider}:{slot.id}",
+        lifecycle_status="blocked_asset",
+        blocked_reason="",
+    )
+    blocked_reason = content_item_missing_asset_reason(content_item) or "missing_required_asset"
+    content_item.blocked_reason = blocked_reason
+    db.add(content_item)
+    db.commit()
+    db.refresh(content_item)
+
+    slot.result_payload = {
+        "provider": provider,
+        "status": "blocked_asset",
+        "content_item_id": content_item.id,
+        "requested_status": "blocked_asset",
+        "blocked_reason": blocked_reason,
+        "title": content_item.title,
+        "scheduled_for": slot.scheduled_for.isoformat() if slot.scheduled_for else None,
+    }
+    slot.last_run_at = datetime.now(UTC).replace(tzinfo=None)
+    slot.error_message = blocked_reason
+    slot.status = "generated"
+    db.add(slot)
+    db.commit()
+
+
 def run_slot_generation(db: Session, slot_id: int) -> PlannerSlotRead:
     slot = (
         db.query(ContentPlanSlot)
@@ -912,8 +1005,12 @@ def run_slot_generation(db: Session, slot_id: int) -> PlannerSlotRead:
     provider, _raw_id = _parse_channel_id(slot.plan_day.channel_id)
     if provider == "blogger":
         _run_blogger_slot_generation(db, slot)
-    else:
+    elif provider == "cloudflare":
         _run_cloudflare_slot_generation(db, slot)
+    elif provider in {"youtube", "instagram"}:
+        _run_platform_slot_generation(db, slot, provider=provider)
+    else:
+        raise ValueError("unsupported planner channel provider")
 
     db.refresh(slot)
     return _serialize_slot(slot)

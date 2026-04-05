@@ -19,7 +19,7 @@ class DefaultSetting:
 
 
 DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
-    "app_name": DefaultSetting("Bloggent", "Workspace display name"),
+    "app_name": DefaultSetting("Donggr AutoBloggent", "Workspace display name"),
     "default_blog_timezone": DefaultSetting("Asia/Seoul", "Default planner and publishing timezone"),
     "default_publish_mode": DefaultSetting("draft", "Default publishing mode for newly created jobs"),
     "default_writer_tone": DefaultSetting("system-operator", "Default writing tone label"),
@@ -33,7 +33,20 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     "automation_telegram_enabled": DefaultSetting("false", "Enable Telegram polling automation"),
     "automation_sheet_enabled": DefaultSetting("false", "Deprecated Google Sheet automation flag"),
     "automation_cloudflare_enabled": DefaultSetting("false", "Enable Cloudflare automation"),
+    "automation_google_indexing_enabled": DefaultSetting("false", "Enable Google indexing automation"),
     "automation_training_enabled": DefaultSetting("false", "Enable training automation"),
+    "workspace_metrics_sync_enabled": DefaultSetting(
+        "true",
+        "Enable periodic Search Console / GA4 metric ingestion for managed Blogger channels.",
+    ),
+    "workspace_metrics_sync_interval_hours": DefaultSetting(
+        "6",
+        "Hours between automatic workspace metric ingestion runs.",
+    ),
+    "workspace_metrics_lookback_days": DefaultSetting(
+        "28",
+        "Lookback window in days for Search Console / GA4 metric ingestion.",
+    ),
     "provider_mode": DefaultSetting(settings.provider_mode, "mock or live provider mode"),
     "public_image_provider": DefaultSetting(
         settings.public_image_provider,
@@ -151,6 +164,21 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     ),
     "blogger_token_scope": DefaultSetting(settings.blogger_token_scope, "Granted Google OAuth scope"),
     "blogger_token_type": DefaultSetting(settings.blogger_token_type, "Google OAuth token type"),
+    "youtube_default_privacy_status": DefaultSetting(
+        settings.youtube_default_privacy_status,
+        "Default YouTube privacy status. Recommended value is private.",
+    ),
+    "meta_graph_api_version": DefaultSetting(
+        settings.meta_graph_api_version,
+        "Meta Graph API version used for Instagram OAuth and publish flows.",
+    ),
+    "instagram_client_id": DefaultSetting(settings.instagram_client_id, "Instagram / Meta app client ID"),
+    "instagram_client_secret": DefaultSetting(settings.instagram_client_secret, "Instagram / Meta app client secret", True),
+    "instagram_redirect_uri": DefaultSetting(settings.instagram_redirect_uri, "Instagram / Meta OAuth redirect URI"),
+    "instagram_publish_api_enabled": DefaultSetting(
+        str(settings.instagram_publish_api_enabled).lower(),
+        "Enable the live Instagram publish adapter after app review and permission verification.",
+    ),
     "blogger_playwright_enabled": DefaultSetting(
         str(settings.blogger_playwright_enabled).lower(),
         "Enable Playwright automation for Blogger search description sync",
@@ -275,6 +303,10 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
         str(settings.quality_gate_min_geo_score),
         "Minimum GEO score (0-100) required by pre-publish quality gate.",
     ),
+    "quality_gate_min_ctr_score": DefaultSetting(
+        str(settings.quality_gate_min_ctr_score),
+        "Minimum CTR score (0-100) required by pre-publish quality gate.",
+    ),
     "last_schedule_run_on_mystery": DefaultSetting(
         "",
         "Last successful recurring mystery scheduler slot marker.",
@@ -351,9 +383,29 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
         "{}",
         "JSON object for Cloudflare daily weighted category counts.",
     ),
+    "google_indexing_policy_mode": DefaultSetting(
+        "mixed",
+        "Google indexing policy mode. mixed keeps publish requests for eligible URLs only.",
+    ),
+    "google_indexing_daily_quota": DefaultSetting(
+        "200",
+        "Google Indexing API daily publish request quota (project-level, LA day boundary).",
+    ),
+    "google_indexing_cooldown_days": DefaultSetting(
+        "7",
+        "Cooldown days before auto publish request can repeat for the same URL.",
+    ),
+    "google_indexing_blog_quota_map": DefaultSetting(
+        "{}",
+        "Per-blog integer daily publish allocation map as JSON. Example: {\"1\": 20, \"2\": 10}",
+    ),
     "cloudflare_inline_images_enabled": DefaultSetting(
         str(settings.cloudflare_inline_images_enabled).lower(),
         "Enable inline markdown collage images for Cloudflare posts.",
+    ),
+    "cloudflare_require_cover_image": DefaultSetting(
+        str(settings.cloudflare_require_cover_image).lower(),
+        "Require cover image before Cloudflare post publish; fail generation when missing.",
     ),
     "travel_blossom_cap_ratio": DefaultSetting(
         str(settings.travel_blossom_cap_ratio),
@@ -419,6 +471,7 @@ SETTING_DESCRIPTION_OVERRIDES_KO: dict[str, str] = {
     "automation_telegram_enabled": "텔레그램 운영 자동화 사용",
     "automation_sheet_enabled": "시트 자동화 사용(구형)",
     "automation_cloudflare_enabled": "Cloudflare 자동화 사용",
+    "automation_google_indexing_enabled": "Google 색인 자동화 사용",
     "automation_training_enabled": "학습 자동화 사용",
     "provider_mode": "공급자 실행 모드(mock/live)",
     "public_image_provider": "대표 이미지 공개 전달 방식",
@@ -463,6 +516,12 @@ SETTING_DESCRIPTION_OVERRIDES_KO: dict[str, str] = {
     "blogger_client_id": "Blogger OAuth 클라이언트 ID",
     "blogger_client_secret": "Blogger OAuth 클라이언트 시크릿",
     "blogger_redirect_uri": "Blogger OAuth 리디렉션 URI",
+    "youtube_default_privacy_status": "YouTube 기본 업로드 공개 상태",
+    "meta_graph_api_version": "Instagram/Meta Graph API 버전",
+    "instagram_client_id": "Instagram/Meta 앱 클라이언트 ID",
+    "instagram_client_secret": "Instagram/Meta 앱 클라이언트 시크릿",
+    "instagram_redirect_uri": "Instagram/Meta OAuth 리디렉션 URI",
+    "instagram_publish_api_enabled": "Instagram 실게시 어댑터 활성화 여부",
     "blogger_playwright_enabled": "Blogger Playwright 자동화 사용 여부",
     "blogger_playwright_auto_sync": "발행 후 Blogger 메타 자동 동기화 사용 여부",
     "blogger_playwright_cdp_url": "Blogger Playwright 원격 디버깅 URL",
@@ -489,6 +548,7 @@ SETTING_DESCRIPTION_OVERRIDES_KO: dict[str, str] = {
     "quality_gate_similarity_threshold": "품질 게이트 유사도 기준(0-100)",
     "quality_gate_min_seo_score": "품질 게이트 최소 SEO 점수(0-100)",
     "quality_gate_min_geo_score": "품질 게이트 최소 GEO 점수(0-100)",
+    "quality_gate_min_ctr_score": "품질 게이트 최소 CTR 점수(0-100)",
     "similarity_threshold": "기본 유사도 임계치",
     "topic_history_lookback_days": "토픽 히스토리 조회 기간(일)",
     "topic_novelty_cluster_threshold": "클러스터 신규성 임계치",
@@ -502,9 +562,14 @@ SETTING_DESCRIPTION_OVERRIDES_KO: dict[str, str] = {
     "cloudflare_daily_publish_timezone": "Cloudflare 자동 발행 시간대",
     "cloudflare_daily_publish_weekday_quota": "월~토 Cloudflare 하루 발행 수",
     "cloudflare_daily_publish_sunday_quota": "일요일 Cloudflare 하루 발행 수",
+    "google_indexing_policy_mode": "Google 색인 정책 모드(mixed 고정)",
+    "google_indexing_daily_quota": "Google 색인 API 하루 요청 상한(프로젝트 기준)",
+    "google_indexing_cooldown_days": "같은 URL 자동 색인 재요청 쿨다운(일)",
+    "google_indexing_blog_quota_map": "블로그별 하루 색인 요청 배분(JSON)",
     "travel_blossom_cap_ratio": "여행 채널 벚꽃 주제 상한 비율",
     "cloudflare_blossom_cap_ratio": "Cloudflare 채널 벚꽃 주제 상한 비율",
     "cloudflare_inline_images_enabled": "Cloudflare 본문 인라인 이미지 사용",
+    "cloudflare_require_cover_image": "Cloudflare 발행 시 대표 이미지 필수",
     "travel_inline_collage_enabled": "여행 본문 인라인 콜라주 사용",
     "mystery_inline_collage_enabled": "미스터리 본문 인라인 콜라주 사용",
     "wikimedia_image_count": "Wikimedia 이미지 최대 수",
