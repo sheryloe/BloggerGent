@@ -1,9 +1,9 @@
-name: bloggent
+name: ${COMPOSE_PROJECT_NAME:-bloggent}
 
 x-api-common: &api-common
   image: bloggent-api:local
   env_file:
-    - .env
+    - ${SERVICE_ENV_FILE:-.env}
   environment:
     DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://bloggent:bloggent@postgres:5432/bloggent}
     REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
@@ -11,7 +11,7 @@ x-api-common: &api-common
     PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8000}
   volumes:
     - ./apps/api:/app
-    - ./storage:/app/storage
+    - ${API_STORAGE_DIR:-./storage}:/app/storage
     - ./prompts:/app/prompts
   extra_hosts:
     - "host.docker.internal:host-gateway"
@@ -22,7 +22,7 @@ services:
     build:
       context: .
       dockerfile: infra/docker/postgres.Dockerfile
-    container_name: bloggent-postgres
+    command: postgres -c hba_file=/etc/postgresql/pg_hba.conf
     environment:
       POSTGRES_DB: bloggent
       POSTGRES_USER: bloggent
@@ -33,7 +33,7 @@ services:
         target: /var/lib/postgresql/data
       - type: bind
         source: ./infra/docker/postgres/pg_hba.conf
-        target: /var/lib/postgresql/data/pg_hba.conf
+        target: /etc/postgresql/pg_hba.conf
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U bloggent -d bloggent"]
       interval: 10s
@@ -47,7 +47,6 @@ services:
     build:
       context: .
       dockerfile: infra/docker/redis.Dockerfile
-    container_name: bloggent-redis
     command: redis-server --appendonly yes
     volumes:
       - type: bind
@@ -64,7 +63,6 @@ services:
     build:
       context: .
       dockerfile: infra/docker/api.Dockerfile
-    container_name: bloggent-api
     depends_on:
       postgres:
         condition: service_healthy
@@ -82,9 +80,8 @@ services:
     build:
       context: .
       dockerfile: infra/docker/web.Dockerfile
-    container_name: bloggent-web
     env_file:
-      - .env
+      - ${SERVICE_ENV_FILE:-.env}
     environment:
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000/api/v1}
       API_INTERNAL_URL: ${API_INTERNAL_URL:-http://api:8000/api/v1}
@@ -96,14 +93,14 @@ services:
     volumes:
       - ./apps/web:/app
       - web_node_modules:/app/node_modules
-      - web_next_cache:/app/.next
     ports:
       - "${WEB_PORT:-3001}:3000"
-    command: npm run dev -- --hostname 0.0.0.0 --port 3000
+    command: >
+      sh -c "rm -rf /app/.next/server /app/.next/cache &&
+      npm run dev -- --hostname 0.0.0.0 --port 3000"
 
   bootstrap:
     <<: *api-common
-    container_name: bloggent-bootstrap
     profiles: ["bootstrap"]
     depends_on:
       postgres:
@@ -119,7 +116,6 @@ services:
   worker:
     <<: *api-common
     profiles: ["async", "full"]
-    container_name: bloggent-worker
     depends_on:
       postgres:
         condition: service_healthy
@@ -135,7 +131,6 @@ services:
   scheduler:
     <<: *api-common
     profiles: ["async", "full"]
-    container_name: bloggent-scheduler
     depends_on:
       postgres:
         condition: service_healthy
@@ -154,7 +149,6 @@ services:
       context: .
       dockerfile: infra/docker/minio.Dockerfile
     profiles: ["storage", "full"]
-    container_name: bloggent-minio
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio123}
@@ -164,9 +158,8 @@ services:
         source: ${MINIO_DATA_DIR:-./.docker-data/minio}
         target: /data
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
 
 volumes:
   web_node_modules:
-  web_next_cache:

@@ -31,6 +31,13 @@ Editorial category guidance: {editorial_category_guidance}
 - If details are unverified, explicitly advise rechecking official sources before visit.
 - If an event window is already over, shift to planning/recap angle.
 
+[Trust + Source Signals]
+- Include one explicit timestamp line near the top using absolute date: "As of {current_date}".
+- Add one section that separates confirmed facts vs unverified details.
+- Add one section named like "Sources / Verification Path" with 2-5 concrete official channels or source types.
+- If a concrete source URL is not available, explicitly state "No verified source URL yet."
+- Avoid absolute claims ("always", "guaranteed", "best") unless directly supported by verifiable evidence.
+
 [Category Strategy]
 - `travel`: focus on area routes, transit choices, walking flow, timing decisions, and practical movement.
 - `culture`: focus on festivals, exhibitions, heritage, K-culture sites, and why the visit matters now.

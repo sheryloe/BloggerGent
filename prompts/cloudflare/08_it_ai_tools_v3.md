@@ -60,6 +60,13 @@ Return one JSON object only with:
 [Accuracy Rule]
 - Never invent specs, prices, release timing, compatibility, or feature availability.
 
+[Trust Rule]
+- Add one timestamp line near the top: "기준 시각: {current_date} (Asia/Seoul)".
+- Include one section that separates "확인된 사실" and "미확인/변동 가능 정보".
+- Include one "출처/확인 경로" section with 2~5개의 공식 문서/릴리즈 노트/벤더 공지 경로.
+- If no concrete source URL is available, explicitly write: "확인 가능한 공식 URL 없음(작성 시점 기준)".
+- For future-looking statements, frame as scenarios, not guaranteed outcomes.
+
 [Output Rules]
 - title/meta_description/labels/excerpt/html_article/faq_section: Korean
 - excerpt: 정확히 2문장

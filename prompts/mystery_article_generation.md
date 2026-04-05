@@ -29,6 +29,13 @@ Editorial category guidance: {editorial_category_guidance}
 - If the topic includes fiction-universe elements (including SCP), explicitly state fictional context.
 - Do not fabricate exact dates, names, evidence documents, or official conclusions.
 
+[Trust + Source Signals]
+- Include one explicit timestamp line near the top using absolute date: "As of {current_date}".
+- Add one section that separates documented facts vs claims/retellings.
+- Add one section named like "Sources / Verification Path" with 2-5 concrete archives, institutions, or source channels.
+- If a concrete source URL is not available, explicitly state "No verified source URL yet."
+- Never frame contested theories as proven conclusions.
+
 [Output Contract]
 Return exactly one JSON object with keys only:
 - title

@@ -61,6 +61,12 @@ Return one JSON object only with these keys:
 - Never invent schedules, fees, transport changes, or opening hours.
 - If uncertain, tell readers to recheck official information before visiting.
 
+[Trust Rule]
+- Add one timestamp line near the top: "기준 시각: {current_date} (Asia/Seoul)".
+- Add one section that separates "확인된 사실" and "미확인 정보".
+- Add one "출처/확인 경로" section with 2~5개의 공식 채널 또는 검증 경로.
+- If no concrete source URL is available, explicitly write: "확인 가능한 공식 URL 없음(작성 시점 기준)".
+
 [Output Rules]
 - title/meta_description/labels/excerpt/html_article/faq_section: Korean
 - meta_description: 130~160자
