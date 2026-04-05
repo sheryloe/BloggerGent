@@ -8,7 +8,16 @@ from typing import Any, Iterable
 from sqlalchemy import and_
 from sqlalchemy.orm import Session, joinedload
 
-from app.models.entities import Article, Blog, BlogTheme, ContentPlanDay, ContentPlanSlot, PublishMode, Topic
+from app.models.entities import (
+    Article,
+    Blog,
+    BlogTheme,
+    ContentPlanDay,
+    ContentPlanSlot,
+    PublishMode,
+    Topic,
+    WorkflowStageType,
+)
 from app.schemas.api import (
     PlannerCalendarRead,
     PlannerCategoryRead,
@@ -24,7 +33,14 @@ from app.services.cloudflare_channel_service import (
     get_cloudflare_overview,
     list_cloudflare_categories,
 )
+from app.services.blog_service import get_blog, get_workflow_step, sync_stage_prompts_from_profile_files
 from app.services.job_service import create_job
+from app.services.multilingual_bundle_service import (
+    bundle_publish_offset_minutes,
+    default_target_audience_for_language,
+    parse_planner_bundle_context,
+    resolve_blog_bundle_language,
+)
 from app.services.platform_publish_service import content_item_missing_asset_reason
 from app.services.platform_service import create_content_item as create_platform_content_item
 from app.services.settings_service import get_settings_map
@@ -65,6 +81,13 @@ CLOUDFLARE_CATEGORY_COLORS = (
 
 READY_BRIEF_FIELDS = ("brief_topic", "brief_audience")
 ACTIVE_SLOT_STATUSES = {"queued", "generating", "generated", "published", "failed", "canceled"}
+MULTILINGUAL_FIXED_WORKFLOW_STAGES: tuple[WorkflowStageType, ...] = (
+    WorkflowStageType.ARTICLE_GENERATION,
+    WorkflowStageType.IMAGE_PROMPT_GENERATION,
+    WorkflowStageType.IMAGE_GENERATION,
+    WorkflowStageType.HTML_ASSEMBLY,
+    WorkflowStageType.PUBLISHING,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -578,17 +601,111 @@ def _ensure_day(
     return plan_day
 
 
+def _datetime_to_iso(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC).isoformat()
+    return value.astimezone(UTC).isoformat()
+
+
+def _enforce_multilingual_blogger_setup(db: Session, blog: Blog) -> tuple[Blog, str | None]:
+    hydrated_blog = get_blog(db, blog.id) or blog
+    language = resolve_blog_bundle_language(hydrated_blog)
+    if not language:
+        return hydrated_blog, None
+
+    changed = False
+    if (hydrated_blog.primary_language or "").strip().lower() != language:
+        hydrated_blog.primary_language = language
+        changed = True
+
+    default_audience = default_target_audience_for_language(language)
+    if default_audience and (hydrated_blog.target_audience or "").strip() != default_audience:
+        hydrated_blog.target_audience = default_audience
+        changed = True
+
+    topic_step = get_workflow_step(hydrated_blog, WorkflowStageType.TOPIC_DISCOVERY)
+    if topic_step and topic_step.is_enabled:
+        topic_step.is_enabled = False
+        db.add(topic_step)
+        changed = True
+
+    for stage_type in MULTILINGUAL_FIXED_WORKFLOW_STAGES:
+        step = get_workflow_step(hydrated_blog, stage_type)
+        if not step or step.is_enabled:
+            continue
+        step.is_enabled = True
+        db.add(step)
+        changed = True
+
+    if changed:
+        db.add(hydrated_blog)
+        db.commit()
+
+    sync_stage_prompts_from_profile_files(
+        db,
+        blog=hydrated_blog,
+        stage_types=(
+            WorkflowStageType.ARTICLE_GENERATION,
+            WorkflowStageType.IMAGE_PROMPT_GENERATION,
+        ),
+    )
+    refreshed = get_blog(db, hydrated_blog.id) or hydrated_blog
+    return refreshed, language
+
+
+def _build_planner_brief_payload(
+    *,
+    slot: ContentPlanSlot,
+    category_key: str | None,
+    category_name: str,
+    language: str | None,
+) -> dict[str, Any]:
+    parsed_context = parse_planner_bundle_context(slot.brief_extra_context)
+    offset_minutes = bundle_publish_offset_minutes(language)
+    recommended_publish_at = None
+    if slot.scheduled_for is not None:
+        recommended_publish_at = _datetime_to_iso(slot.scheduled_for + timedelta(minutes=offset_minutes))
+
+    return {
+        "topic": slot.brief_topic or "",
+        "audience": slot.brief_audience or "",
+        "information_level": slot.brief_information_level or "",
+        "extra_context": slot.brief_extra_context or "",
+        "category_key": category_key,
+        "category_name": category_name,
+        "scheduled_for": _datetime_to_iso(slot.scheduled_for),
+        "bundle_key": parsed_context.bundle_key,
+        "facts": parsed_context.facts,
+        "prohibited_claims": parsed_context.prohibited_claims,
+        "context_notes": parsed_context.notes,
+        "language": language or "",
+        "publish_offset_minutes": offset_minutes,
+        "recommended_publish_at": recommended_publish_at,
+    }
+
+
 def _planner_prompt_lines(slot: ContentPlanSlot, *, blog_name: str, category_name: str) -> tuple[str, str]:
+    parsed_context = parse_planner_bundle_context(slot.brief_extra_context)
     title_seed = (slot.brief_topic or "").strip() or f"{blog_name} {category_name}"
     prompt_lines = [
         f"Category: {category_name}",
         f"Topic: {slot.brief_topic or ''}",
         f"Audience: {slot.brief_audience or ''}",
     ]
+    if parsed_context.bundle_key:
+        prompt_lines.append(f"Bundle key: {parsed_context.bundle_key}")
+    if parsed_context.facts:
+        prompt_lines.append("Confirmed facts:")
+        prompt_lines.extend(f"- {item}" for item in parsed_context.facts)
+    if parsed_context.prohibited_claims:
+        prompt_lines.append("Prohibited claims:")
+        prompt_lines.extend(f"- {item}" for item in parsed_context.prohibited_claims)
     if slot.brief_information_level:
         prompt_lines.append(f"Information level: {slot.brief_information_level}")
-    if slot.brief_extra_context:
-        prompt_lines.append(f"Extra context: {slot.brief_extra_context}")
+    if parsed_context.notes:
+        prompt_lines.append(f"Context notes: {parsed_context.notes}")
     prompt_lines.append("Planner mode: Use the brief exactly as the writing contract.")
     return title_seed, "\n".join(prompt_lines)
 
@@ -597,6 +714,7 @@ def _planner_manual_topic_payload(slot: ContentPlanSlot) -> dict[str, list[dict[
     category_key = _slot_category_key(slot)
     if not category_key:
         return {}
+    parsed_context = parse_planner_bundle_context(slot.brief_extra_context)
     return {
         category_key: [
             {
@@ -606,6 +724,9 @@ def _planner_manual_topic_payload(slot: ContentPlanSlot) -> dict[str, list[dict[
                 "extra_context": slot.brief_extra_context or "",
                 "category_name": _slot_category_name(slot) or category_key,
                 "scheduled_for": slot.scheduled_for.isoformat() if slot.scheduled_for else "",
+                "bundle_key": parsed_context.bundle_key,
+                "facts": parsed_context.facts,
+                "prohibited_claims": parsed_context.prohibited_claims,
             }
         ]
     }
@@ -701,6 +822,19 @@ def create_month_plan(
     return get_calendar(db, channel_id=context.channel_id, month=month)
 
 
+def _apply_multilingual_schedule_default(slot: ContentPlanSlot, blog: Blog | None) -> None:
+    if blog is None or slot.scheduled_for is None:
+        return
+    parsed_context = parse_planner_bundle_context(slot.brief_extra_context)
+    if not parsed_context.bundle_key:
+        return
+    language = resolve_blog_bundle_language(blog)
+    if not language:
+        return
+    base_time = slot.scheduled_for.replace(minute=0, second=0, microsecond=0)
+    slot.scheduled_for = base_time + timedelta(minutes=bundle_publish_offset_minutes(language))
+
+
 def create_slot(db: Session, payload: PlannerSlotCreate) -> PlannerSlotRead:
     plan_day = (
         db.query(ContentPlanDay)
@@ -723,6 +857,7 @@ def create_slot(db: Session, payload: PlannerSlotCreate) -> PlannerSlotRead:
         result_payload={},
     )
     _apply_slot_category(slot, category, legacy_themes.get(category.key))
+    _apply_multilingual_schedule_default(slot, context.blog)
     slot.status = _slot_status(slot)
     db.add(slot)
     db.flush()
@@ -762,6 +897,7 @@ def update_slot(db: Session, slot_id: int, payload: PlannerSlotUpdate) -> Planne
     for key, value in updates.items():
         setattr(slot, key, value)
 
+    _apply_multilingual_schedule_default(slot, context.blog)
     slot.status = str(explicit_status) if explicit_status is not None else _slot_status(slot)
     _resequence_slots(slot.plan_day, sort_by_time=sort_by_time)
     db.commit()
@@ -793,6 +929,12 @@ def _ensure_slot_ready(slot: ContentPlanSlot) -> None:
     if not _slot_category_key(slot):
         raise ValueError("category_key is required")
     missing = [field for field in READY_BRIEF_FIELDS if not getattr(slot, field)]
+    if "brief_audience" in missing and slot.plan_day.blog is not None:
+        language = resolve_blog_bundle_language(slot.plan_day.blog)
+        default_audience = default_target_audience_for_language(language)
+        if default_audience:
+            slot.brief_audience = default_audience
+            missing = [field for field in missing if field != "brief_audience"]
     if missing:
         raise ValueError("planner brief is incomplete")
 
@@ -828,10 +970,28 @@ def _run_blogger_slot_generation(db: Session, slot: ContentPlanSlot) -> None:
     if slot.plan_day.blog is None:
         raise ValueError("blog channel context is missing")
 
-    blog = slot.plan_day.blog
+    blog, multilingual_language = _enforce_multilingual_blogger_setup(db, slot.plan_day.blog)
+    _apply_multilingual_schedule_default(slot, blog)
+    db.add(slot)
+    db.commit()
+    db.refresh(slot)
+
+    if not (slot.brief_audience or "").strip() and multilingual_language:
+        slot.brief_audience = default_target_audience_for_language(multilingual_language)
+        db.add(slot)
+        db.commit()
+        db.refresh(slot)
+
     category_key = _slot_category_key(slot)
     category_name = _slot_category_name(slot) or "General"
     title_seed, planner_prompt = _planner_prompt_lines(slot, blog_name=blog.name, category_name=category_name)
+    planner_brief_payload = _build_planner_brief_payload(
+        slot=slot,
+        category_key=category_key,
+        category_name=category_name,
+        language=multilingual_language,
+    )
+
     topic = db.query(Topic).filter(Topic.blog_id == blog.id, Topic.keyword == title_seed).one_or_none()
     if topic is None:
         topic = Topic(
@@ -857,19 +1017,15 @@ def _run_blogger_slot_generation(db: Session, slot: ContentPlanSlot) -> None:
         topic_id=topic.id,
         publish_mode=PublishMode.DRAFT,
         raw_prompts={
-            "planner_brief": {
-                "topic": slot.brief_topic,
-                "audience": slot.brief_audience,
-                "information_level": slot.brief_information_level,
-                "extra_context": slot.brief_extra_context,
-                "category_key": category_key,
-                "category_name": category_name,
-                "scheduled_for": slot.scheduled_for.isoformat() if slot.scheduled_for else None,
-            }
+            "planner_brief": planner_brief_payload
         },
     )
     slot.job_id = job.id
-    slot.result_payload = {}
+    slot.result_payload = {
+        "bundle_key": planner_brief_payload.get("bundle_key"),
+        "language": planner_brief_payload.get("language"),
+        "recommended_publish_at": planner_brief_payload.get("recommended_publish_at"),
+    }
     slot.status = "queued"
     slot.last_run_at = datetime.now(UTC).replace(tzinfo=None)
     slot.error_message = None

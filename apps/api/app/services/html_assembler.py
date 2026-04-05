@@ -13,6 +13,9 @@ MYSTERY_COLLAGE_MARKER_PATTERNS = (
     re.compile(r"AI-generated editorial collage", re.IGNORECASE),
 )
 
+LANGUAGE_SWITCH_START_MARKER = "<!--BLOGGENT_LANGUAGE_SWITCH_START-->"
+LANGUAGE_SWITCH_END_MARKER = "<!--BLOGGENT_LANGUAGE_SWITCH_END-->"
+
 
 def _inject_inline_style(html: str, tag: str, style: str) -> str:
     pattern = re.compile(rf"<{tag}([^>]*)>", re.IGNORECASE)
@@ -190,6 +193,24 @@ def _resolve_primary_image_url(article: Article, fallback_url: str) -> str:
     return ""
 
 
+def upsert_language_switch_html(assembled_html: str, language_switch_html: str) -> str:
+    source = str(assembled_html or "")
+    block = str(language_switch_html or "").strip()
+    pattern = re.compile(
+        rf"{re.escape(LANGUAGE_SWITCH_START_MARKER)}.*?{re.escape(LANGUAGE_SWITCH_END_MARKER)}",
+        flags=re.DOTALL,
+    )
+    replacement = f"{LANGUAGE_SWITCH_START_MARKER}\n{block}\n{LANGUAGE_SWITCH_END_MARKER}"
+    if pattern.search(source):
+        return pattern.sub(replacement, source, count=1)
+
+    insertion = f"\n{replacement}\n"
+    closing_tag = "</article>"
+    if closing_tag in source:
+        return source.replace(closing_tag, f"{insertion}{closing_tag}", 1)
+    return f"{source}{insertion}".strip()
+
+
 def render_faq_html(
     faq_section: list[dict],
     section_title: str = "Frequently Asked Questions",
@@ -218,7 +239,13 @@ def render_faq_html(
     )
 
 
-def assemble_article_html(article: Article, hero_image_url: str, related_posts: list[dict]) -> str:
+def assemble_article_html(
+    article: Article,
+    hero_image_url: str,
+    related_posts: list[dict],
+    *,
+    language_switch_html: str = "",
+) -> str:
     category = (article.blog.content_category if article.blog else "").lower()
     theme = _theme_config(category)
     related_title = "Related Mystery Stories" if category == "mystery" else "Related Korea Travel Reads"
@@ -269,6 +296,7 @@ def assemble_article_html(article: Article, hero_image_url: str, related_posts: 
     escaped_lead_summary = html.escape(lead_summary, quote=True)
     hidden_lead_summary = html.escape(lead_summary)
     escaped_title = html.escape(article.title, quote=True)
+    language_switch_block = str(language_switch_html or "").strip()
     hero_url = _resolve_primary_image_url(article, hero_image_url)
     hero_figure_html = ""
     if hero_url:
@@ -294,6 +322,9 @@ def assemble_article_html(article: Article, hero_image_url: str, related_posts: 
   {hero_figure_html}
   <section style="font-size:17px;line-height:1.9;color:{theme['body']};">{article_html}</section>
   {faq_html}
+  {LANGUAGE_SWITCH_START_MARKER}
+  {language_switch_block}
+  {LANGUAGE_SWITCH_END_MARKER}
   {related_html}
 </article>
 """.strip()

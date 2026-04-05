@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from celery import Task
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.core.celery_app import celery_app
 from app.db.session import SessionLocal
@@ -38,7 +39,7 @@ from app.services.google_sheet_service import (
     list_sheet_topic_history_entries,
     sync_google_sheet_snapshot,
 )
-from app.services.html_assembler import assemble_article_html
+from app.services.html_assembler import assemble_article_html, upsert_language_switch_html
 from app.services.job_service import (
     create_job,
     increment_attempt,
@@ -47,6 +48,11 @@ from app.services.job_service import (
     merge_response,
     record_failure,
     set_status,
+)
+from app.services.multilingual_bundle_service import (
+    SUPPORTED_LANGUAGES,
+    build_language_switch_block,
+    resolve_blog_bundle_language,
 )
 from app.services.providers.base import ProviderRuntimeError
 from app.services.providers.factory import (
@@ -446,6 +452,14 @@ def _build_blogger_inline_3x2_prompt(
         safe_story_direction = safe_story_direction[:220].rstrip()
 
     is_mystery = blog.profile_key == "world_mystery" or (blog.content_category or "").lower() == "mystery"
+    language = _normalize_supported_language(resolve_blog_bundle_language(blog) or blog.primary_language)
+    language_persona_hint = (
+        "Japanese 20-40 independent travelers prioritizing route flow, crowd avoidance, and budget control."
+        if language == "ja"
+        else "Global Spanish-speaking travelers; keep hooks clear and practical without regional slang lock-in."
+        if language == "es"
+        else "US-first travelers with UK/EU planning expectations mixed in."
+    )
     profile_hint = "documentary mystery" if is_mystery else "travel editorial"
     subject_focus = "evidence, records, place atmosphere, and theory comparison" if is_mystery else (
         "route flow, timing decisions, neighborhood atmosphere, and practical movement"
@@ -455,6 +469,7 @@ def _build_blogger_inline_3x2_prompt(
         "Layout must be a 3x2 grid with exactly 6 distinct panels and visible white gutters. "
         "Match the article topic and keep the scene documentary, realistic, and editorial. "
         f"Focus on {subject_focus}. "
+        f"Persona hint: {language_persona_hint} "
         "No text overlays, no logos, no watermark. "
         f"Profile: {profile_hint}. Category: {editorial_category_label or profile_hint}. "
         f"Topic: {keyword}. Title: {article_title}. Excerpt: {article_excerpt}. Story direction: {safe_story_direction}"
@@ -512,6 +527,219 @@ def _append_hero_only_visual_rule(prompt: str) -> str:
         "- Do not request inline, middle, secondary, or body images.\n"
         "- Do not include panel marker text inside article content.\n"
     )
+
+
+def _extract_planner_brief_payload(job) -> dict:
+    raw_prompts = job.raw_prompts if isinstance(getattr(job, "raw_prompts", None), dict) else {}
+    planner_brief = raw_prompts.get("planner_brief")
+    if isinstance(planner_brief, dict):
+        return planner_brief
+    return {}
+
+
+def _format_planner_brief_for_prompt(planner_brief_payload: dict) -> str:
+    if not planner_brief_payload:
+        return "No planner brief provided."
+
+    lines: list[str] = [
+        f"Topic: {str(planner_brief_payload.get('topic') or '').strip()}",
+        f"Audience: {str(planner_brief_payload.get('audience') or '').strip()}",
+        f"Information level: {str(planner_brief_payload.get('information_level') or '').strip()}",
+        f"Category: {str(planner_brief_payload.get('category_name') or planner_brief_payload.get('category_key') or '').strip()}",
+    ]
+    bundle_key = str(planner_brief_payload.get("bundle_key") or "").strip()
+    if bundle_key:
+        lines.append(f"Bundle key: {bundle_key}")
+
+    facts = planner_brief_payload.get("facts")
+    if isinstance(facts, list) and facts:
+        lines.append("Confirmed facts:")
+        lines.extend(f"- {str(item).strip()}" for item in facts if str(item).strip())
+
+    prohibited_claims = planner_brief_payload.get("prohibited_claims")
+    if isinstance(prohibited_claims, list) and prohibited_claims:
+        lines.append("Prohibited claims:")
+        lines.extend(f"- {str(item).strip()}" for item in prohibited_claims if str(item).strip())
+
+    notes = str(planner_brief_payload.get("context_notes") or "").strip()
+    if notes:
+        lines.append(f"Context notes: {notes}")
+
+    scheduled_for = str(planner_brief_payload.get("scheduled_for") or "").strip()
+    if scheduled_for:
+        lines.append(f"Scheduled for: {scheduled_for}")
+
+    recommended_publish_at = str(planner_brief_payload.get("recommended_publish_at") or "").strip()
+    if recommended_publish_at:
+        lines.append(f"Recommended publish time: {recommended_publish_at}")
+
+    cleaned = [line for line in lines if line and not line.endswith(": ")]
+    return "\n".join(cleaned) if cleaned else "No planner brief provided."
+
+
+def _normalize_supported_language(value: str | None) -> str | None:
+    lowered = str(value or "").strip().lower()
+    if lowered in SUPPORTED_LANGUAGES:
+        return lowered
+    if lowered.startswith("en"):
+        return "en"
+    if lowered.startswith("ja"):
+        return "ja"
+    if lowered.startswith("es"):
+        return "es"
+    return None
+
+
+def _resolve_article_language(article: Article) -> str | None:
+    blog = getattr(article, "blog", None)
+    resolved = _normalize_supported_language(resolve_blog_bundle_language(blog) if blog else None)
+    if resolved:
+        return resolved
+    if blog is not None:
+        return _normalize_supported_language(getattr(blog, "primary_language", None))
+    return None
+
+
+def _list_bundle_articles(db, *, bundle_key: str) -> list[Article]:
+    normalized_bundle_key = str(bundle_key or "").strip()
+    if not normalized_bundle_key:
+        return []
+    cutoff = datetime.now(timezone.utc) - timedelta(days=45)
+    candidates = (
+        db.execute(
+            select(Article)
+            .where(Article.created_at >= cutoff)
+            .options(
+                selectinload(Article.job),
+                selectinload(Article.blog),
+                selectinload(Article.blogger_post),
+            )
+            .order_by(Article.created_at.desc())
+        )
+        .scalars()
+        .all()
+    )
+    selected: list[Article] = []
+    for article in candidates:
+        if not article.job:
+            continue
+        planner_brief = _extract_planner_brief_payload(article.job)
+        if str(planner_brief.get("bundle_key") or "").strip() != normalized_bundle_key:
+            continue
+        selected.append(article)
+    return selected
+
+
+def _build_bundle_language_url_map(bundle_articles: list[Article]) -> dict[str, str]:
+    url_map: dict[str, str] = {}
+    for article in bundle_articles:
+        language = _resolve_article_language(article)
+        if language not in SUPPORTED_LANGUAGES:
+            continue
+        post = article.blogger_post
+        if post is None:
+            continue
+        if post.post_status not in {PostStatus.PUBLISHED, PostStatus.SCHEDULED}:
+            continue
+        url = str(post.published_url or "").strip()
+        if url and language not in url_map:
+            url_map[language] = url
+    return url_map
+
+
+def _sync_multilingual_bundle_links(
+    db,
+    *,
+    bundle_key: str,
+) -> dict:
+    normalized_bundle_key = str(bundle_key or "").strip()
+    if not normalized_bundle_key:
+        return {"status": "skipped", "reason": "bundle_key_missing"}
+
+    bundle_articles = _list_bundle_articles(db, bundle_key=normalized_bundle_key)
+    if not bundle_articles:
+        return {"status": "skipped", "reason": "bundle_articles_not_found", "bundle_key": normalized_bundle_key}
+
+    url_map = _build_bundle_language_url_map(bundle_articles)
+    missing_languages = [lang for lang in SUPPORTED_LANGUAGES if not url_map.get(lang)]
+    if missing_languages:
+        return {
+            "status": "pending",
+            "bundle_key": normalized_bundle_key,
+            "available_languages": sorted(url_map.keys()),
+            "missing_languages": missing_languages,
+        }
+
+    updated_articles = 0
+    updated_remote_posts = 0
+    failures: list[dict[str, str]] = []
+
+    for article in bundle_articles:
+        language = _resolve_article_language(article)
+        if language not in SUPPORTED_LANGUAGES:
+            continue
+        post = article.blogger_post
+        if post is None or not post.blogger_post_id:
+            continue
+        if not article.blog:
+            continue
+
+        language_switch_block = build_language_switch_block(
+            current_language=language,
+            urls_by_language=url_map,
+        )
+        if not language_switch_block:
+            continue
+
+        current_html = (article.assembled_html or article.html_article or "").strip()
+        if not current_html:
+            continue
+        updated_html = upsert_language_switch_html(current_html, language_switch_block).strip()
+        if updated_html == current_html:
+            continue
+
+        labels = ensure_article_editorial_labels(db, article, commit=False)
+        article.assembled_html = updated_html
+        db.add(article)
+        db.commit()
+        db.refresh(article)
+        updated_articles += 1
+
+        try:
+            provider = get_blogger_provider(db, article.blog)
+            summary, raw_payload = provider.update_post(
+                post_id=post.blogger_post_id,
+                title=article.title,
+                content=updated_html,
+                labels=labels,
+                meta_description=article.meta_description,
+            )
+            _upsert_blogger_post(
+                db,
+                job_id=article.job_id,
+                blog_id=article.blog_id,
+                article_id=article.id,
+                summary=summary,
+                raw_payload=raw_payload,
+            )
+            updated_remote_posts += 1
+        except Exception as exc:  # noqa: BLE001
+            failures.append(
+                {
+                    "article_id": str(article.id),
+                    "blog_id": str(article.blog_id),
+                    "message": str(exc),
+                }
+            )
+
+    return {
+        "status": "applied" if not failures else "partial",
+        "bundle_key": normalized_bundle_key,
+        "updated_articles": updated_articles,
+        "updated_remote_posts": updated_remote_posts,
+        "url_map": url_map,
+        "failures": failures,
+    }
 
 
 def _assess_blogger_quality_gate(
@@ -1873,6 +2101,9 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
     request_saver_mode = _is_enabled_setting(settings_map.get("openai_request_saver_mode"), default=True)
     inline_collage_enabled = _blogger_inline_collage_enabled(settings_map, blog)
     is_mystery_blog = blog.profile_key == "world_mystery" or (blog.content_category or "").lower() == "mystery"
+    planner_brief_payload = _extract_planner_brief_payload(job)
+    planner_brief_text = _format_planner_brief_for_prompt(planner_brief_payload)
+    bundle_key = str(planner_brief_payload.get("bundle_key") or "").strip()
 
     article_step = _require_enabled_step(blog, WorkflowStageType.ARTICLE_GENERATION)
     image_generation_step = _require_enabled_step(blog, WorkflowStageType.IMAGE_GENERATION)
@@ -1897,6 +2128,7 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
         blog,
         article_step,
         keyword=job.keyword_snapshot,
+        planner_brief=planner_brief_text,
         editorial_category_key=topic_editorial_key,
         editorial_category_label=topic_editorial_label,
         editorial_category_guidance=topic_editorial_guidance,
@@ -1987,6 +2219,7 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
             keyword=job.keyword_snapshot,
             article_title=article.title,
             article_excerpt=article.excerpt,
+            planner_brief=planner_brief_text,
             editorial_category_key=topic_editorial_key,
             editorial_category_label=topic_editorial_label,
             editorial_category_guidance=topic_editorial_guidance,
@@ -2415,7 +2648,23 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
         f"{blog.name} assembling final HTML.",
     )
     db.refresh(article, attribute_names=["blog"])
-    assembled_html = assemble_article_html(article, hero_image_url, related_posts)
+    language_switch_html = ""
+    if bundle_key:
+        url_map = _build_bundle_language_url_map(_list_bundle_articles(db, bundle_key=bundle_key))
+        if len(url_map) == len(SUPPORTED_LANGUAGES):
+            current_language = _normalize_supported_language(resolve_blog_bundle_language(blog) or blog.primary_language)
+            if current_language:
+                language_switch_html = build_language_switch_block(
+                    current_language=current_language,
+                    urls_by_language=url_map,
+                )
+
+    assembled_html = assemble_article_html(
+        article,
+        hero_image_url,
+        related_posts,
+        language_switch_html=language_switch_html,
+    )
     article.assembled_html = assembled_html
     db.add(article)
     db.commit()
@@ -2444,6 +2693,16 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
         summary=summary,
         raw_payload=raw_payload,
     )
+    language_sync_result = {"status": "skipped", "reason": "bundle_key_missing"}
+    if bundle_key:
+        try:
+            language_sync_result = _sync_multilingual_bundle_links(db, bundle_key=bundle_key)
+        except Exception as exc:  # noqa: BLE001
+            language_sync_result = {
+                "status": "failed",
+                "bundle_key": bundle_key,
+                "message": str(exc),
+            }
     rebuild_topic_memories_for_blog(db, blog)
 
     telegram_result = None
@@ -2468,6 +2727,7 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
             "scheduled_for": scheduled_for.isoformat() if scheduled_for else None,
             "summary": summary,
             "telegram": telegram_result,
+            "multilingual_bundle_sync": language_sync_result,
         },
     )
     set_status(

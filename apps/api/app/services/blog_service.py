@@ -875,6 +875,7 @@ def render_agent_prompt(blog: Blog, agent: BlogAgentConfig, **replacements: str)
         "primary_language": blog.primary_language,
         "target_audience": blog.target_audience or "",
         "content_brief": blog.content_brief or "",
+        "planner_brief": "",
         "blogger_url": blog.blogger_url or "",
         "current_date": f"{local_now:%B} {local_now.day}, {local_now:%Y} ({settings.schedule_timezone})",
         "target_reading_time_min_minutes": str(blog.target_reading_time_min_minutes),

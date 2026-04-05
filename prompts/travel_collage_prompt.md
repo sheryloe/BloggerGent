@@ -1,46 +1,40 @@
-Create one final English image prompt for "{blog_name}".
+Create one final English hero collage prompt for "{blog_name}".
 
-[Topic]
-- {keyword}
-
-[Story Context]
+[Input]
+- Topic: {keyword}
+- Primary language: {primary_language}
+- Audience: {target_audience}
+- Planner brief:
+{planner_brief}
+- Editorial category: {editorial_category_label}
 - Title: {article_title}
 - Excerpt: {article_excerpt}
 - Article context:
 {article_context}
 
+[Persona Direction by Language]
+- `en`: US-first traveler expectations, but keep UK/EU planning relevance.
+- `ja`: Japanese 20-40 independent traveler priorities (route flow, crowds, budget control).
+- `es`: Global Spanish-speaking traveler clarity, neutral style, practical decisions.
+
 [Output Rules]
 - Return plain text only.
-- Write one final prompt for ONE composite 3x3 travel collage image.
-- This is the hero image prompt only.
-- Require exactly 9 panels arranged in a clear 3x3 grid with visible white gutters.
-- The center panel must be visually dominant and noticeably larger than each surrounding panel.
-- Never output one single continuous scene, blended panorama, or seamless split.
-- No text overlays.
-- No logos.
+- Return one final prompt for one composite 3x3 travel collage image.
+- Exactly 9 distinct panels in a visible 3x3 grid.
+- The center panel must be dominant and visually larger than surrounding panels.
+- Use visible white gutters.
+- No blended panorama, no seamless split, no text, no logos.
 - Realistic photography only.
 
-[Match Rules]
-- The image must show the article's first promise immediately.
-- Use the exact place, route, district, festival, or neighborhood logic from the article.
-- Avoid generic spring scenery if the article is about a specific local event or district.
-- Avoid memo-desk, notebook, or abstract lifestyle imagery unless the article is truly about a memo or routine topic.
+[Content Rules]
+- Match the article's main promise immediately.
+- Reflect the exact route/place/event logic from the article and planner brief.
+- Include decision-useful visual cues (transport nodes, crowd flow, timing mood, practical scene contrast).
+- Avoid generic postcard compositions when the topic is location-specific.
 
-[Travel Direction]
-- For blossom-season topics, prefer one strong scene that combines place identity with the spring atmosphere.
-- Good blossom examples:
-  - a real neighborhood cherry blossom street with pedestrians and local storefronts
-  - a riverside bloom walk with clear route character
-  - a ward festival arrival scene showing actual local event mood
-  - an evening blossom view when the article is about night timing
-- Do not turn every blossom topic into the same tunnel-of-flowers postcard.
-
-[Style Direction]
-- premium editorial travel photography
-- cinematic but believable
-- location-specific
-- clean panel separation
-- authentic Korean atmosphere
-- strong subject clarity across all panels
+[Style]
+- Premium editorial travel photography.
+- Cinematic but believable.
+- Korean location identity must be clear and practical.
 
 Return one final prompt only.

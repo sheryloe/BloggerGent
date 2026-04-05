@@ -12,7 +12,7 @@ from app.core.config import settings as app_settings
 from app.db.base import Base
 from app.models.entities import Blog, BlogTheme, ContentItem, ContentPlanDay, ContentPlanSlot, PublicationRecord, PublishMode, WorkflowStageType
 from app.services import planner_service
-from app.services.blog_service import stage_supports_prompt
+from app.services.blog_service import ensure_blog_workflow_steps, get_workflow_step, stage_supports_prompt
 from app.services.platform_service import ensure_managed_channels
 from app.services.settings_service import get_settings_map, upsert_settings
 
@@ -45,6 +45,8 @@ def _seed_blog(db: Session, *, blog_id: int, name: str, slug: str, profile_key: 
         profile_key=profile_key,
         publish_mode=PublishMode.DRAFT,
         is_active=True,
+        blogger_blog_id=f"remote-{blog_id}",
+        blogger_url=f"https://example.com/{slug}",
     )
     db.add(blog)
     db.commit()
@@ -263,3 +265,75 @@ def test_run_slot_generation_routes_instagram_reel_to_workspace_queue(db: Sessio
     assert content_item.content_type == "instagram_reel"
     assert content_item.lifecycle_status == "blocked_asset"
     assert content_item.blocked_reason == "missing_instagram_video_url"
+
+
+def test_multilingual_slot_generation_disables_topic_discovery_and_sets_bundle_payload(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    blog = _seed_blog(
+        db,
+        blog_id=90,
+        name="Donggri Kankoku",
+        slug="donggri-kankoku",
+        profile_key="korea_travel",
+    )
+    blog.blogger_url = "https://donggri-kankoku.blogspot.com/"
+    db.add(blog)
+    db.commit()
+    db.refresh(blog)
+    blog = ensure_blog_workflow_steps(db, blog)
+
+    plan_day = ContentPlanDay(
+        channel_id=f"blogger:{blog.id}",
+        blog_id=blog.id,
+        plan_date=date(2026, 4, 8),
+        target_post_count=1,
+        status="planned",
+    )
+    db.add(plan_day)
+    db.flush()
+    slot = ContentPlanSlot(
+        plan_day_id=plan_day.id,
+        category_key="travel",
+        category_name="Travel",
+        scheduled_for=datetime(2026, 4, 8, 9, 12, 0),
+        slot_order=1,
+        status="brief_ready",
+        brief_topic="Jeju coastal evening route guide",
+        brief_audience="",
+        brief_extra_context="bundle_key: jeju-evening-route-2026-04-08\nfacts: shuttle from city hall",
+        result_payload={},
+    )
+    db.add(slot)
+    db.commit()
+
+    captured: dict[str, object] = {}
+
+    def _fake_create_job(*_args, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(id=777)
+
+    monkeypatch.setattr(planner_service, "create_job", _fake_create_job)
+    monkeypatch.setattr(planner_service.run_job, "delay", lambda *_args: None)
+
+    generated = planner_service.run_slot_generation(db, slot.id)
+
+    refreshed_blog = db.get(Blog, blog.id)
+    refreshed_slot = db.get(ContentPlanSlot, slot.id)
+    topic_step = get_workflow_step(refreshed_blog, WorkflowStageType.TOPIC_DISCOVERY)
+    article_step = get_workflow_step(refreshed_blog, WorkflowStageType.ARTICLE_GENERATION)
+    image_prompt_step = get_workflow_step(refreshed_blog, WorkflowStageType.IMAGE_PROMPT_GENERATION)
+    publishing_step = get_workflow_step(refreshed_blog, WorkflowStageType.PUBLISHING)
+
+    assert generated.job_id == 777
+    assert topic_step is not None and topic_step.is_enabled is False
+    assert article_step is not None and article_step.is_enabled is True
+    assert image_prompt_step is not None and image_prompt_step.is_enabled is True
+    assert publishing_step is not None and publishing_step.is_enabled is True
+    assert refreshed_slot is not None
+    assert refreshed_slot.scheduled_for is not None
+    assert refreshed_slot.scheduled_for.minute == 30
+    assert captured["raw_prompts"]["planner_brief"]["bundle_key"] == "jeju-evening-route-2026-04-08"
+    assert captured["raw_prompts"]["planner_brief"]["language"] == "ja"
+    assert captured["raw_prompts"]["planner_brief"]["facts"] == ["shuttle from city hall"]
