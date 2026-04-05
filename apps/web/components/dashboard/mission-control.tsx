@@ -33,6 +33,16 @@ type RoomDefinition = {
   summary: string;
 };
 
+type OperationBundle = {
+  key: "generation" | "assets" | "upload" | "operations";
+  title: string;
+  purpose: string;
+  summary: string;
+  href: string;
+  icon: typeof Sparkles;
+  tone: string;
+};
+
 const ROOM_DEFINITIONS: RoomDefinition[] = [
   {
     key: "blogger",
@@ -97,11 +107,40 @@ const RUNTIME_LABELS: Record<string, string> = {
   gemini_cli: "Gemini CLI",
 };
 
+function readScore(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function scoreLine(lastScore: Record<string, unknown>) {
+  const pairs: Array<[string, string]> = [
+    ["seo_ctr", "SEO/CTR"],
+    ["watch_quality", "Watch"],
+    ["engagement_quality", "Engage"],
+  ];
+  const segments: string[] = [];
+  pairs.forEach(([key, label]) => {
+    const score = readScore(lastScore[key]);
+    if (score !== null) {
+      segments.push(`${label} ${score.toFixed(1)}`);
+    }
+  });
+  return segments.join(" · ");
+}
+
 export function MissionControl({ mission }: MissionControlProps) {
   const rooms = buildRooms(mission.channels);
+  const workerById = new Map(mission.workers.map((worker) => [worker.id, worker]));
   const liveWorkers = mission.runtimeHealth.liveWorkers || mission.workers.filter((worker) => worker.status === "running").length;
   const activeRuns = mission.runs.filter((run) => run.status === "running" || run.status === "queued");
   const failedRuns = mission.runs.filter((run) => run.status === "failed");
+  const operationBundles = buildOperationBundles(mission, failedRuns.length);
 
   return (
     <div className="space-y-6">
@@ -109,15 +148,15 @@ export function MissionControl({ mission }: MissionControlProps) {
         <article className="mission-hero rounded-[34px] p-6 text-white sm:p-8">
           <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
             <div className="max-w-3xl">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.36em] text-white/70">Mission Control</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.36em] text-white/70">Donggr AutoBloggent</p>
               <h1 className="mt-3 font-display text-[44px] font-semibold leading-none">Multi-Platform Marketing OS</h1>
               <p className="mt-4 text-sm leading-7 text-white/80">
-                블로그, 유튜브, 인스타그램 운영 상태를 한 화면에서 보고, 작업 큐와 분석 루프를 바로 이동할 수 있도록 재구성한 홈 화면입니다.
+                생성·자산·업로드·운영 4개 묶음을 기준으로 멀티 채널 실행 흐름을 한 화면에서 점검하고 바로 실행하는 운영 메인 화면입니다.
               </p>
               <div className="mt-6 flex flex-wrap gap-3">
-                <QuickJump href="/planner" label="Publishing 열기" />
-                <QuickJump href="/analytics" label="Analytics 열기" subtle />
-                <QuickJump href="/google" label="SEO / Indexing 열기" subtle />
+                <QuickJump href="/planner" label="업로드 관리 열기" />
+                <QuickJump href="/content-ops" label="자산/콘텐츠 관리" subtle />
+                <QuickJump href="/ops-health" label="운영 점검 열기" subtle />
               </div>
             </div>
             <div className="grid min-w-[280px] gap-3 sm:grid-cols-2">
@@ -150,6 +189,28 @@ export function MissionControl({ mission }: MissionControlProps) {
         </article>
       </section>
 
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {operationBundles.map((bundle) => {
+          const Icon = bundle.icon;
+          return (
+            <article key={bundle.key} className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_12px_30px_rgba(15,23,42,0.05)]">
+              <div className="flex items-center justify-between gap-3">
+                <div className={`rounded-[18px] bg-gradient-to-br p-2.5 text-white ${bundle.tone}`}>
+                  <Icon className="h-4 w-4" />
+                </div>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{bundle.title}</span>
+              </div>
+              <p className="mt-4 text-sm font-semibold text-slate-900">{bundle.purpose}</p>
+              <p className="mt-2 text-sm text-slate-600">{bundle.summary}</p>
+              <Link href={bundle.href} className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-slate-800">
+                바로 이동
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </article>
+          );
+        })}
+      </section>
+
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {rooms.map((room) => {
           const Icon = room.icon;
@@ -165,10 +226,11 @@ export function MissionControl({ mission }: MissionControlProps) {
               </div>
               <h2 className="mt-5 text-xl font-semibold text-slate-950">{room.label}</h2>
               <p className="mt-2 text-sm leading-6 text-slate-600">{room.summary}</p>
-              <div className="mt-5 grid grid-cols-3 gap-2">
+              <div className="mt-5 grid grid-cols-4 gap-2">
                 <MiniMetric label="Posts" value={String(room.postsCount)} />
                 <MiniMetric label="Queue" value={String(room.pendingItems)} />
                 <MiniMetric label="Agents" value={String(room.liveWorkerCount)} />
+                <MiniMetric label="Failed" value={String(room.failedItems)} />
               </div>
               <div className="mt-5 flex items-center justify-between text-sm font-semibold text-slate-700">
                 <span>{room.caption}</span>
@@ -194,7 +256,11 @@ export function MissionControl({ mission }: MissionControlProps) {
           <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
             <div className="space-y-3">
               {activeRuns.slice(0, 6).map((run) => (
-                <TaskRunCard key={run.id} run={run} worker={mission.workers.find((worker) => worker.id === run.agentWorkerId) ?? null} />
+                <TaskRunCard
+                  key={run.id}
+                  run={run}
+                  worker={run.agentWorkerId !== null ? workerById.get(run.agentWorkerId) ?? null : null}
+                />
               ))}
               {activeRuns.length === 0 ? (
                 <EmptyState
@@ -255,23 +321,30 @@ export function MissionControl({ mission }: MissionControlProps) {
             </Link>
           </div>
           <div className="mt-5 space-y-3">
-            {mission.recentContent.slice(0, 6).map((item) => (
-              <div key={item.id} className="rounded-[24px] border border-slate-200 bg-white px-4 py-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                      {contentTypeIcon(item.contentType)}
-                      <span>{CONTENT_TYPE_LABELS[item.contentType] ?? item.contentType}</span>
+            {mission.recentContent.slice(0, 6).map((item) => {
+              const itemScoreLine = scoreLine(item.lastScore);
+              return (
+                <div key={item.id} className="rounded-[24px] border border-slate-200 bg-white px-4 py-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                        {contentTypeIcon(item.contentType)}
+                        <span>{CONTENT_TYPE_LABELS[item.contentType] ?? item.contentType}</span>
+                      </div>
+                      <p className="mt-2 truncate text-sm font-semibold text-slate-950">{item.title}</p>
+                      <p className="mt-1 max-h-12 overflow-hidden text-sm leading-6 text-slate-600">{item.summary || item.caption || "콘텐츠 요약이 아직 없습니다."}</p>
+                      {itemScoreLine.length > 0 ? <p className="mt-1 text-xs text-slate-500">{itemScoreLine}</p> : null}
+                      {(item.latestPublication?.errorCode || "").trim() ? (
+                        <p className="mt-1 text-xs font-medium text-rose-600">error: {item.latestPublication?.errorCode}</p>
+                      ) : null}
                     </div>
-                    <p className="mt-2 truncate text-sm font-semibold text-slate-950">{item.title}</p>
-                    <p className="mt-1 max-h-12 overflow-hidden text-sm leading-6 text-slate-600">{item.summary || item.caption || "콘텐츠 요약이 아직 없습니다."}</p>
+                    <span className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${statusPill(item.status)}`}>
+                      {item.status}
+                    </span>
                   </div>
-                  <span className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${statusPill(item.status)}`}>
-                    {item.status}
-                  </span>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             {mission.recentContent.length === 0 ? (
               <EmptyState
                 title="최근 콘텐츠가 없습니다."
@@ -312,17 +385,73 @@ export function MissionControl({ mission }: MissionControlProps) {
   );
 }
 
+function buildOperationBundles(mission: MissionControlRead, failedRunCount: number): OperationBundle[] {
+  const totalRecent = mission.recentContent.length;
+  const blockedAssetCount = mission.recentContent.filter((item) => item.status === "blocked_asset").length;
+  const uploadQueueCount =
+    mission.runtimeHealth.queuedRuns +
+    mission.recentContent.filter(
+      (item) =>
+        item.status === "ready_to_publish" ||
+        item.latestPublication?.publishStatus === "queued" ||
+        item.latestPublication?.publishStatus === "scheduled",
+    ).length;
+  const operationAttentionCount = mission.alerts.length + failedRunCount;
+
+  return [
+    {
+      key: "generation",
+      title: "생성",
+      purpose: "주제 발굴과 초안 생성을 시작하는 단계",
+      summary: `최근 생성/검토 대상 ${totalRecent}건`,
+      href: "/content-ops",
+      icon: Sparkles,
+      tone: "from-[#fb923c] via-[#f97316] to-[#ef4444]",
+    },
+    {
+      key: "assets",
+      title: "자산",
+      purpose: "이미지/썸네일/본문 자산을 보강하는 단계",
+      summary: `보강 필요 자산 ${blockedAssetCount}건`,
+      href: "/content-ops?tab=articles",
+      icon: ImageIcon,
+      tone: "from-[#a78bfa] via-[#8b5cf6] to-[#6366f1]",
+    },
+    {
+      key: "upload",
+      title: "업로드",
+      purpose: "예약/게시 큐를 처리하고 결과를 확인하는 단계",
+      summary: `게시 대기/실행 큐 ${uploadQueueCount}건`,
+      href: "/planner",
+      icon: RadioTower,
+      tone: "from-[#2dd4bf] via-[#14b8a6] to-[#0f766e]",
+    },
+    {
+      key: "operations",
+      title: "운영",
+      purpose: "장애 징후를 확인하고 재시도를 제어하는 단계",
+      summary: `운영 경보/실패 항목 ${operationAttentionCount}건`,
+      href: "/ops-health",
+      icon: SearchCheck,
+      tone: "from-[#60a5fa] via-[#3b82f6] to-[#1d4ed8]",
+    },
+  ];
+}
+
 function buildRooms(channels: ManagedChannelRead[]) {
+  const channelByProvider = new Map(channels.map((channel) => [channel.provider, channel]));
   return ROOM_DEFINITIONS.map((definition) => {
-    const matchedChannel = channels.find((channel) => channel.provider === definition.key);
+    const matchedChannel = channelByProvider.get(definition.key);
     const pendingItems = matchedChannel?.pendingItems ?? 0;
     const liveWorkerCount = matchedChannel?.liveWorkerCount ?? 0;
+    const failedItems = matchedChannel?.failedItems ?? 0;
     return {
       ...definition,
       status: matchedChannel?.status ?? "standby",
       postsCount: matchedChannel?.postsCount ?? 0,
       pendingItems,
       liveWorkerCount,
+      failedItems,
       caption:
         matchedChannel != null
           ? `${matchedChannel.name} 연결됨`
@@ -500,8 +629,14 @@ function statusPill(status: string) {
   if (normalized === "failed" || normalized === "error" || normalized === "warning") {
     return "bg-[#fff1f2] text-[#9f1239]";
   }
+  if (normalized === "blocked" || normalized === "blocked_asset") {
+    return "bg-[#fffbeb] text-[#92400e]";
+  }
   if (normalized === "queued" || normalized === "review" || normalized === "scheduled") {
     return "bg-[#eff6ff] text-[#1d4ed8]";
+  }
+  if (normalized === "ready_to_publish") {
+    return "bg-[#ecfeff] text-[#155e75]";
   }
   return "bg-[#f8fafc] text-slate-600";
 }

@@ -11,8 +11,12 @@ import {
   getChannelPromptFlow,
   getChannels,
   getCloudflarePosts,
+  getWorkspaceIntegrations,
+  getWorkspaceOAuthStartUrl,
   getModelPolicy,
+  refreshWorkspaceOAuth,
   reorderChannelPromptFlow,
+  syncWorkspaceChannelMetrics,
   updateChannelPromptFlowStep,
   updateSettings,
 } from "@/lib/api";
@@ -21,9 +25,11 @@ import type {
   BloggerConfigRead,
   ManagedChannelRead,
   ModelPolicyRead,
+  PlatformCredentialRead,
   PromptFlowRead,
   PromptFlowStepRead,
   SettingRead,
+  WorkspaceIntegrationOverviewRead,
   WorkflowStageType,
 } from "@/lib/types";
 
@@ -48,6 +54,12 @@ type StepDraft = {
   promptTemplate: string;
   providerModel: string;
   isEnabled: boolean;
+};
+
+type AuthCheckItem = {
+  label: string;
+  ok: boolean;
+  detail?: string;
 };
 
 type SettingControlKind = "text" | "textarea" | "password" | "number" | "boolean" | "select" | "time" | "url";
@@ -180,6 +192,7 @@ const SECTION_DEFS: SettingSection[] = [
     keys: [
       "automation_master_enabled",
       "automation_scheduler_enabled",
+      "automation_google_indexing_enabled",
       "automation_publish_queue_enabled",
       "automation_cloudflare_enabled",
       "automation_content_review_enabled",
@@ -342,6 +355,7 @@ const FIELD_LABELS: Record<string, string> = {
   blogger_playwright_account_index: "계정 인덱스",
   automation_master_enabled: "자동화 전체 마스터 스위치",
   automation_scheduler_enabled: "스케줄러 자동화 사용",
+  automation_google_indexing_enabled: "Google Indexing 자동화 사용",
   automation_publish_queue_enabled: "발행 큐 자동화 사용",
   automation_cloudflare_enabled: "Cloudflare 자동화 사용",
   automation_content_review_enabled: "콘텐츠 검토 자동화 사용",
@@ -442,6 +456,7 @@ const FIELD_DESCRIPTIONS: Record<string, string> = {
   openai_request_saver_mode: "가능하면 추가 요청을 줄여 비용과 호출량을 아낍니다.",
   automation_master_enabled: "모든 자동화 경로를 한 번에 허용하거나 차단하는 최상위 스위치입니다.",
   automation_scheduler_enabled: "정시 스케줄러 자동 실행을 허용합니다.",
+  automation_google_indexing_enabled: "Google Indexing API 호출 자동화를 허용합니다.",
   automation_publish_queue_enabled: "발행 큐 자동 처리를 허용합니다.",
   automation_cloudflare_enabled: "Cloudflare 채널 자동화를 허용합니다.",
   automation_content_review_enabled: "콘텐츠 품질 검토 자동화를 허용합니다.",
@@ -803,6 +818,15 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
   const [channelPreviewsLoading, setChannelPreviewsLoading] = useState(false);
   const [remoteConfigLoading, setRemoteConfigLoading] = useState(false);
   const [remoteConfigError, setRemoteConfigError] = useState("");
+  const [workspaceIntegrations, setWorkspaceIntegrations] = useState<WorkspaceIntegrationOverviewRead>({
+    channels: [],
+    integrations: [],
+    credentials: [],
+  });
+  const [workspaceIntegrationLoading, setWorkspaceIntegrationLoading] = useState(false);
+  const [workspaceIntegrationError, setWorkspaceIntegrationError] = useState("");
+  const [integrationActionMessage, setIntegrationActionMessage] = useState("");
+  const [integrationActionError, setIntegrationActionError] = useState("");
   const [isPending, startTransition] = useTransition();
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flowDraftVersion = useRef(0);
@@ -1056,6 +1080,50 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
     }
   }
 
+  async function loadWorkspaceIntegrationState() {
+    try {
+      setWorkspaceIntegrationLoading(true);
+      setWorkspaceIntegrationError("");
+      const payload = await getWorkspaceIntegrations();
+      setWorkspaceIntegrations(payload);
+    } catch {
+      setWorkspaceIntegrationError("워크스페이스 연동 상태를 불러오지 못했습니다.");
+    } finally {
+      setWorkspaceIntegrationLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (activeTab !== "integrations") {
+      return;
+    }
+    void loadWorkspaceIntegrationState();
+  }, [activeTab]);
+
+  async function handleRefreshWorkspaceOAuth(channelId: string) {
+    try {
+      setIntegrationActionError("");
+      setIntegrationActionMessage("");
+      await refreshWorkspaceOAuth(channelId);
+      await loadWorkspaceIntegrationState();
+      setIntegrationActionMessage(`${channelId} 토큰을 갱신했습니다.`);
+    } catch {
+      setIntegrationActionError(`${channelId} 토큰 갱신에 실패했습니다.`);
+    }
+  }
+
+  async function handleSyncWorkspaceChannelMetrics(channelId: string) {
+    try {
+      setIntegrationActionError("");
+      setIntegrationActionMessage("");
+      await syncWorkspaceChannelMetrics(channelId, 28, true);
+      await loadWorkspaceIntegrationState();
+      setIntegrationActionMessage(`${channelId} 메트릭 동기화를 실행했습니다.`);
+    } catch {
+      setIntegrationActionError(`${channelId} 메트릭 동기화에 실패했습니다.`);
+    }
+  }
+
   async function applyFlowUpdate(patch: Partial<StepDraft>, immediate = false) {
     if (!selectedStep || !draft || !selectedChannel) {
       return;
@@ -1177,7 +1245,6 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
   const currentSectionKeys = currentSections.flatMap((section) => section.items.map((item) => item.key));
   const currentDirtyCount = currentSectionKeys.filter(isDirtyField).length;
   const oauthClientConfigured = Boolean(runtimeConfig.client_id_configured && runtimeConfig.client_secret_configured);
-  const oauthStartUrl = runtimeConfig.authorization_url || `${process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1"}/blogger/oauth/start`;
   const grantedScopeSet = useMemo(
     () => new Set((runtimeConfig.granted_scopes ?? []).map((item) => item.trim()).filter(Boolean)),
     [runtimeConfig.granted_scopes],
@@ -1193,6 +1260,65 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
     { label: "공개 이미지", value: FIELD_LABELS.public_image_provider ? prettifyKey(localSettings.public_image_provider || "local") : "미설정" },
     { label: "플래너 슬롯", value: `${localSettings.planner_default_daily_posts || "0"}개` },
   ];
+  const integrationByChannel = useMemo(
+    () => new Map(workspaceIntegrations.integrations.map((item) => [item.channelId, item])),
+    [workspaceIntegrations.integrations],
+  );
+  const credentialByChannel = useMemo(() => {
+    const map = new Map<string, PlatformCredentialRead>();
+    workspaceIntegrations.credentials.forEach((item) => {
+      if (item.channelId && !map.has(item.channelId)) {
+        map.set(item.channelId, item);
+      }
+    });
+    return map;
+  }, [workspaceIntegrations.credentials]);
+  const firstOAuthChannelId = useMemo(() => {
+    const candidates = (workspaceIntegrations.channels.length ? workspaceIntegrations.channels : channels).filter((channel) =>
+      ["blogger", "youtube", "instagram"].includes(String(channel.provider || "").toLowerCase()),
+    );
+    return candidates[0]?.channelId ?? null;
+  }, [channels, workspaceIntegrations.channels]);
+  const oauthStartUrl = firstOAuthChannelId ? getWorkspaceOAuthStartUrl(firstOAuthChannelId) : null;
+  const integrationChannels = workspaceIntegrations.channels.length ? workspaceIntegrations.channels : channels;
+  const providerAuthSummary = useMemo(() => {
+    function summarize(provider: string) {
+      const providerChannels = integrationChannels.filter((channel) => String(channel.provider || "").toLowerCase() === provider);
+      const connectedCount = providerChannels.filter((channel) => {
+        const integration = integrationByChannel.get(channel.channelId);
+        return (integration?.oauthState || channel.oauthState || "").toLowerCase() === "connected";
+      }).length;
+      const validCredentialCount = providerChannels.filter((channel) => {
+        const credential = credentialByChannel.get(channel.channelId);
+        return Boolean(credential?.isValid);
+      }).length;
+      return {
+        provider,
+        total: providerChannels.length,
+        connected: connectedCount,
+        validCredentials: validCredentialCount,
+        firstChannelId: providerChannels[0]?.channelId ?? null,
+      };
+    }
+
+    return {
+      blogger: summarize("blogger"),
+      youtube: summarize("youtube"),
+      instagram: summarize("instagram"),
+    };
+  }, [credentialByChannel, integrationByChannel, integrationChannels]);
+  const cloudflareAuthSummary = useMemo(() => {
+    const channel = integrationChannels.find((item) => String(item.provider || "").toLowerCase() === "cloudflare") ?? null;
+    const integration = channel ? integrationByChannel.get(channel.channelId) : null;
+    const baseUrlConfigured = Boolean((localSettings.cloudflare_blog_api_base_url || "").trim());
+    const channelConnected = (integration?.status || channel?.status || "").toLowerCase() === "connected";
+    return {
+      channelId: channel?.channelId ?? null,
+      channelConnected,
+      baseUrlConfigured,
+    };
+  }, [integrationByChannel, integrationChannels, localSettings.cloudflare_blog_api_base_url]);
+  const indexingAutomationEnabled = localSettings.automation_google_indexing_enabled === "true";
 
   return (
     <div className="space-y-5">
@@ -1243,7 +1369,7 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 space-y-2">
                     <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                      <FlagPill tone="slate">{channel.provider === "cloudflare" ? "Cloudflare" : "Blogger"}</FlagPill>
+                      <FlagPill tone="slate">{providerDisplayName(channel.provider)}</FlagPill>
                       <FlagPill tone={channel.status === "connected" ? "emerald" : "amber"}>
                         {channel.status === "connected" ? "연결됨" : channel.status || "확인 필요"}
                       </FlagPill>
@@ -1470,13 +1596,153 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
 
             {activeTab === "integrations" ? (
               <article className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm lg:p-6">
+                <div>
+                  <h3 className="text-xl font-semibold text-slate-950">파트별 인증 상태</h3>
+                  <p className="mt-1 text-sm text-slate-500">운영 파트별 인증 상태를 분리해 점검할 수 있도록 구성했습니다.</p>
+                </div>
+
+                <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  <AuthPartCard
+                    title="Google OAuth"
+                    summary={runtimeConfig.connected ? "연결됨" : "연결 필요"}
+                    tone={runtimeConfig.connected ? "emerald" : "amber"}
+                    checks={[
+                      { label: "OAuth 연결", ok: runtimeConfig.connected },
+                      { label: "Client ID/Secret 설정", ok: oauthClientConfigured },
+                      { label: "누락 Scope 없음", ok: missingScopes.length === 0, detail: missingScopes.length ? `${missingScopes.length}개 누락` : undefined },
+                    ]}
+                    action={oauthStartUrl ? (
+                      <a
+                        href={oauthStartUrl}
+                        className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+                      >
+                        OAuth 재인증
+                      </a>
+                    ) : null}
+                  />
+                  <AuthPartCard
+                    title="Blogger 채널 OAuth"
+                    summary={`${providerAuthSummary.blogger.connected}/${providerAuthSummary.blogger.total} 연결`}
+                    tone={providerAuthSummary.blogger.total > 0 && providerAuthSummary.blogger.connected === providerAuthSummary.blogger.total ? "emerald" : "amber"}
+                    checks={[
+                      { label: "채널 구성", ok: providerAuthSummary.blogger.total > 0, detail: `총 ${providerAuthSummary.blogger.total}개` },
+                      {
+                        label: "OAuth 연결",
+                        ok: providerAuthSummary.blogger.total > 0 && providerAuthSummary.blogger.connected === providerAuthSummary.blogger.total,
+                        detail: `${providerAuthSummary.blogger.connected}개 연결`,
+                      },
+                      {
+                        label: "유효 토큰",
+                        ok: providerAuthSummary.blogger.total > 0 && providerAuthSummary.blogger.validCredentials >= providerAuthSummary.blogger.connected,
+                        detail: `${providerAuthSummary.blogger.validCredentials}개 유효`,
+                      },
+                    ]}
+                    action={providerAuthSummary.blogger.firstChannelId ? (
+                      <a
+                        href={getWorkspaceOAuthStartUrl(providerAuthSummary.blogger.firstChannelId)}
+                        className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+                      >
+                        Blogger OAuth
+                      </a>
+                    ) : null}
+                  />
+                  <AuthPartCard
+                    title="YouTube 채널 OAuth"
+                    summary={`${providerAuthSummary.youtube.connected}/${providerAuthSummary.youtube.total} 연결`}
+                    tone={providerAuthSummary.youtube.total > 0 && providerAuthSummary.youtube.connected === providerAuthSummary.youtube.total ? "emerald" : "amber"}
+                    checks={[
+                      { label: "채널 구성", ok: providerAuthSummary.youtube.total > 0, detail: `총 ${providerAuthSummary.youtube.total}개` },
+                      {
+                        label: "OAuth 연결",
+                        ok: providerAuthSummary.youtube.total > 0 && providerAuthSummary.youtube.connected === providerAuthSummary.youtube.total,
+                        detail: `${providerAuthSummary.youtube.connected}개 연결`,
+                      },
+                      {
+                        label: "유효 토큰",
+                        ok: providerAuthSummary.youtube.total > 0 && providerAuthSummary.youtube.validCredentials >= providerAuthSummary.youtube.connected,
+                        detail: `${providerAuthSummary.youtube.validCredentials}개 유효`,
+                      },
+                    ]}
+                    action={providerAuthSummary.youtube.firstChannelId ? (
+                      <a
+                        href={getWorkspaceOAuthStartUrl(providerAuthSummary.youtube.firstChannelId)}
+                        className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+                      >
+                        YouTube OAuth
+                      </a>
+                    ) : null}
+                  />
+                  <AuthPartCard
+                    title="Instagram 채널 OAuth"
+                    summary={`${providerAuthSummary.instagram.connected}/${providerAuthSummary.instagram.total} 연결`}
+                    tone={providerAuthSummary.instagram.total > 0 && providerAuthSummary.instagram.connected === providerAuthSummary.instagram.total ? "emerald" : "amber"}
+                    checks={[
+                      { label: "채널 구성", ok: providerAuthSummary.instagram.total > 0, detail: `총 ${providerAuthSummary.instagram.total}개` },
+                      {
+                        label: "OAuth 연결",
+                        ok: providerAuthSummary.instagram.total > 0 && providerAuthSummary.instagram.connected === providerAuthSummary.instagram.total,
+                        detail: `${providerAuthSummary.instagram.connected}개 연결`,
+                      },
+                      {
+                        label: "유효 토큰",
+                        ok: providerAuthSummary.instagram.total > 0 && providerAuthSummary.instagram.validCredentials >= providerAuthSummary.instagram.connected,
+                        detail: `${providerAuthSummary.instagram.validCredentials}개 유효`,
+                      },
+                    ]}
+                    action={providerAuthSummary.instagram.firstChannelId ? (
+                      <a
+                        href={getWorkspaceOAuthStartUrl(providerAuthSummary.instagram.firstChannelId)}
+                        className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+                      >
+                        Instagram OAuth
+                      </a>
+                    ) : null}
+                  />
+                  <AuthPartCard
+                    title="Cloudflare 연동"
+                    summary={cloudflareAuthSummary.channelConnected ? "연결됨" : "연결 필요"}
+                    tone={cloudflareAuthSummary.channelConnected && cloudflareAuthSummary.baseUrlConfigured ? "emerald" : "amber"}
+                    checks={[
+                      { label: "채널 연결 상태", ok: cloudflareAuthSummary.channelConnected },
+                      { label: "API Base URL 설정", ok: cloudflareAuthSummary.baseUrlConfigured },
+                      { label: "채널 존재", ok: Boolean(cloudflareAuthSummary.channelId), detail: cloudflareAuthSummary.channelId || "미구성" },
+                    ]}
+                  />
+                  <AuthPartCard
+                    title="Indexing 자동화"
+                    summary={indexingAutomationEnabled && indexingScopeGranted ? "활성" : "점검 필요"}
+                    tone={indexingAutomationEnabled && indexingScopeGranted ? "emerald" : "amber"}
+                    checks={[
+                      { label: "automation_google_indexing_enabled", ok: indexingAutomationEnabled },
+                      { label: "Indexing Scope 승인", ok: indexingScopeGranted },
+                      {
+                        label: "OAuth 재인증 필요 여부",
+                        ok: indexingScopeGranted,
+                        detail: indexingScopeGranted ? "정상" : "필수",
+                      },
+                    ]}
+                    action={oauthStartUrl ? (
+                      <a
+                        href={oauthStartUrl}
+                        className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+                      >
+                        Scope 재승인
+                      </a>
+                    ) : null}
+                  />
+                </div>
+              </article>
+            ) : null}
+
+            {activeTab === "integrations" ? (
+              <article className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm lg:p-6">
                 <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                   <div>
                     <h3 className="text-xl font-semibold text-slate-950">Google OAuth2 연동</h3>
                     <p className="mt-1 text-sm text-slate-500">Blogger, Search Console, GA4, Indexing API 동작은 이 OAuth 인증 상태를 기준으로 결정됩니다.</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {oauthClientConfigured ? (
+                    {oauthClientConfigured && oauthStartUrl ? (
                       <a
                         href={oauthStartUrl}
                         className="rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800"
@@ -1550,6 +1816,98 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
                   <p>2. Google OAuth 동의화면이 Testing이면 실제 로그인 계정을 Test users에 추가합니다.</p>
                   <p>3. `OAuth2 연결/재인증` 버튼으로 다시 인증하고, `/google` 화면에서 승인 Scope에 indexing이 포함됐는지 확인합니다.</p>
                   <p>4. 여전히 실패하면 Redirect URI가 Google Cloud 설정과 완전히 동일한지(프로토콜/포트/경로) 확인합니다.</p>
+                </div>
+              </article>
+            ) : null}
+
+            {activeTab === "integrations" ? (
+              <article className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm lg:p-6">
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                  <div>
+                    <h3 className="text-xl font-semibold text-slate-950">채널 OAuth / 게시 연동</h3>
+                    <p className="mt-1 text-sm text-slate-500">채널 단위 OAuth 시작/토큰 갱신/메트릭 동기화를 이 화면에서 바로 실행합니다.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void loadWorkspaceIntegrationState()}
+                    disabled={workspaceIntegrationLoading}
+                    className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                  >
+                    {workspaceIntegrationLoading ? "채널 상태 조회 중..." : "채널 상태 새로고침"}
+                  </button>
+                </div>
+
+                {workspaceIntegrationError ? (
+                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{workspaceIntegrationError}</div>
+                ) : null}
+                {integrationActionError ? (
+                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{integrationActionError}</div>
+                ) : null}
+                {integrationActionMessage ? (
+                  <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">{integrationActionMessage}</div>
+                ) : null}
+
+                <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                  {(workspaceIntegrations.channels.length ? workspaceIntegrations.channels : channels).map((channel) => {
+                    const integration = integrationByChannel.get(channel.channelId);
+                    const credential = credentialByChannel.get(channel.channelId);
+                    const oauthStartUrlForChannel = getWorkspaceOAuthStartUrl(channel.channelId);
+                    return (
+                      <div key={channel.channelId} className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <h4 className="truncate text-base font-semibold text-slate-950">{channel.name}</h4>
+                              <a
+                                href={guideHrefForProvider(channel.provider)}
+                                className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-300 bg-white text-[11px] font-semibold text-slate-600 hover:bg-slate-100"
+                                title={`${channel.provider} 연결 가이드`}
+                              >
+                                ?
+                              </a>
+                            </div>
+                            <p className="mt-1 text-xs text-slate-500">{channel.channelId}</p>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <FlagPill tone={channel.status === "connected" ? "emerald" : "amber"}>{channel.status}</FlagPill>
+                            <FlagPill tone={channel.oauthState === "connected" ? "emerald" : "slate"}>{channel.oauthState}</FlagPill>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 grid gap-2 text-sm text-slate-600">
+                          <InfoRow label="Provider" value={channel.provider} />
+                          <InfoRow label="OAuth 상태" value={integration?.oauthState || channel.oauthState} />
+                          <InfoRow label="Scope 수" value={String(integration?.scopeCount ?? credential?.scopes.length ?? 0)} />
+                          <InfoRow label="토큰 만료" value={credential?.expiresAt ? formatDateTime(credential.expiresAt) : "미기록"} />
+                          <InfoRow label="대기 콘텐츠" value={String(channel.pendingItems)} />
+                          <InfoRow label="실패 콘텐츠" value={String(channel.failedItems)} />
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <a
+                            href={oauthStartUrlForChannel}
+                            className="rounded-full bg-slate-950 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800"
+                          >
+                            OAuth 시작
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => void handleRefreshWorkspaceOAuth(channel.channelId)}
+                            className="rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+                          >
+                            토큰 갱신
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleSyncWorkspaceChannelMetrics(channel.channelId)}
+                            className="rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+                          >
+                            메트릭 동기화
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </article>
             ) : null}
@@ -1695,6 +2053,41 @@ export function SettingsConsole({ settings, config }: SettingsConsoleProps) {
   );
 }
 
+function AuthPartCard({
+  title,
+  summary,
+  tone,
+  checks,
+  action,
+}: {
+  title: string;
+  summary: string;
+  tone: "emerald" | "amber";
+  checks: AuthCheckItem[];
+  action?: ReactNode;
+}) {
+  return (
+    <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+      <div className="flex items-center justify-between gap-2">
+        <h4 className="text-sm font-semibold text-slate-950">{title}</h4>
+        <FlagPill tone={tone}>{summary}</FlagPill>
+      </div>
+      <div className="mt-3 space-y-2">
+        {checks.map((item) => (
+          <div key={`${title}-${item.label}`} className="flex items-center justify-between gap-3 text-xs">
+            <span className="text-slate-600">{item.label}</span>
+            <span className={item.ok ? "font-semibold text-emerald-700" : "font-semibold text-amber-700"}>
+              {item.ok ? "OK" : "확인 필요"}
+              {item.detail ? ` · ${item.detail}` : ""}
+            </span>
+          </div>
+        ))}
+      </div>
+      {action ? <div className="mt-4">{action}</div> : null}
+    </div>
+  );
+}
+
 function GuideStep({ number, title, description }: { number: string; title: string; description: string }) {
   return (
     <div className="rounded-[22px] bg-slate-50 px-4 py-3">
@@ -1703,6 +2096,34 @@ function GuideStep({ number, title, description }: { number: string; title: stri
       <p className="mt-1 text-xs leading-5 text-slate-500">{description}</p>
     </div>
   );
+}
+
+function guideHrefForProvider(provider: string) {
+  const normalized = String(provider || "").trim().toLowerCase();
+  if (normalized === "youtube") {
+    return "/guide#youtube";
+  }
+  if (normalized === "instagram") {
+    return "/guide#instagram";
+  }
+  return "/guide#blogger";
+}
+
+function providerDisplayName(provider: string) {
+  const normalized = String(provider || "").trim().toLowerCase();
+  if (normalized === "youtube") {
+    return "YouTube";
+  }
+  if (normalized === "instagram") {
+    return "Instagram";
+  }
+  if (normalized === "cloudflare") {
+    return "Cloudflare";
+  }
+  if (normalized === "blogger") {
+    return "Blogger";
+  }
+  return provider || "Unknown";
 }
 
 function StatTile({ label, value }: { label: string; value: string }) {

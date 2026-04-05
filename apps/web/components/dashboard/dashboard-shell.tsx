@@ -137,7 +137,7 @@ export function DashboardShell({ children, nav }: { children: React.ReactNode; n
 
   return (
     <div className="dashboard-shell min-h-screen px-4 py-4 text-slate-950 sm:px-5 lg:px-6">
-      <div className="mx-auto grid min-h-[calc(100vh-2rem)] max-w-[1820px] gap-4 xl:grid-cols-[280px_minmax(0,1fr)_320px]">
+      <div className="mx-auto grid min-h-[calc(100vh-2rem)] w-full gap-4 2xl:grid-cols-[280px_minmax(0,1fr)_320px] xl:grid-cols-[280px_minmax(0,1fr)]">
         <aside className="office-panel office-panel-strong flex min-h-0 flex-col overflow-hidden rounded-[30px] p-4 sm:p-5">
           <div className="office-plaque rounded-[26px] p-5 text-white">
             <p className="text-[11px] font-semibold uppercase tracking-[0.36em] text-white/70">Bloggent OS</p>
@@ -207,12 +207,12 @@ export function DashboardShell({ children, nav }: { children: React.ReactNode; n
             </div>
           </header>
 
-          <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-4 sm:px-5 sm:py-5 lg:px-7 lg:py-6">
+          <div className="min-h-0 flex-1 overflow-x-auto overflow-y-auto px-4 py-4 sm:px-5 sm:py-5 lg:px-7 lg:py-6">
             {children}
           </div>
         </main>
 
-        <aside className="office-panel office-panel-dark flex min-h-0 flex-col rounded-[30px] p-4 text-white sm:p-5">
+        <aside className="office-panel office-panel-dark hidden min-h-0 flex-col rounded-[30px] p-4 text-white sm:p-5 2xl:flex">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-slate-300">Operator Dock</p>
             <h3 className="mt-3 font-display text-[28px] font-semibold leading-none">Desk</h3>

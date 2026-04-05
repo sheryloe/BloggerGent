@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import type { ContentOpsStatus, ContentReviewItem } from "@/lib/types";
+import { getWorkspaceContentItems, processWorkspacePublishQueue, queueWorkspaceContentItemPublish } from "@/lib/api";
+import type { ContentItemRead, ContentOpsStatus, ContentReviewItem } from "@/lib/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
 
@@ -40,6 +41,9 @@ function statusTone(value: string) {
   if (value === "failed" || value === "rejected") {
     return "border-rose-200 bg-rose-500/10 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/15 dark:text-rose-200";
   }
+  if (value === "blocked_asset" || value === "blocked") {
+    return "border-amber-200 bg-amber-500/10 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200";
+  }
   if (value === "approved" || value === "applied" || value === "auto_approved") {
     return "border-emerald-200 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200";
   }
@@ -52,6 +56,33 @@ function issueMessage(issue: Record<string, unknown>) {
   return `${code}: ${message}`;
 }
 
+function readScore(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function scoreSummary(lastScore: Record<string, unknown>) {
+  const pairs: Array<[string, string]> = [
+    ["seo_ctr", "SEO/CTR"],
+    ["watch_quality", "Watch"],
+    ["engagement_quality", "Engage"],
+  ];
+  const segments: string[] = [];
+  pairs.forEach(([key, label]) => {
+    const score = readScore(lastScore[key]);
+    if (score !== null) {
+      segments.push(`${label} ${score.toFixed(1)}`);
+    }
+  });
+  return segments.join(" · ");
+}
+
 export function ContentOpsManager({
   initialStatus,
   initialReviews,
@@ -61,8 +92,38 @@ export function ContentOpsManager({
 }) {
   const [status, setStatus] = useState(initialStatus);
   const [reviews, setReviews] = useState(initialReviews);
+  const [platformItems, setPlatformItems] = useState<ContentItemRead[]>([]);
+  const [platformStatusFilter, setPlatformStatusFilter] = useState<string>("all");
   const [feedback, setFeedback] = useState<string>("");
   const [isPending, startTransition] = useTransition();
+
+  const platformSummary = useMemo(() => {
+    const queued = platformItems.filter((item) => item.lifecycleStatus === "queued" || item.lifecycleStatus === "scheduled").length;
+    const failed = platformItems.filter((item) => item.lifecycleStatus === "failed" || item.lifecycleStatus === "blocked").length;
+    const blockedAsset = platformItems.filter((item) => item.lifecycleStatus === "blocked_asset").length;
+    const published = platformItems.filter((item) => item.lifecycleStatus === "published" || item.lifecycleStatus === "review").length;
+    return { queued, failed, blockedAsset, published };
+  }, [platformItems]);
+
+  const filteredPlatformItems = useMemo(() => {
+    if (platformStatusFilter === "all") {
+      return platformItems;
+    }
+    return platformItems.filter((item) => item.lifecycleStatus === platformStatusFilter);
+  }, [platformItems, platformStatusFilter]);
+
+  const loadPlatformItems = async () => {
+    const [youtubeItems, instagramItems] = await Promise.all([
+      getWorkspaceContentItems({ provider: "youtube", limit: 30 }),
+      getWorkspaceContentItems({ provider: "instagram", limit: 30 }),
+    ]);
+    const merged = [...youtubeItems, ...instagramItems].sort((left, right) => {
+      const leftTime = new Date(left.updatedAt).getTime();
+      const rightTime = new Date(right.updatedAt).getTime();
+      return rightTime - leftTime;
+    });
+    setPlatformItems(merged.slice(0, 20));
+  };
 
   const refreshData = async () => {
     const [nextStatus, nextReviews] = await Promise.all([
@@ -71,7 +132,18 @@ export function ContentOpsManager({
     ]);
     setStatus(nextStatus);
     setReviews(nextReviews);
+    await loadPlatformItems();
   };
+
+  useEffect(() => {
+    startTransition(async () => {
+      try {
+        await loadPlatformItems();
+      } catch {
+        setFeedback("플랫폼 게시 대기열을 불러오지 못했습니다.");
+      }
+    });
+  }, []);
 
   const runAction = (path: string, successMessage: string) => {
     startTransition(async () => {
@@ -82,6 +154,32 @@ export function ContentOpsManager({
         setFeedback(successMessage);
       } catch (error) {
         setFeedback(error instanceof Error ? error.message : "작업 실행에 실패했습니다.");
+      }
+    });
+  };
+
+  const processPlatformQueue = () => {
+    startTransition(async () => {
+      try {
+        setFeedback("");
+        const result = await processWorkspacePublishQueue(10);
+        await refreshData();
+        setFeedback(`플랫폼 게시 큐를 실행했습니다. 처리 건수: ${result.processed_count ?? 0}`);
+      } catch (error) {
+        setFeedback(error instanceof Error ? error.message : "플랫폼 게시 큐 실행에 실패했습니다.");
+      }
+    });
+  };
+
+  const queuePlatformItem = (itemId: number) => {
+    startTransition(async () => {
+      try {
+        setFeedback("");
+        await queueWorkspaceContentItemPublish(itemId);
+        await refreshData();
+        setFeedback(`콘텐츠 #${itemId}를 게시 대기열로 전환했습니다.`);
+      } catch (error) {
+        setFeedback(error instanceof Error ? error.message : "게시 대기열 등록에 실패했습니다.");
       }
     });
   };
@@ -130,6 +228,94 @@ export function ContentOpsManager({
             새로고침
           </Button>
           {feedback ? <p className="text-sm text-slate-500 dark:text-zinc-400">{feedback}</p> : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>YouTube / Instagram 게시 큐</CardTitle>
+          <CardDescription>
+            queued={platformSummary.queued} | blocked_asset={platformSummary.blockedAsset} | failed={platformSummary.failed} | published/review={platformSummary.published}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={processPlatformQueue} disabled={isPending}>
+              게시 큐 처리
+            </Button>
+            <Button variant="outline" onClick={() => startTransition(refreshData)} disabled={isPending}>
+              상태 새로고침
+            </Button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {[
+              ["all", "전체"],
+              ["blocked_asset", "에셋 대기"],
+              ["ready_to_publish", "게시 준비"],
+              ["failed", "실패"],
+              ["queued", "큐"],
+            ].map(([value, label]) => (
+              <Button
+                key={value}
+                size="sm"
+                variant={platformStatusFilter === value ? "default" : "outline"}
+                onClick={() => setPlatformStatusFilter(value)}
+                disabled={isPending}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
+          <div className="grid gap-3">
+            {filteredPlatformItems.length === 0 ? (
+              <p className="text-sm text-slate-500 dark:text-zinc-400">플랫폼 콘텐츠 항목이 없습니다.</p>
+            ) : (
+              filteredPlatformItems.map((item) => {
+                const failureCode = String(
+                  item.latestPublication?.errorCode ??
+                    item.latestPublication?.responsePayload?.error_code ??
+                    item.latestPublication?.responsePayload?.failure_code ??
+                    "",
+                ).trim();
+                const scores = scoreSummary(item.lastScore);
+                return (
+                  <div key={item.id} className="rounded-lg border border-slate-200 px-3 py-3 dark:border-white/10">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="space-y-1">
+                        <p className="text-sm font-semibold text-slate-900 dark:text-zinc-100">
+                          [{item.provider}] {item.title || "(제목 없음)"}
+                        </p>
+                        <p className="text-xs text-slate-500 dark:text-zinc-400">
+                          #{item.id} · {item.contentType} · {item.lifecycleStatus} · {item.updatedAt}
+                        </p>
+                        {scores ? (
+                          <p className="text-xs text-slate-500 dark:text-zinc-400">{scores}</p>
+                        ) : null}
+                        {item.blockedReason ? (
+                          <p className="text-xs font-medium text-amber-700 dark:text-amber-300">blocked: {item.blockedReason}</p>
+                        ) : null}
+                        {failureCode ? (
+                          <p className="text-xs font-medium text-rose-600 dark:text-rose-300">error: {failureCode}</p>
+                        ) : null}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge className={statusTone(item.lifecycleStatus)}>{item.lifecycleStatus}</Badge>
+                        {(item.lifecycleStatus === "draft" ||
+                          item.lifecycleStatus === "review" ||
+                          item.lifecycleStatus === "failed" ||
+                          item.lifecycleStatus === "blocked_asset" ||
+                          item.lifecycleStatus === "ready_to_publish") ? (
+                          <Button size="sm" variant="outline" onClick={() => queuePlatformItem(item.id)} disabled={isPending}>
+                            게시 대기 등록
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </CardContent>
       </Card>
 

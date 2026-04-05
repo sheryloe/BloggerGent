@@ -2,15 +2,17 @@ import { MissionControl } from "@/components/dashboard/mission-control";
 import { fetchChannels, getMissionControl } from "@/lib/api";
 import type { MissionControlRead } from "@/lib/types";
 
+export const revalidate = 5;
+
 export default async function DashboardHomePage() {
-  const [missionResult, channelsResult] = await Promise.allSettled([getMissionControl(), fetchChannels()]);
-  const channels = channelsResult.status === "fulfilled" ? channelsResult.value : [];
+  const missionValue = await getMissionControl().catch(() => null);
+  const channels = missionValue?.channels?.length ? missionValue.channels : await fetchChannels().catch(() => []);
 
   const mission: MissionControlRead =
-    missionResult.status === "fulfilled"
-      ? missionResult.value
+    missionValue
+      ? missionValue
       : {
-          workspaceLabel: "Bloggent Mission Control",
+          workspaceLabel: "Donggr AutoBloggent",
           channels,
           workers: [],
           runs: [],
@@ -26,5 +28,5 @@ export default async function DashboardHomePage() {
           alerts: [],
         };
 
-  return <MissionControl mission={{ ...mission, channels: mission.channels.length > 0 ? mission.channels : channels }} />;
+  return <MissionControl mission={mission} />;
 }

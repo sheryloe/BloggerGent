@@ -1,4 +1,4 @@
-﻿import {
+import {
   ArchiveChannel,
   ArchiveChannelPage,
   BlogArchivePage,
@@ -39,6 +39,7 @@
   ManagedChannelRead,
   MissionControlRead,
   ModelPolicyRead,
+  PlatformIntegrationRead,
   PlannerCalendarRead,
   PlannerCategoryRead,
   PlatformCredentialRead,
@@ -57,6 +58,7 @@
   SyncedBloggerPostPage,
   TelegramTestResult,
   Topic,
+  WorkspaceIntegrationOverviewRead,
 } from "@/lib/types";
 
 function resolveBaseUrl() {
@@ -65,11 +67,13 @@ function resolveBaseUrl() {
 
 type ApiFetchOptions = RequestInit & {
   revalidate?: number | false;
+  timeoutMs?: number;
 };
 
 async function apiFetch<T>(path: string, init?: ApiFetchOptions): Promise<T> {
   const method = (init?.method ?? "GET").toUpperCase();
   const revalidate = init?.revalidate;
+  const timeoutMs = init?.timeoutMs ?? (method === "GET" ? 8000 : 15000);
   const fetchInit: RequestInit & { next?: { revalidate?: number | false } } = {
     ...init,
     headers: {
@@ -90,11 +94,29 @@ async function apiFetch<T>(path: string, init?: ApiFetchOptions): Promise<T> {
     }
   }
 
-  const response = await fetch(`${resolveBaseUrl()}${path}`, fetchInit);
-  if (!response.ok) {
-    throw new Error(`API request failed for ${path}: ${response.status}`);
+  let timeoutHandle: NodeJS.Timeout | null = null;
+  if (!fetchInit.signal && timeoutMs > 0) {
+    const controller = new AbortController();
+    timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+    fetchInit.signal = controller.signal;
   }
-  return response.json() as Promise<T>;
+
+  try {
+    const response = await fetch(`${resolveBaseUrl()}${path}`, fetchInit);
+    if (!response.ok) {
+      throw new Error(`API request failed for ${path}: ${response.status}`);
+    }
+    return response.json() as Promise<T>;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`API request timed out for ${path}: ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
 }
 
 export async function getDashboardMetrics(blogId?: number) {
@@ -431,9 +453,32 @@ function mapManagedChannel(item: any): ManagedChannelRead {
 }
 
 function mapContentItem(item: any): ContentItemRead {
+  const latestPublicationRaw = item.latest_publication ?? null;
+  const latestPublication = latestPublicationRaw
+    ? {
+        id: latestPublicationRaw.id,
+        provider: latestPublicationRaw.provider ?? "",
+        remoteId: latestPublicationRaw.remote_id ?? null,
+        remoteUrl: latestPublicationRaw.remote_url ?? null,
+        targetState: latestPublicationRaw.target_state ?? "publish",
+        publishStatus: latestPublicationRaw.publish_status ?? "draft",
+        errorCode:
+          latestPublicationRaw.error_code ??
+          (latestPublicationRaw.response_payload?.error_code as string | undefined) ??
+          (latestPublicationRaw.response_payload?.failure_code as string | undefined) ??
+          null,
+        scheduledFor: latestPublicationRaw.scheduled_for ?? null,
+        publishedAt: latestPublicationRaw.published_at ?? null,
+        responsePayload: latestPublicationRaw.response_payload ?? {},
+        createdAt: latestPublicationRaw.created_at,
+        updatedAt: latestPublicationRaw.updated_at,
+      }
+    : null;
+
   return {
     id: item.id,
     managedChannelId: item.managed_channel_id,
+    idempotencyKey: item.idempotency_key ?? "",
     channelId: item.channel_id ?? "",
     provider: item.provider ?? "",
     blogId: item.blog_id ?? null,
@@ -454,8 +499,10 @@ function mapContentItem(item: any): ContentItemRead {
     approvalStatus: item.approval_status ?? "pending",
     scheduledFor: item.scheduled_for ?? null,
     lastFeedback: item.last_feedback ?? null,
+    blockedReason: item.blocked_reason ?? null,
     lastScore: item.last_score ?? {},
     createdByAgent: item.created_by_agent ?? null,
+    latestPublication,
     createdAt: item.created_at,
     updatedAt: item.updated_at,
   };
@@ -536,6 +583,20 @@ function mapPlatformCredential(item: any): PlatformCredentialRead {
   };
 }
 
+function mapPlatformIntegration(item: any): PlatformIntegrationRead {
+  return {
+    provider: item.provider,
+    channelId: item.channel_id,
+    displayName: item.display_name ?? "",
+    oauthState: item.oauth_state ?? "unknown",
+    status: item.status ?? "attention",
+    scopeCount: item.scope_count ?? 0,
+    expiresAt: item.expires_at ?? null,
+    isValid: item.is_valid ?? false,
+    lastError: item.last_error ?? null,
+  };
+}
+
 function mapAgentRuntimeHealth(item: any): AgentRuntimeHealthRead {
   const workerStatus = item?.worker_status ?? {};
   const runStatus = item?.run_status ?? {};
@@ -560,7 +621,7 @@ function mapAgentRuntimeHealth(item: any): AgentRuntimeHealthRead {
 
 function mapMissionControl(payload: any): MissionControlRead {
   return {
-    workspaceLabel: payload.workspace_label ?? "Bloggent Mission Control",
+    workspaceLabel: payload.workspace_label ?? "Donggr AutoBloggent",
     channels: (payload.channels ?? []).map(mapManagedChannel),
     workers: (payload.workers ?? []).map(mapAgentWorker),
     runs: (payload.runs ?? []).map(mapAgentRun),
@@ -576,8 +637,89 @@ function mapMissionControl(payload: any): MissionControlRead {
 }
 
 export async function getMissionControl() {
-  const payload = await apiFetch<any>("/workspace/mission-control", { revalidate: false });
+  const payload = await apiFetch<any>("/workspace/mission-control", { revalidate: 5, timeoutMs: 5000 });
   return mapMissionControl(payload);
+}
+
+export async function getWorkspaceIntegrations(channelId?: string) {
+  const query = channelId ? `?channel_id=${encodeURIComponent(channelId)}` : "";
+  const payload = await apiFetch<any>(`/workspace/integrations${query}`, { revalidate: false });
+  return {
+    channels: (payload.channels ?? []).map(mapManagedChannel),
+    integrations: (payload.integrations ?? []).map(mapPlatformIntegration),
+    credentials: (payload.credentials ?? []).map(mapPlatformCredential),
+  } satisfies WorkspaceIntegrationOverviewRead;
+}
+
+export function getWorkspaceOAuthStartUrl(channelId: string) {
+  return `${resolveBaseUrl()}/workspace/oauth/${encodeURIComponent(channelId)}/start`;
+}
+
+export async function refreshWorkspaceOAuth(channelId: string) {
+  const payload = await apiFetch<any>(`/workspace/oauth/${encodeURIComponent(channelId)}/refresh`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  return mapPlatformCredential(payload);
+}
+
+export async function getWorkspaceContentItems(params?: {
+  channelId?: string;
+  provider?: string;
+  contentType?: string;
+  lifecycleStatus?: string;
+  limit?: number;
+}) {
+  const query = new URLSearchParams();
+  if (params?.channelId) {
+    query.set("channel_id", params.channelId);
+  }
+  if (params?.provider) {
+    query.set("provider", params.provider);
+  }
+  if (params?.contentType) {
+    query.set("content_type", params.contentType);
+  }
+  if (params?.lifecycleStatus) {
+    query.set("lifecycle_status", params.lifecycleStatus);
+  }
+  query.set("limit", String(params?.limit ?? 50));
+  const payload = await apiFetch<any[]>(`/workspace/content-items?${query.toString()}`, { revalidate: false });
+  return (payload ?? []).map(mapContentItem);
+}
+
+export async function queueWorkspaceContentItemPublish(itemId: number) {
+  const payload = await apiFetch<any>(`/workspace/content-items/${itemId}/publish`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  return mapContentItem(payload);
+}
+
+export async function processWorkspacePublishQueue(limit = 10) {
+  return apiFetch<any>(`/workspace/publish-queue/process?limit=${Math.max(1, Math.min(limit, 100))}`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function syncWorkspaceChannelMetrics(channelId: string, days = 28, refreshIndexing = true) {
+  return apiFetch<any>(
+    `/workspace/channels/${encodeURIComponent(channelId)}/metrics/sync?days=${Math.max(1, Math.min(days, 365))}&refresh_indexing=${
+      refreshIndexing ? "true" : "false"
+    }`,
+    {
+      method: "POST",
+      body: JSON.stringify({}),
+    },
+  );
+}
+
+export async function runWorkspaceMetricSync(force = false) {
+  return apiFetch<any>(`/workspace/metrics/sync?force=${force ? "true" : "false"}`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
 }
 
 function mapPromptFlow(payload: any): PromptFlowRead {
@@ -716,7 +858,7 @@ export async function getModelPolicy() {
 }
 
 export async function getChannels() {
-  const payload = await apiFetch<any[]>("/channels", { revalidate: false });
+  const payload = await apiFetch<any[]>("/channels", { revalidate: 15, timeoutMs: 5000 });
   return (payload ?? []).map(mapManagedChannel);
 }
 

@@ -16,8 +16,11 @@ const displayFont = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "Bloggent",
-  description: "블로그별 AI 에이전트와 프롬프트를 운영하는 SEO 자동화 대시보드"
+  title: {
+    default: "Donggr AutoBloggent",
+    template: "%s | Donggr AutoBloggent",
+  },
+  description: "Donggr AutoBloggent는 생성·자산·업로드·운영 루프를 통합한 멀티 플랫폼 마케팅 운영 시스템입니다.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

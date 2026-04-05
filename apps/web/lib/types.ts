@@ -779,6 +779,7 @@ export interface IntegratedArchiveItem {
   provider: "blogger" | "cloudflare" | string;
   channel_id: string;
   channel_name: string;
+  category_slug?: string | null;
   remote_id: string;
   provider_status: string;
   title: string;
@@ -786,6 +787,11 @@ export interface IntegratedArchiveItem {
   published_url?: string | null;
   thumbnail_url?: string | null;
   labels: string[];
+  seo_score?: number | null;
+  geo_score?: number | null;
+  ctr?: number | null;
+  index_status?: string;
+  quality_status?: string | null;
   published_at?: string | null;
   updated_at?: string | null;
   status: string;
@@ -1111,9 +1117,25 @@ export interface ManagedChannelRead {
   linkedBlogId?: number | null;
 }
 
+export interface ContentItemPublicationRecord {
+  id: number;
+  provider: string;
+  remoteId: string | null;
+  remoteUrl: string | null;
+  targetState: string;
+  publishStatus: string;
+  errorCode: string | null;
+  scheduledFor: string | null;
+  publishedAt: string | null;
+  responsePayload: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ContentItemRead {
   id: number;
   managedChannelId: number;
+  idempotencyKey: string;
   channelId: string;
   provider: string;
   blogId: number | null;
@@ -1134,8 +1156,10 @@ export interface ContentItemRead {
   approvalStatus: string;
   scheduledFor: string | null;
   lastFeedback: string | null;
+  blockedReason: string | null;
   lastScore: Record<string, unknown>;
   createdByAgent: string | null;
+  latestPublication: ContentItemPublicationRecord | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1207,6 +1231,24 @@ export interface PlatformCredentialRead {
   lastError: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PlatformIntegrationRead {
+  provider: string;
+  channelId: string;
+  displayName: string;
+  oauthState: string;
+  status: string;
+  scopeCount: number;
+  expiresAt: string | null;
+  isValid: boolean;
+  lastError: string | null;
+}
+
+export interface WorkspaceIntegrationOverviewRead {
+  channels: ManagedChannelRead[];
+  integrations: PlatformIntegrationRead[];
+  credentials: PlatformCredentialRead[];
 }
 
 export interface AgentRuntimeHealthRead {

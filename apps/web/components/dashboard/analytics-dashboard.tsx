@@ -12,6 +12,7 @@ import {
   getCloudflarePosts,
   getIntegratedAnalytics,
   getSettings,
+  getWorkspaceContentItems,
   refreshAnalyticsIndexing,
   requestAnalyticsIndexing,
   updateSettings,
@@ -34,6 +35,13 @@ type AnalyticsDashboardProps = {
 type SortKey = "published_at" | "seo" | "geo" | "similarity";
 type SortDir = "asc" | "desc";
 type DetailTab = "day" | "week" | "month";
+type PlatformScoreKey = "seo_ctr" | "watch_quality" | "engagement_quality";
+type PlatformScoreCard = {
+  provider: "blogger" | "youtube" | "instagram";
+  itemCount: number;
+  latestUpdatedAt: string | null;
+  scores: Record<PlatformScoreKey, number | null>;
+};
 
 type CalendarCell = {
   dateKey: string;
@@ -149,6 +157,47 @@ function formatDateTime(value: string | null | undefined) {
   return `${year}-${month}-${day} ${hour}:${minute}`;
 }
 
+function providerLabel(provider: string) {
+  if (provider === "youtube") return "YouTube";
+  if (provider === "instagram") return "Instagram";
+  return "Blogger";
+}
+
+function readNumericScore(raw: unknown): number | null {
+  const score = Number(raw);
+  if (!Number.isFinite(score)) return null;
+  return Math.max(0, Math.min(100, score));
+}
+
+function averagePlatformScore(items: Array<{ lastScore: Record<string, unknown> }>, key: PlatformScoreKey): number | null {
+  const values = items
+    .map((item) => readNumericScore(item.lastScore?.[key]))
+    .filter((value): value is number => value !== null);
+  if (!values.length) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function buildPlatformScoreCard(
+  provider: "blogger" | "youtube" | "instagram",
+  items: Array<{ updatedAt: string; lastScore: Record<string, unknown> }>,
+): PlatformScoreCard {
+  const latestUpdatedAt =
+    [...items]
+      .map((item) => item.updatedAt)
+      .filter(Boolean)
+      .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0] ?? null;
+  return {
+    provider,
+    itemCount: items.length,
+    latestUpdatedAt,
+    scores: {
+      seo_ctr: averagePlatformScore(items, "seo_ctr"),
+      watch_quality: averagePlatformScore(items, "watch_quality"),
+      engagement_quality: averagePlatformScore(items, "engagement_quality"),
+    },
+  };
+}
+
 function toBool(value: string | undefined, fallback = false) {
   if (value === undefined) return fallback;
   return ["1", "true", "yes", "on", "enabled"].includes(value.trim().toLowerCase());
@@ -256,6 +305,7 @@ export function AnalyticsDashboard({ blogs, channels }: AnalyticsDashboardProps)
   const [indexingSaving, setIndexingSaving] = useState(false);
   const [indexingRefreshing, setIndexingRefreshing] = useState(false);
   const [requestingUrl, setRequestingUrl] = useState<string | null>(null);
+  const [platformScoreCards, setPlatformScoreCards] = useState<PlatformScoreCard[]>([]);
   const oauthStartUrl = `${process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1"}/blogger/oauth/start`;
 
   const selectedChannel = useMemo(() => channels.find((channel) => channel.channelId === selectedChannelId) ?? null, [channels, selectedChannelId]);
@@ -381,6 +431,19 @@ export function AnalyticsDashboard({ blogs, channels }: AnalyticsDashboardProps)
     }
   }
 
+  async function loadPlatformScores() {
+    const [bloggerItems, youtubeItems, instagramItems] = await Promise.all([
+      getWorkspaceContentItems({ provider: "blogger", limit: 80 }),
+      getWorkspaceContentItems({ provider: "youtube", limit: 80 }),
+      getWorkspaceContentItems({ provider: "instagram", limit: 80 }),
+    ]);
+    setPlatformScoreCards([
+      buildPlatformScoreCard("blogger", bloggerItems),
+      buildPlatformScoreCard("youtube", youtubeItems),
+      buildPlatformScoreCard("instagram", instagramItems),
+    ]);
+  }
+
   async function handleSaveIndexingSettings() {
     try {
       setIndexingSaving(true);
@@ -487,6 +550,12 @@ export function AnalyticsDashboard({ blogs, channels }: AnalyticsDashboardProps)
   useEffect(() => {
     void loadIndexingSettings();
   }, [blogs]);
+
+  useEffect(() => {
+    void loadPlatformScores().catch((error) => {
+      setStatus(error instanceof Error ? error.message : "플랫폼 점수 카드를 불러오지 못했습니다.");
+    });
+  }, []);
 
   useEffect(() => {
     if (!selectedDateFromQuery && selectedDate) {
@@ -951,6 +1020,43 @@ export function AnalyticsDashboard({ blogs, channels }: AnalyticsDashboardProps)
         </section>
 
         <section className="rounded-[28px] bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-indigo-500">플랫폼 점수 분리</p>
+              <h2 className="mt-2 text-xl font-semibold text-slate-900">SEO/CTR · Watch · Engagement 비교</h2>
+              <p className="mt-2 text-sm text-slate-500">플랫폼별 last_score를 분리해 보여주며, 점수는 혼합 계산하지 않습니다.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void loadPlatformScores()}
+              className="rounded-2xl bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200"
+            >
+              비교 카드 새로고침
+            </button>
+          </div>
+          <div className="mt-5 grid gap-3 md:grid-cols-3">
+            {platformScoreCards.map((card) => (
+              <article key={card.provider} className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">{providerLabel(card.provider)}</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      콘텐츠 {card.itemCount}건 · 갱신 {formatDateTime(card.latestUpdatedAt)}
+                    </p>
+                  </div>
+                  <ViewChip label={card.provider} />
+                </div>
+                <div className="mt-4 grid gap-2">
+                  <ProviderScoreRow label="SEO/CTR" score={card.scores.seo_ctr} />
+                  <ProviderScoreRow label="Watch" score={card.scores.watch_quality} />
+                  <ProviderScoreRow label="Engagement" score={card.scores.engagement_quality} />
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-[28px] bg-white p-5 shadow-sm">
           <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-6">
             <Field label="기준 월"><input type="month" value={month} onChange={(event) => setQuery({ month: event.target.value, selectedDate: null, articlePage: "1" })} className="w-full rounded-2xl bg-slate-50 px-4 py-3 text-sm outline-none focus:bg-white" /></Field>
             <Field label="출처"><select value={sourceType} onChange={(event) => setQuery({ source: event.target.value || null, articlePage: "1" })} className="w-full rounded-2xl bg-slate-50 px-4 py-3 text-sm outline-none focus:bg-white"><option value="all">전체</option><option value="generated">앱 생성</option><option value="synced">동기화</option></select></Field>
@@ -1018,5 +1124,13 @@ function DetailTabButton({ active, onClick, label }: { active: boolean; onClick:
 function MiniMetric({ label, value }: { label: string; value: string }) { return <article className="rounded-[24px] bg-white p-4 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">{label}</p><p className="mt-2 text-xl font-semibold text-slate-900">{value}</p></article>; }
 function MiniStat({ label, value }: { label: string; value: string }) { return <div><p className="text-xs uppercase tracking-[0.2em] text-slate-400">{label}</p><p className="mt-1 font-semibold text-slate-900">{value}</p></div>; }
 function ViewChip({ label }: { label: string }) { return <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">{label}</span>; }
+function ProviderScoreRow({ label, score }: { label: string; score: number | null }) {
+  return (
+    <div className="flex items-center justify-between rounded-2xl bg-white px-3 py-2">
+      <span className="text-xs font-medium text-slate-500">{label}</span>
+      <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-medium ${scoreTone(score)}`}>{score === null ? "N/A" : score.toFixed(1)}</span>
+    </div>
+  );
+}
 function ScoreBadge({ score, label }: { score: number | null; label: string }) { return <span className={`inline-flex rounded-full px-3 py-1 text-[11px] font-medium ${scoreTone(score)}`}>{label} {score === null ? 'N/A' : score.toFixed(1)}</span>; }
 function EmptyBlock({ title, body }: { title: string; body: string }) { return <article className="rounded-[24px] bg-white p-5 text-center shadow-sm"><p className="text-sm font-semibold text-slate-900">{title}</p><p className="mt-2 text-sm leading-6 text-slate-500">{body}</p></article>; }
