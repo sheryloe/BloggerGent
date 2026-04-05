@@ -1,49 +1,30 @@
-# Deployment
+﻿# Deployment
 
-이 문서는 Donggr AutoBloggent 운영 배포 체크리스트입니다.
+## 배포 전 체크
+1. 브랜드 문자열이 `동그리 자동 블로그전트`인지 확인
+2. `/` -> `/dashboard` 리다이렉트 확인
+3. `Admin / Integrations / Ops Monitor` 분리 동작 확인
+4. UTF-8 한글 깨짐 여부 확인
 
-## 서비스 구성
-
-- `web`
-- `api`
-- `worker` (profile)
-- `scheduler` (profile)
-- `postgres`
-- `redis`
-- `minio` (선택)
-
-## 배포 전 필수 확인
-
-### 환경 변수
-
-- `WEB_PORT`, `API_PORT`
-- `NEXT_PUBLIC_API_BASE_URL`, `API_INTERNAL_URL`
-- `OPENAI_API_KEY`
-- `BLOGGER_CLIENT_ID`, `BLOGGER_CLIENT_SECRET`, `BLOGGER_REDIRECT_URI`
-- `SETTINGS_ENCRYPTION_SECRET`
-- (R2 사용 시) `CLOUDFLARE_*`, `PUBLIC_IMAGE_PROVIDER=cloudflare_r2`
-
-### 헬스 체크
-
-```bash
-curl http://127.0.0.1:7002/healthz
-```
-
-### 웹 빌드
-
+## 운영 검증
 ```bash
 docker compose --env-file .env exec -T web sh -lc "cd /app && npm run build"
+docker compose --env-file .env exec -T api python -m pytest apps/api/tests/test_workspace_platform_services.py apps/api/tests/test_planner_service.py
 ```
 
-## 운영 검증 시나리오
+## 런타임 확인
+```bash
+docker compose --env-file .env exec -T api python - <<'PY'
+import json, urllib.request
+u='http://127.0.0.1:8000/api/v1/workspace/mission-control'
+print(json.load(urllib.request.urlopen(u)).get('workspace_label'))
+PY
+```
 
-1. `http://127.0.0.1:7001/` → `/dashboard` 리다이렉트
-2. 대시보드 4묶음(`생성/자산/업로드/운영`) 노출
-3. API `workspace_label` = `Donggr AutoBloggent`
-4. 주요 API 응답 오류/타임아웃 없음
+## Ops 동기화
+- 화면: `/ops-health` -> 실시간 동기화
+- CLI 폴백:
+```bash
+docker compose --env-file .env exec -T api python -m app.tools.ops_health_report
+```
 
-## 배포 후 주의사항
-
-- 마이그레이션/운영 검증 완료 전 공개 자산 삭제 금지
-- 포트/경로 변경 시 README + 위키 동시 갱신
-- 장애 재현 로그는 `TEST/logs`에 타임스탬프 파일로 저장

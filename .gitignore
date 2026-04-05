@@ -11,3 +11,40 @@ storage/images/*
 storage/html/*
 !storage/images/.gitkeep
 !storage/html/.gitkeep
+
+# local build artifacts / caches
+apps/web/out/
+apps/web/tsconfig.tsbuildinfo
+apps/api/celerybeat-schedule
+.codex-output/
+.codex/
+.agents/
+.playwright-cli/
+.docker-data/
+backup/
+output/
+TEST/
+
+# local utility directories
+env/
+plugins/
+
+# local storage snapshots
+storage/reports/
+storage/tmp/
+storage/rewrite-packages/
+storage/scheduled-post-batches/
+storage/training/
+storage/manual-mystery-repair/
+storage/mystery-refine-backups/
+storage/patch-packages/
+
+# one-off local scripts / dumps
+scripts/fix_cloudflare_ctr_images.py
+/allposts.json
+/cats.json
+/feed.xml
+/page.html
+/popup.json
+/public_top.json
+/rss.xml
