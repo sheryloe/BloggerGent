@@ -12,7 +12,18 @@ from sqlalchemy.orm import selectinload
 
 from app.core.celery_app import celery_app
 from app.db.session import SessionLocal
-from app.models.entities import Article, Blog, BloggerPost, Image, JobStatus, LogLevel, PostStatus, PublishMode, WorkflowStageType
+from app.models.entities import (
+    Article,
+    Blog,
+    BloggerPost,
+    Image,
+    JobStatus,
+    LogLevel,
+    PostStatus,
+    PublishMode,
+    Topic,
+    WorkflowStageType,
+)
 from app.services.article_service import build_collage_prompt, ensure_article_editorial_labels, save_article
 from app.services.audit_service import add_log, count_logs_since
 from app.services.blog_service import get_blog, get_workflow_step, render_agent_prompt, stage_label
