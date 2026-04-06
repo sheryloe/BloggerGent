@@ -8,6 +8,7 @@ FREE_MODEL_POLICY = {
         "gpt-5-codex",
         "gpt-5-2025-08-07",
         "gpt-5-chat-latest",
+        "gpt-4.5-preview-2025-02-27",
         "gpt-4.1-2025-04-14",
         "gpt-4o-2024-05-13",
         "gpt-4o-2024-08-06",

@@ -8,38 +8,35 @@ export type ModelGroup = {
 export const OPENAI_DATA_SHARING_FREE_TIERS: ModelGroup[] = [
   {
     id: "shared-1m",
-    title: "무료 1M 토큰/일 그룹",
-    description: "데이터 공유 활성화 계정 기준. 입력/출력 토큰 합산으로 계산됩니다.",
+    title: "Free tier 1M token group",
+    description:
+      "Input + output combined. Usage tiers 1-2: 250K tokens. Deprecated: gpt-4.5-preview-2025-02-27 (shut down 2025-07-14).",
     models: [
-      "gpt-5.4",
-      "gpt-5.2",
-      "gpt-5.1",
-      "gpt-5.1-codex",
-      "gpt-5",
       "gpt-5-codex",
+      "gpt-5-2025-08-07",
       "gpt-5-chat-latest",
-      "gpt-4.1",
-      "gpt-4o",
-      "o1",
-      "o3",
+      "gpt-4.5-preview-2025-02-27",
+      "gpt-4.1-2025-04-14",
+      "gpt-4o-2024-05-13",
+      "gpt-4o-2024-08-06",
+      "gpt-4o-2024-11-20",
+      "o3-2025-04-16",
+      "o1-preview-2024-09-12",
+      "o1-2024-12-17",
     ],
   },
   {
     id: "shared-10m",
-    title: "무료 10M 토큰/일 그룹",
-    description: "데이터 공유 활성화 계정 기준. 소형 모델 위주라 대량 생성 워크로드에 유리합니다.",
+    title: "Free tier 10M token group",
+    description: "Input + output combined. Usage tiers 1-2: 2.5M tokens.",
     models: [
-      "gpt-5.4-mini",
-      "gpt-5.4-nano",
-      "gpt-5.1-codex-mini",
-      "gpt-5-mini",
-      "gpt-5-nano",
-      "gpt-4.1-mini",
-      "gpt-4.1-nano",
-      "gpt-4o-mini",
-      "o1-mini",
-      "o3-mini",
-      "o4-mini",
+      "gpt-5-mini-2025-08-07",
+      "gpt-5-nano-2025-08-07",
+      "gpt-4.1-mini-2025-04-14",
+      "gpt-4.1-nano-2025-04-14",
+      "gpt-4o-mini-2024-07-18",
+      "o4-mini-2025-04-16",
+      "o1-mini-2024-09-12",
       "codex-mini-latest",
     ],
   },
@@ -47,8 +44,6 @@ export const OPENAI_DATA_SHARING_FREE_TIERS: ModelGroup[] = [
 
 const CHAT_COMPLETIONS_UNSUPPORTED_MODELS = new Set([
   "gpt-5-codex",
-  "gpt-5.1-codex",
-  "gpt-5.1-codex-mini",
   "codex-mini-latest",
 ]);
 
@@ -70,7 +65,7 @@ export const OPENAI_IMAGE_MODEL_SUGGESTIONS = [
 export const GEMINI_MODEL_SUGGESTIONS = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"];
 
 export const OPENAI_DATA_SHARING_NOTICE =
-  "공식 도움말 기준으로 평가 공유는 주 7회까지 무료이며, 무료 토큰은 데이터 공유가 켜진 프로젝트 트래픽에만 적용됩니다.";
+  "Free tier usage is calculated from the combined input/output token count. These lists reflect the shared usage tiers.";
 
 export const OPENAI_DATA_SHARING_COMPATIBILITY_NOTE =
-  "현재 앱의 본문 생성기는 Chat Completions 기반이라 codex 계열은 무료 대상 안내에만 표시하고 추천 입력값에서는 제외했습니다.";
+  "Chat Completions does not accept codex-family models. They are listed for reference only.";
