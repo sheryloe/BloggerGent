@@ -1248,8 +1248,9 @@ def build_sheet_topic_exclusion_prompt_cloudflare(
 
 def get_google_sheet_sync_config(db: Session) -> dict[str, str]:
     values = get_settings_map(db)
+    sheet_sync_enabled = _is_enabled(values.get("sheet_sync_enabled"), default=False)
     return {
-        "sheet_id": _extract_sheet_id(values),
+        "sheet_id": _extract_sheet_id(values) if sheet_sync_enabled else "",
         "travel_tab": (values.get("google_sheet_travel_tab") or "援ш?釉붾줈洹?").strip() or "援ш?釉붾줈洹?",
         "mystery_tab": (values.get("google_sheet_mystery_tab") or "援ш?釉붾줈洹?").strip() or "援ш?釉붾줈洹?",
         "cloudflare_tab": (values.get("google_sheet_cloudflare_tab") or "?대씪?곕뱶?뚮젅?대툝濡쒓렇").strip() or "?대씪?곕뱶?뚮젅?대툝濡쒓렇",

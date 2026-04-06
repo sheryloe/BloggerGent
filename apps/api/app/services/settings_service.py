@@ -126,7 +126,7 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     ),
     "topic_history_lookback_days": DefaultSetting(
         "180",
-        "Lookback window in days for topic history matching (sheet first, DB fallback).",
+        "Lookback window in days for topic history matching (DB only).",
     ),
     "topic_novelty_cluster_threshold": DefaultSetting(
         "0.85",
