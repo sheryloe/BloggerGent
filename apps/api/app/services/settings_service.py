@@ -538,6 +538,16 @@ for key, description in SETTING_DESCRIPTION_OVERRIDES_KO.items():
         DEFAULT_SETTINGS[key].description = description
 
 GOOGLE_SHEET_ID_PATTERN = re.compile(r"/spreadsheets/d/([a-zA-Z0-9-_]+)")
+MOJIBAKE_HINTS = ("�", "援ш", "?쒕", "?대씪", "梨꾨")
+
+
+def _is_corrupted_app_name(value: str) -> bool:
+    raw = str(value or "").strip()
+    if not raw:
+        return True
+    if any(token in raw for token in MOJIBAKE_HINTS):
+        return True
+    return raw.count("?") >= 3
 
 
 def _extract_google_sheet_id(value: str) -> str:
@@ -566,6 +576,9 @@ def ensure_default_settings(db: Session) -> None:
                 changed = True
             if item.is_secret and item.value and not is_encrypted_secret(item.value):
                 item.value = encrypt_secret_value(item.value)
+                changed = True
+            if key == "app_name" and _is_corrupted_app_name(item.value):
+                item.value = default.value
                 changed = True
             continue
         db.add(
