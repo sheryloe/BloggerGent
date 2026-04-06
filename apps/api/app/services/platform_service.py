@@ -6,8 +6,8 @@ from datetime import UTC, datetime
 import hashlib
 import json
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import or_, select
+from sqlalchemy.orm import Session, load_only, selectinload
 
 from app.models.entities import (
     AgentRun,
@@ -176,10 +176,11 @@ def _channel_query():
         select(ManagedChannel)
         .options(
             selectinload(ManagedChannel.credentials),
-            selectinload(ManagedChannel.content_items),
-            selectinload(ManagedChannel.agent_workers),
-            selectinload(ManagedChannel.agent_runs),
-            selectinload(ManagedChannel.linked_blog),
+            selectinload(ManagedChannel.content_items).load_only(ContentItem.lifecycle_status),
+            selectinload(ManagedChannel.agent_workers).load_only(AgentWorker.role_name, AgentWorker.status),
+            selectinload(ManagedChannel.agent_runs).load_only(AgentRun.id),
+            selectinload(ManagedChannel.publication_records).load_only(PublicationRecord.id),
+            selectinload(ManagedChannel.linked_blog).load_only(Blog.id),
         )
         .order_by(ManagedChannel.created_at.asc(), ManagedChannel.id.asc())
     )
@@ -563,6 +564,7 @@ def list_content_items(
     *,
     provider: str | None = None,
     channel_id: str | None = None,
+    channel_ids: list[str] | None = None,
     lifecycle_status: str | None = None,
     content_type: str | None = None,
     limit: int = 50,
@@ -581,10 +583,15 @@ def list_content_items(
         .order_by(ContentItem.created_at.desc(), ContentItem.id.desc())
         .limit(max(1, min(limit, 200)))
     )
+    normalized_channel_ids = [str(item).strip() for item in (channel_ids or []) if str(item).strip()]
     if channel_id:
         query = query.join(ContentItem.managed_channel).where(ManagedChannel.channel_id == channel_id)
+    elif normalized_channel_ids:
+        query = query.join(ContentItem.managed_channel).where(ManagedChannel.channel_id.in_(normalized_channel_ids))
     elif provider:
         query = query.join(ContentItem.managed_channel).where(ManagedChannel.provider == provider)
+    elif channel_ids is not None and not normalized_channel_ids:
+        return []
     if lifecycle_status:
         query = query.where(ContentItem.lifecycle_status == lifecycle_status)
     if content_type:
@@ -716,8 +723,10 @@ def list_agent_workers(
     db: Session,
     *,
     channel_id: str | None = None,
+    channel_ids: list[str] | None = None,
     runtime_kind: str | None = None,
     ensure_channels: bool = True,
+    include_unbound: bool = False,
 ) -> list[AgentWorker]:
     if ensure_channels:
         ensure_managed_channels(db)
@@ -726,8 +735,20 @@ def list_agent_workers(
         .options(selectinload(AgentWorker.managed_channel))
         .order_by(AgentWorker.created_at.asc(), AgentWorker.id.asc())
     )
+    normalized_channel_ids = [str(item).strip() for item in (channel_ids or []) if str(item).strip()]
     if channel_id:
         query = query.join(AgentWorker.managed_channel).where(ManagedChannel.channel_id == channel_id)
+    elif normalized_channel_ids:
+        if include_unbound:
+            query = query.outerjoin(AgentWorker.managed_channel).where(
+                or_(ManagedChannel.channel_id.in_(normalized_channel_ids), AgentWorker.managed_channel_id.is_(None))
+            )
+        else:
+            query = query.join(AgentWorker.managed_channel).where(ManagedChannel.channel_id.in_(normalized_channel_ids))
+    elif channel_ids is not None and not normalized_channel_ids:
+        if not include_unbound:
+            return []
+        query = query.where(AgentWorker.managed_channel_id.is_(None))
     if runtime_kind:
         query = query.where(AgentWorker.runtime_kind == runtime_kind)
     return db.execute(query).scalars().unique().all()
@@ -794,8 +815,10 @@ def list_agent_runs(
     *,
     channel_id: str | None = None,
     status: str | None = None,
+    channel_ids: list[str] | None = None,
     limit: int = 100,
     ensure_channels: bool = True,
+    include_unbound: bool = False,
 ) -> list[AgentRun]:
     if ensure_channels:
         ensure_managed_channels(db)
@@ -809,8 +832,20 @@ def list_agent_runs(
         .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
         .limit(max(1, min(limit, 200)))
     )
+    normalized_channel_ids = [str(item).strip() for item in (channel_ids or []) if str(item).strip()]
     if channel_id:
         query = query.join(AgentRun.managed_channel).where(ManagedChannel.channel_id == channel_id)
+    elif normalized_channel_ids:
+        if include_unbound:
+            query = query.outerjoin(AgentRun.managed_channel).where(
+                or_(ManagedChannel.channel_id.in_(normalized_channel_ids), AgentRun.managed_channel_id.is_(None))
+            )
+        else:
+            query = query.join(AgentRun.managed_channel).where(ManagedChannel.channel_id.in_(normalized_channel_ids))
+    elif channel_ids is not None and not normalized_channel_ids:
+        if not include_unbound:
+            return []
+        query = query.where(AgentRun.managed_channel_id.is_(None))
     if status:
         query = query.where(AgentRun.status == status)
     return db.execute(query).scalars().unique().all()

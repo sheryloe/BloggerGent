@@ -4,7 +4,7 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta
 from threading import Lock
 
-from sqlalchemy import select
+from sqlalchemy import case, func, literal, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.entities import AIUsageEvent, AgentRun, AgentWorker, ContentItem, PlatformCredential, PublicationRecord
@@ -104,7 +104,121 @@ def workspace_runtime_usage(db: Session, *, days: int = 7) -> dict:
     normalized_days = max(1, min(int(days or 7), 90))
     now = datetime.now(UTC)
     since = now - timedelta(days=normalized_days)
-    events = db.execute(select(AIUsageEvent).where(AIUsageEvent.created_at >= since).order_by(AIUsageEvent.created_at.desc())).scalars().all()
+
+    bind = db.get_bind()
+    dialect_name = getattr(getattr(bind, "dialect", None), "name", "")
+    if dialect_name == "postgresql":
+        try:
+            combined = func.lower(
+                func.concat_ws(
+                    " ",
+                    func.coalesce(AIUsageEvent.provider_mode, ""),
+                    func.coalesce(AIUsageEvent.provider_name, ""),
+                    func.coalesce(AIUsageEvent.provider_model, ""),
+                    func.coalesce(AIUsageEvent.endpoint, ""),
+                )
+            )
+            name_expr = func.coalesce(AIUsageEvent.provider_name, AIUsageEvent.provider_mode, literal("unknown"))
+            default_bucket = func.coalesce(func.nullif(func.lower(func.trim(name_expr)), ""), literal("unknown"))
+            bucket = case(
+                (combined.ilike("%codex%"), literal("codex_cli")),
+                (combined.ilike("%gemini%"), literal("gemini_cli")),
+                (combined.ilike("%claude%"), literal("claude_cli")),
+                (combined.ilike("%openai%"), literal("openai")),
+                (combined.ilike("%gpt-%"), literal("openai")),
+                else_=default_bucket,
+            )
+            error_count_expr = func.sum(
+                case(
+                    (AIUsageEvent.success.is_(False), func.greatest(func.coalesce(AIUsageEvent.request_count, 1), 1)),
+                    else_=0,
+                )
+            ).label("error_count")
+            rows = db.execute(
+                select(
+                    bucket.label("provider_key"),
+                    func.sum(AIUsageEvent.request_count).label("request_count"),
+                    func.sum(AIUsageEvent.input_tokens).label("input_tokens"),
+                    func.sum(AIUsageEvent.output_tokens).label("output_tokens"),
+                    func.sum(AIUsageEvent.total_tokens).label("total_tokens"),
+                    func.sum(AIUsageEvent.estimated_cost_usd).label("estimated_cost_usd"),
+                    error_count_expr,
+                    func.max(AIUsageEvent.created_at).label("last_event_at"),
+                    func.array_agg(func.distinct(AIUsageEvent.provider_model)).label("models"),
+                )
+                .where(AIUsageEvent.created_at >= since)
+                .group_by(bucket)
+            ).all()
+
+            providers: list[dict] = []
+            total_models: set[str] = set()
+            total_request_count = 0
+            total_input_tokens = 0
+            total_output_tokens = 0
+            total_tokens = 0
+            total_estimated_cost_usd = 0.0
+            total_error_count = 0
+            last_event_at: datetime | None = None
+
+            for row in rows:
+                provider_key = str(row.provider_key or "unknown")
+                request_count = int(row.request_count or 0)
+                input_tokens = int(row.input_tokens or 0)
+                output_tokens = int(row.output_tokens or 0)
+                total_token_count = int(row.total_tokens or 0)
+                estimated_cost = float(row.estimated_cost_usd or 0.0)
+                error_count = int(row.error_count or 0)
+                models = [str(model) for model in (row.models or []) if model]
+
+                providers.append(
+                    {
+                        "provider_key": provider_key,
+                        "label": RUNTIME_LABELS.get(provider_key, provider_key.replace("_", " ").title()),
+                        "request_count": request_count,
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "total_tokens": total_token_count,
+                        "estimated_cost_usd": round(estimated_cost, 6),
+                        "error_count": error_count,
+                        "last_event_at": row.last_event_at,
+                        "models": sorted(set(models)),
+                    }
+                )
+
+                total_request_count += request_count
+                total_input_tokens += input_tokens
+                total_output_tokens += output_tokens
+                total_tokens += total_token_count
+                total_estimated_cost_usd += estimated_cost
+                total_error_count += error_count
+                total_models.update(models)
+                last_event_at = max(filter(None, [last_event_at, row.last_event_at]), default=row.last_event_at)
+
+            providers.sort(key=lambda item: (-int(item["request_count"]), str(item["provider_key"])))
+
+            return {
+                "generated_at": now,
+                "days": normalized_days,
+                "providers": providers,
+                "totals": {
+                    "request_count": total_request_count,
+                    "input_tokens": total_input_tokens,
+                    "output_tokens": total_output_tokens,
+                    "total_tokens": total_tokens,
+                    "estimated_cost_usd": round(total_estimated_cost_usd, 6),
+                    "error_count": total_error_count,
+                    "last_event_at": last_event_at,
+                    "models": sorted(total_models),
+                },
+            }
+        except Exception:
+            pass
+
+    events = (
+        db.execute(select(AIUsageEvent).where(AIUsageEvent.created_at >= since).order_by(AIUsageEvent.created_at.desc()))
+        .scalars()
+        .all()
+    )
 
     grouped: dict[str, dict] = {}
     total_models: set[str] = set()
@@ -372,6 +486,7 @@ def list_content_items(
     *,
     provider: str | None = None,
     channel_id: str | None = None,
+    channel_ids: list[str] | None = None,
     content_type: str | None = None,
     status: str | None = None,
     lifecycle_status: str | None = None,
@@ -382,6 +497,7 @@ def list_content_items(
         db,
         provider=provider,
         channel_id=channel_id,
+        channel_ids=channel_ids,
         content_type=content_type,
         lifecycle_status=lifecycle_status or status,
         limit=limit,
@@ -606,14 +722,18 @@ def list_agent_workers(
     db: Session,
     *,
     channel_id: str | None = None,
+    channel_ids: list[str] | None = None,
     runtime_kind: str | None = None,
     ensure_channels: bool = True,
+    include_unbound: bool = False,
 ) -> list[dict]:
     workers = list_platform_agent_workers(
         db,
         channel_id=channel_id,
+        channel_ids=channel_ids,
         runtime_kind=runtime_kind,
         ensure_channels=ensure_channels,
+        include_unbound=include_unbound,
     )
     return [serialize_agent_worker(item) for item in workers]
 
@@ -673,14 +793,18 @@ def list_agent_runs(
     db: Session,
     *,
     channel_id: str | None = None,
+    channel_ids: list[str] | None = None,
     limit: int = 50,
     ensure_channels: bool = True,
+    include_unbound: bool = False,
 ) -> list[dict]:
     runs = list_platform_agent_runs(
         db,
         channel_id=channel_id,
+        channel_ids=channel_ids,
         limit=limit,
         ensure_channels=ensure_channels,
+        include_unbound=include_unbound,
     )
     return [serialize_agent_run(item) for item in runs]
 
@@ -865,20 +989,21 @@ def build_mission_control_payload(db: Session, *, use_cache: bool = True) -> dic
     channels = [item for item in channels if _should_include_mission_channel(item)]
     visible_channel_ids = {str(item.get("channel_id")) for item in channels if item.get("channel_id")}
 
+    channel_ids = sorted(visible_channel_ids)
     workers = [
         item
-        for item in list_agent_workers(db, ensure_channels=False)
+        for item in list_agent_workers(db, channel_ids=channel_ids, ensure_channels=False, include_unbound=True)
         if not item.get("channel_id") or item.get("channel_id") in visible_channel_ids
     ]
     runs_for_health = [
         item
-        for item in list_agent_runs(db, limit=200, ensure_channels=False)
+        for item in list_agent_runs(db, channel_ids=channel_ids, limit=200, ensure_channels=False, include_unbound=True)
         if not item.get("channel_id") or item.get("channel_id") in visible_channel_ids
     ]
     runs = runs_for_health[:30]
     recent_content = [
         item
-        for item in list_content_items(db, limit=12, ensure_channels=False)
+        for item in list_content_items(db, channel_ids=channel_ids, limit=12, ensure_channels=False)
         if item.get("channel_id") in visible_channel_ids
     ]
     runtime_health = _runtime_health_from_serialized(workers, runs_for_health)

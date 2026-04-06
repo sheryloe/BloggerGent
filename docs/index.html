@@ -1,90 +1,228 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ko">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Bloggent Docs</title>
+    <title>동그리 자동 블로그전트</title>
+    <meta
+      name="description"
+      content="블로그 생성, 자산, 업로드, 운영을 한 화면에서 연결하는 동그리 자동 블로그전트. SEO, GEO, CTR, 색인 상태까지 운영에 필요한 지표를 연결합니다."
+    />
+    <meta property="og:title" content="동그리 자동 블로그전트" />
+    <meta property="og:description" content="운영 콘솔에서 콘텐츠 생성과 SEO/CTR/색인까지 한 번에 관리합니다." />
+    <meta property="og:image" content="assets/dashboard.png" />
+    <meta name="theme-color" content="#0f6b5b" />
     <style>
+      @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@300;400;600;700&display=swap");
       :root {
         color-scheme: light;
-        --bg: #f5f7fb;
+        --bg: #f6f6f3;
+        --text: #142128;
+        --muted: #4a5a61;
+        --accent: #0f6b5b;
+        --accent-2: #1f4e79;
         --panel: #ffffff;
-        --text: #172033;
-        --muted: #52607a;
-        --accent: #0f766e;
-        --border: #d9e1ec;
+        --border: rgba(20, 33, 40, 0.1);
+        --shadow: 0 22px 60px rgba(12, 18, 28, 0.15);
+      }
+      * {
+        box-sizing: border-box;
       }
       body {
         margin: 0;
-        font-family: "Segoe UI", Arial, sans-serif;
-        background: linear-gradient(180deg, #eef4ff 0%, var(--bg) 100%);
+        font-family: "IBM Plex Sans KR", sans-serif;
+        background: radial-gradient(circle at top, #e9f2ee 0%, #f6f6f3 55%, #f0f4f7 100%);
         color: var(--text);
       }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
       main {
-        max-width: 920px;
+        max-width: 1100px;
         margin: 0 auto;
-        padding: 48px 20px 64px;
+        padding: 56px 24px 80px;
+      }
+      .hero {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 28px;
+        align-items: center;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 14px;
+        border-radius: 999px;
+        background: rgba(15, 107, 91, 0.08);
+        color: var(--accent);
+        font-size: 14px;
+        font-weight: 600;
+      }
+      h1 {
+        font-size: 42px;
+        line-height: 1.15;
+        margin: 16px 0 18px;
+      }
+      p {
+        color: var(--muted);
+        line-height: 1.7;
+      }
+      .cta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 24px;
+      }
+      .btn {
+        padding: 12px 18px;
+        border-radius: 14px;
+        font-weight: 600;
+        border: 1px solid var(--accent);
+      }
+      .btn.primary {
+        background: var(--accent);
+        color: #ffffff;
+        border-color: transparent;
       }
       .panel {
         background: var(--panel);
-        border: 1px solid var(--border);
         border-radius: 24px;
         padding: 28px;
-        box-shadow: 0 18px 50px rgba(23, 32, 51, 0.08);
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow);
       }
-      h1, h2 { margin: 0 0 12px; }
-      p { line-height: 1.7; color: var(--muted); }
-      ul { line-height: 1.8; color: var(--muted); }
-      a { color: var(--accent); text-decoration: none; }
-      a:hover { text-decoration: underline; }
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 16px;
+        margin-top: 28px;
+      }
+      .metric {
+        padding: 18px;
+        border-radius: 18px;
+        background: #f4f7f5;
+        border: 1px solid var(--border);
+      }
+      .metric strong {
+        display: block;
+        font-size: 18px;
+        margin-bottom: 8px;
+      }
+      .screenshot {
+        margin-top: 32px;
+        border-radius: 20px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        box-shadow: 0 18px 40px rgba(9, 12, 18, 0.18);
+      }
+      .screenshot img {
+        display: block;
+        width: 100%;
+      }
       .grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
         gap: 16px;
-        margin-top: 20px;
+        margin-top: 28px;
       }
       .card {
-        background: #f8fbff;
+        background: #ffffff;
         border: 1px solid var(--border);
         border-radius: 18px;
         padding: 18px;
       }
-      code {
-        background: #ecf3ff;
-        padding: 2px 6px;
-        border-radius: 8px;
+      .card h3 {
+        margin: 0 0 10px;
+        font-size: 18px;
+      }
+      .footer {
+        margin-top: 48px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+      @media (max-width: 720px) {
+        h1 {
+          font-size: 32px;
+        }
       }
     </style>
   </head>
   <body>
     <main>
-      <section class="panel">
-        <h1>Bloggent 문서</h1>
-        <p>현재 기본 공개 이미지 전략은 <code>cloudflare_r2</code> 입니다. 원본은 Cloudflare R2에 저장하고, 실제 렌더링은 <code>/cdn-cgi/image</code> 변형 URL을 사용합니다.</p>
-        <div class="grid">
-          <article class="card">
-            <h2>시작하기</h2>
-            <p>Cloudflare R2 bucket, access key, img 도메인, Blogger OAuth, 앱 설정 순서를 정리했습니다.</p>
-            <a href="./getting-started.md">열기</a>
-          </article>
-          <article class="card">
-            <h2>배포</h2>
-            <p>운영 시 필요한 환경 변수와 검증 체크리스트를 확인합니다.</p>
-            <a href="./deployment.md">열기</a>
-          </article>
-          <article class="card">
-            <h2>위키</h2>
-            <p>README보다 자세한 운영 설명은 저장소 <code>wiki/</code> 문서에 정리돼 있습니다.</p>
-            <a href="../wiki/Home.md">열기</a>
-          </article>
+      <section class="hero">
+        <div>
+          <span class="badge">운영 콘솔 중심 자동화</span>
+          <h1>동그리 자동 블로그전트</h1>
+          <p>
+            블로그 생성, 자산, 업로드, 운영을 한 화면에서 연결하는 운영 콘솔입니다. 채널별 운영 흐름과
+            SEO/CTR/색인 지표까지 같이 연결해 일관된 운영 상태를 유지합니다.
+          </p>
+          <div class="cta">
+            <a class="btn primary" href="./getting-started.md">빠른 시작</a>
+            <a class="btn" href="./workflow.md">운영 플로우</a>
+            <a class="btn" href="./deployment.md">배포 가이드</a>
+          </div>
         </div>
-        <h2 style="margin-top: 24px;">핵심 메모</h2>
-        <ul>
-          <li><code>Image.public_url</code>은 기본 hero optimized URL입니다.</li>
-          <li>hero/card/thumb 최적화는 HTML이 변형 URL을 렌더링할 때만 실제로 적용됩니다.</li>
-          <li>마이그레이션 검증 전 기존 GitHub Pages / Cloudinary 자산 삭제 금지.</li>
-        </ul>
+        <div class="panel">
+          <strong style="font-size: 18px;">서비스 요약</strong>
+          <p style="margin: 12px 0 0;">
+            Mission Control에서 생성, 업로드, 운영, 지표를 통합 관리합니다. Blogger, Cloudflare,
+            YouTube, Instagram 채널을 연결해 운영 상태를 한 눈에 확인합니다.
+          </p>
+          <div class="metrics">
+            <div class="metric">
+              <strong>SEO / GEO</strong>
+              <span>검색 가시성, 지역 노출 지표를 통합 추적</span>
+            </div>
+            <div class="metric">
+              <strong>CTR</strong>
+              <span>채널별 클릭률을 운영 중심 지표로 관리</span>
+            </div>
+            <div class="metric">
+              <strong>Indexing</strong>
+              <span>색인 상태와 누락 현황을 즉시 확인</span>
+            </div>
+          </div>
+        </div>
       </section>
+
+      <section class="screenshot">
+        <img src="assets/dashboard.png" alt="동그리 자동 블로그전트 대시보드" />
+      </section>
+
+      <section class="grid">
+        <article class="card">
+          <h3>채널 연결 중심 운영</h3>
+          <p>Blogger 2개, Cloudflare 1개를 기준으로 연결 상태만 운영 화면에 노출합니다.</p>
+        </article>
+        <article class="card">
+          <h3>7단계 플로우 고정</h3>
+          <p>프롬프트 편집이 필요한 단계만 노출하고 시스템 단계는 설명만 제공합니다.</p>
+        </article>
+        <article class="card">
+          <h3>Ops Health 동기화</h3>
+          <p>동기화 시각과 런타임 상태를 최신으로 유지합니다.</p>
+        </article>
+      </section>
+
+      <section class="panel" style="margin-top: 32px;">
+        <strong style="font-size: 18px;">GitHub Pages 안내</strong>
+        <p style="margin: 12px 0 0;">
+          GitHub Pages는 정적 소개와 문서 용도로만 사용합니다. 실제 운영 UI는 Docker 환경의
+          <code>/dashboard</code>를 기준으로 검증합니다.
+        </p>
+      </section>
+
+      <div class="footer">
+        <span>Docs: <a href="./index.md">문서 인덱스</a></span>
+        <span>FAQ: <a href="./faq.md">FAQ</a></span>
+        <span>Security: <a href="./security.md">보안 정책</a></span>
+      </div>
     </main>
   </body>
 </html>

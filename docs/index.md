@@ -1,21 +1,19 @@
+﻿---
+title: 동그리 자동 블로그전트 문서
 ---
-title: Bloggent 문서
----
 
-# Bloggent 문서
+# 동그리 자동 블로그전트 문서
 
-Bloggent의 기본 운영 문서는 Cloudflare R2 기반 이미지 전달 전략을 기준으로 정리되어 있습니다.
+운영 콘솔 중심의 블로그 자동화 제품입니다. 채널 연결, SEO/CTR/색인 상태, 운영 플로우를 한 번에 관리합니다.
 
-## 먼저 볼 문서
+## 바로가기
 
-- [시작하기](getting-started.html)
-- [배포](deployment.html)
-- [워크플로](workflow.html)
+- [빠른 시작](getting-started.html)
+- [운영 플로우](workflow.html)
+- [배포 가이드](deployment.html)
 - [SEO 메타데이터](seo-metadata.html)
 
-## 핵심 메모
+## 안내
 
-- 공개 이미지 기본 provider: `cloudflare_r2`
-- 운영 권장 도메인: `img.<domain>`
-- 원본 저장: Cloudflare R2
-- 렌더링 최적화: `/cdn-cgi/image`
+- GitHub Pages는 정적 소개/문서 용도입니다.
+- 실제 운영 검증은 Docker 환경의 `/dashboard`에서 진행합니다.

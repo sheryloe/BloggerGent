@@ -1,5 +1,6 @@
-title: Bloggent
-description: GEO + SEO 중심 Blogger 운영 문서
+﻿title: "동그리 자동 블로그전트"
+description: "GEO + SEO 중심 운영 문서"
+lang: ko-KR
 theme: minima
 markdown: kramdown
 header_pages:
