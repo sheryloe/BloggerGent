@@ -211,6 +211,69 @@ def test_la_quota_boundary_counts_only_current_la_day(db: Session) -> None:
     assert remaining == 4
 
 
+def test_quota_snapshot_reports_usage_like_free_tier_counter(db: Session) -> None:
+    blog = _create_blog(db, blog_id=31, slug="blog-thirty-one")
+    now = datetime(2026, 4, 4, 20, 0, tzinfo=timezone.utc)
+
+    upsert_settings(
+        db,
+        {
+            "google_indexing_daily_quota": "5",
+            "blogger_token_scope": "https://www.googleapis.com/auth/indexing",
+        },
+    )
+    db.add_all(
+        [
+            GoogleIndexRequestLog(
+                blog_id=blog.id,
+                url="https://example.com/jobs/p1",
+                request_type="publish",
+                trigger_mode="manual",
+                is_force=False,
+                success=True,
+                http_status=200,
+                request_payload={},
+                response_payload={},
+                created_at=datetime(2026, 4, 4, 8, 0, tzinfo=timezone.utc),
+            ),
+            GoogleIndexRequestLog(
+                blog_id=blog.id,
+                url="https://example.com/jobs/p2",
+                request_type="publish",
+                trigger_mode="manual",
+                is_force=False,
+                success=True,
+                http_status=200,
+                request_payload={},
+                response_payload={},
+                created_at=datetime(2026, 4, 4, 9, 0, tzinfo=timezone.utc),
+            ),
+            GoogleIndexRequestLog(
+                blog_id=blog.id,
+                url="https://example.com/jobs/i1",
+                request_type="inspection",
+                trigger_mode="manual",
+                is_force=False,
+                success=True,
+                http_status=200,
+                request_payload={},
+                response_payload={},
+                created_at=datetime(2026, 4, 4, 10, 0, tzinfo=timezone.utc),
+            ),
+        ]
+    )
+    db.commit()
+
+    quota = indexing_service.get_google_blog_indexing_quota(db, blog_id=blog.id, now=now)
+
+    assert quota["publish_used"] == 2
+    assert quota["publish_limit"] == 5
+    assert quota["publish_remaining"] == 3
+    assert quota["inspection_used"] == 1
+    assert quota["inspection_limit"] == 2000
+    assert quota["inspection_qpm_limit"] == 600
+
+
 def test_refresh_state_merges_inspection_and_metadata(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     blog = _create_blog(db, blog_id=4, slug="blog-four", site_url="sc-domain:example.com")
     url = "https://example.com/posts/alpha"

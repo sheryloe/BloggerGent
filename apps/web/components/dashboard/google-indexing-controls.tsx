@@ -1,13 +1,17 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { requestGoogleBlogIndexing, testGoogleBlogIndexing } from "@/lib/api";
-import type { GoogleBlogIndexingRequestRead, GoogleBlogIndexingTestRead } from "@/lib/types";
+import { getGoogleBlogIndexingQuota, requestGoogleBlogIndexing, testGoogleBlogIndexing } from "@/lib/api";
+import type { GoogleBlogIndexingQuotaRead, GoogleBlogIndexingRequestRead, GoogleBlogIndexingTestRead } from "@/lib/types";
+
+const URL_INSPECTION_DAILY_MAX = 2000;
+const URL_INSPECTION_QPM_MAX = 600;
+const INDEXING_PUBLISH_DEFAULT_DAILY_MAX = 200;
 
 function parseUrls(raw: string): string[] {
   const seen = new Set<string>();
@@ -41,6 +45,7 @@ export function GoogleIndexingControls({ blogId }: { blogId: number }) {
   const [runTest, setRunTest] = useState<boolean>(true);
   const [force, setForce] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
+  const [quota, setQuota] = useState<GoogleBlogIndexingQuotaRead | null>(null);
   const [testResult, setTestResult] = useState<GoogleBlogIndexingTestRead | null>(null);
   const [requestResult, setRequestResult] = useState<GoogleBlogIndexingRequestRead | null>(null);
 
@@ -50,6 +55,26 @@ export function GoogleIndexingControls({ blogId }: { blogId: number }) {
     if (Number.isNaN(parsed)) return 10;
     return Math.max(1, Math.min(parsed, 500));
   }, [countInput]);
+  const publishDailyMax = quota?.publishLimit ?? requestResult?.dailyQuota ?? INDEXING_PUBLISH_DEFAULT_DAILY_MAX;
+  const publishUsedToday =
+    quota?.publishUsed ?? (requestResult ? Math.max(requestResult.dailyQuota - requestResult.remainingQuotaAfter, 0) : 0);
+  const testRequestedInRun = testResult?.refresh.requested ?? 0;
+  const inspectionDailyMax = quota?.inspectionLimit ?? URL_INSPECTION_DAILY_MAX;
+  const inspectionUsedToday = quota?.inspectionUsed ?? testRequestedInRun;
+  const inspectionQpmMax = quota?.inspectionQpmLimit ?? URL_INSPECTION_QPM_MAX;
+
+  async function refreshQuota() {
+    try {
+      const payload = await getGoogleBlogIndexingQuota(blogId);
+      setQuota(payload);
+    } catch {
+      // keep UI usable even when quota API is temporarily unavailable
+    }
+  }
+
+  useEffect(() => {
+    void refreshQuota();
+  }, [blogId]);
 
   async function handleTest() {
     setError("");
@@ -61,6 +86,7 @@ export function GoogleIndexingControls({ blogId }: { blogId: number }) {
         limit: parsedUrls.length ? Math.max(parsedUrls.length, 1) : 80,
       });
       setTestResult(payload);
+      await refreshQuota();
       startTransition(() => router.refresh());
     } catch (err) {
       setError(err instanceof Error ? err.message : "URL 테스트 요청에 실패했습니다.");
@@ -79,6 +105,7 @@ export function GoogleIndexingControls({ blogId }: { blogId: number }) {
         testLimit: parsedUrls.length ? Math.max(parsedUrls.length, 1) : 120,
       });
       setRequestResult(payload);
+      await refreshQuota();
       startTransition(() => router.refresh());
     } catch (err) {
       setError(err instanceof Error ? err.message : "색인 요청에 실패했습니다.");
@@ -89,7 +116,11 @@ export function GoogleIndexingControls({ blogId }: { blogId: number }) {
     <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-slate-900">URL 테스트 / 색인 요청</h3>
-        <p className="text-xs text-slate-500">Google Indexing API 일일 쿼터를 자동 반영합니다.</p>
+        <p className="text-xs text-slate-500">무료 티어 기준 수치를 함께 표시합니다.</p>
+      </div>
+      <div className="grid gap-2 rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-600 md:grid-cols-2">
+        <p>URL 테스트(Inspection): {inspectionUsedToday}/{inspectionDailyMax} (일/속성, {inspectionQpmMax}/분)</p>
+        <p>색인 요청(Publish): {publishUsedToday}/{publishDailyMax} (일/프로젝트)</p>
       </div>
 
       <div className="grid gap-3 md:grid-cols-3">

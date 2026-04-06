@@ -1175,6 +1175,18 @@ class GoogleBlogIndexingRequest(BaseModel):
     test_limit: int = Field(default=100, ge=1, le=1000)
 
 
+class GoogleBlogIndexingQuotaRead(BaseModel):
+    day_key: str
+    blog_id: int
+    publish_used: int
+    publish_limit: int
+    publish_remaining: int
+    inspection_used: int
+    inspection_limit: int
+    inspection_remaining: int
+    inspection_qpm_limit: int
+
+
 class GoogleSheetSyncRequest(BaseModel):
     initial: bool = False
 

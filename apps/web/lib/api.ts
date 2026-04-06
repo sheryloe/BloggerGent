@@ -12,6 +12,7 @@ import {
   DashboardMetrics,
   GoogleBlogOverview,
   GoogleBlogIndexingRequestRead,
+  GoogleBlogIndexingQuotaRead,
   GoogleBlogIndexingRefreshRead,
   GoogleBlogIndexingTestRead,
   GoogleIntegrationConfig,
@@ -355,6 +356,23 @@ export async function getGoogleBlogOverview(blogId: number, days = 28) {
 
 export async function getSyncedBloggerPosts(blogId: number, page = 1, pageSize = 20) {
   return apiFetch<SyncedBloggerPostPage>(`/google/blogs/${blogId}/synced-posts?page=${page}&page_size=${pageSize}`);
+}
+
+export async function getGoogleBlogIndexingQuota(blogId: number) {
+  const response = await apiFetch<any>(`/google/blogs/${blogId}/indexing/quota`, {
+    revalidate: false,
+  });
+  return {
+    dayKey: response.day_key,
+    blogId: response.blog_id,
+    publishUsed: response.publish_used ?? 0,
+    publishLimit: response.publish_limit ?? 0,
+    publishRemaining: response.publish_remaining ?? 0,
+    inspectionUsed: response.inspection_used ?? 0,
+    inspectionLimit: response.inspection_limit ?? 0,
+    inspectionRemaining: response.inspection_remaining ?? 0,
+    inspectionQpmLimit: response.inspection_qpm_limit ?? 0,
+  } satisfies GoogleBlogIndexingQuotaRead;
 }
 
 function mapGoogleIndexingActionResult(item: any): GoogleIndexingActionResult {

@@ -1000,6 +1000,18 @@ export interface GoogleBlogIndexingRequestRead {
   results: GoogleIndexingActionResult[];
 }
 
+export interface GoogleBlogIndexingQuotaRead {
+  dayKey: string;
+  blogId: number;
+  publishUsed: number;
+  publishLimit: number;
+  publishRemaining: number;
+  inspectionUsed: number;
+  inspectionLimit: number;
+  inspectionRemaining: number;
+  inspectionQpmLimit: number;
+}
+
 export interface BloggerConfig {
   client_name: string;
   client_id_configured: boolean;

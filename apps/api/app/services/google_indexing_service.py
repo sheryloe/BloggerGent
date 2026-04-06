@@ -35,6 +35,8 @@ DEFAULT_DAILY_QUOTA = 200
 DEFAULT_COOLDOWN_DAYS = 7
 DEFAULT_REFRESH_LIMIT = 50
 LA_TIMEZONE = ZoneInfo("America/Los_Angeles")
+URL_INSPECTION_FREE_DAILY_LIMIT = 2000
+URL_INSPECTION_FREE_QPM_LIMIT = 600
 
 
 @dataclass(slots=True)
@@ -147,23 +149,66 @@ def _la_day_bounds(now: datetime | None = None) -> tuple[datetime, datetime, str
     return day_start_local.astimezone(timezone.utc), day_end_local.astimezone(timezone.utc), day_start_local.date().isoformat()
 
 
-def count_publish_requests_for_la_day(db: Session, *, now: datetime | None = None) -> int:
-    day_start_utc, day_end_utc, _day_key = _la_day_bounds(now)
+def count_request_logs_for_la_day(
+    db: Session,
+    *,
+    request_type: str,
+    now: datetime | None = None,
+    blog_id: int | None = None,
+) -> int:
+    day_start_utc, day_end_utc, _ = _la_day_bounds(now)
+    filters = [
+        GoogleIndexRequestLog.request_type == request_type,
+        GoogleIndexRequestLog.created_at >= day_start_utc,
+        GoogleIndexRequestLog.created_at < day_end_utc,
+    ]
+    if blog_id is not None:
+        filters.append(GoogleIndexRequestLog.blog_id == blog_id)
     return int(
         db.execute(
-            select(func.count(GoogleIndexRequestLog.id)).where(
-                GoogleIndexRequestLog.request_type == "publish",
-                GoogleIndexRequestLog.created_at >= day_start_utc,
-                GoogleIndexRequestLog.created_at < day_end_utc,
-            )
+            select(func.count(GoogleIndexRequestLog.id)).where(*filters)
         ).scalar()
         or 0
     )
 
 
+def count_publish_requests_for_la_day(db: Session, *, now: datetime | None = None) -> int:
+    return count_request_logs_for_la_day(db, request_type="publish", now=now)
+
+
 def remaining_publish_quota_for_la_day(db: Session, daily_quota: int, *, now: datetime | None = None) -> int:
     used = count_publish_requests_for_la_day(db, now=now)
     return max(daily_quota - used, 0)
+
+
+def get_google_blog_indexing_quota(
+    db: Session,
+    *,
+    blog_id: int,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    config = get_google_indexing_config(db)
+    publish_used = count_publish_requests_for_la_day(db, now=now)
+    publish_remaining = max(config.daily_quota - publish_used, 0)
+    inspection_used = count_request_logs_for_la_day(
+        db,
+        request_type="inspection",
+        now=now,
+        blog_id=blog_id,
+    )
+    inspection_remaining = max(URL_INSPECTION_FREE_DAILY_LIMIT - inspection_used, 0)
+    _day_start_utc, _day_end_utc, day_key = _la_day_bounds(now)
+    return {
+        "day_key": day_key,
+        "blog_id": blog_id,
+        "publish_used": publish_used,
+        "publish_limit": config.daily_quota,
+        "publish_remaining": publish_remaining,
+        "inspection_used": inspection_used,
+        "inspection_limit": URL_INSPECTION_FREE_DAILY_LIMIT,
+        "inspection_remaining": inspection_remaining,
+        "inspection_qpm_limit": URL_INSPECTION_FREE_QPM_LIMIT,
+    }
 
 
 def _blog_publish_allocation(*, blog_ids: list[int], total_quota: int, configured: dict[int, int]) -> dict[int, int]:

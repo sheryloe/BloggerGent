@@ -7,6 +7,7 @@ from app.db.session import get_db
 from app.schemas.api import (
     BloggerRemotePostRead,
     GoogleBlogIndexingRequest,
+    GoogleBlogIndexingQuotaRead,
     GoogleBlogIndexingTestRequest,
     GoogleBlogOverviewRead,
     GoogleIntegrationConfigRead,
@@ -25,7 +26,11 @@ from app.services.google_reporting_service import (
     list_blogger_posts,
     list_search_console_sites,
 )
-from app.services.google_indexing_service import refresh_indexing_for_blog, request_indexing_for_blog
+from app.services.google_indexing_service import (
+    get_google_blog_indexing_quota,
+    refresh_indexing_for_blog,
+    request_indexing_for_blog,
+)
 from app.services.settings_service import get_settings_map
 
 router = APIRouter()
@@ -189,3 +194,14 @@ def request_google_blog_indexing(
         run_test=payload.run_test,
         test_limit=payload.test_limit,
     )
+
+
+@router.get("/blogs/{blog_id}/indexing/quota", response_model=GoogleBlogIndexingQuotaRead)
+def get_google_blog_indexing_quota_view(
+    blog_id: int,
+    db: Session = Depends(get_db),
+) -> dict:
+    blog = get_blog(db, blog_id)
+    if not blog:
+        raise HTTPException(status_code=404, detail="Blog not found")
+    return get_google_blog_indexing_quota(db, blog_id=blog_id)
