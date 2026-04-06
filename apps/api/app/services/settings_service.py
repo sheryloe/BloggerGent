@@ -50,7 +50,7 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     "provider_mode": DefaultSetting(settings.provider_mode, "mock or live provider mode"),
     "public_image_provider": DefaultSetting(
         settings.public_image_provider,
-        "????대?吏 怨듦컻 ?꾨떖 諛⑹떇. ?꾩옱 ?댁쁺 沅뚯옣媛믪? cloudflare_r2 ?낅땲??",
+        "공개 이미지 제공 방식. 현재 운영 권장값은 cloudflare_r2 입니다.",
     ),
     "public_asset_base_url": DefaultSetting(
         settings.public_asset_base_url,
@@ -70,7 +70,7 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     ),
     "cloudflare_r2_public_base_url": DefaultSetting(
         settings.cloudflare_r2_public_base_url,
-        "Cloudflare 怨듦컻 ?대?吏 湲곗? URL. integration ?낅줈?쒕? ?곕㈃ 鍮꾩썙????cloudflare_blog_api_base_url + /assets 媛 ?먮룞 ?곸슜?⑸땲??",
+        "Cloudflare 공개 이미지 기본 URL. integration 업로드를 비우면 cloudflare_blog_api_base_url + /assets 가 자동 적용됩니다.",
     ),
     "cloudflare_r2_prefix": DefaultSetting(
         settings.cloudflare_r2_prefix,
@@ -102,10 +102,10 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
         "OpenAI Admin API key used for free-tier usage reporting",
         True,
     ),
-    "openai_text_model": DefaultSetting(settings.openai_text_model, "湲곕낯 OpenAI 蹂댁“ ?띿뒪??紐⑤뜽"),
+    "openai_text_model": DefaultSetting(settings.openai_text_model, "기본 OpenAI 보조 텍스트 모델"),
     "article_generation_model": DefaultSetting(
         settings.article_generation_model,
-        "?λЦ 蹂몃Ц ?앹꽦怨?由щ씪?댄듃???곕뒗 二쇰젰 OpenAI 紐⑤뜽",
+        "장문 본문 생성과 리라이트에 사용하는 주력 OpenAI 모델",
     ),
     "openai_image_model": DefaultSetting(settings.openai_image_model, "Default OpenAI image model"),
     "openai_request_saver_mode": DefaultSetting(
@@ -199,15 +199,15 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     "telegram_chat_id": DefaultSetting(settings.telegram_chat_id, "Telegram chat ID", True),
     "cloudflare_channel_enabled": DefaultSetting(
         str(settings.cloudflare_channel_enabled).lower(),
-        "Cloudflare 梨꾨꼸 ?곕룞 ?ъ슜 ?щ?",
+        "Cloudflare 채널 연동 사용 여부",
     ),
     "cloudflare_blog_api_base_url": DefaultSetting(
         settings.cloudflare_blog_api_base_url,
-        "Cloudflare ?곕룞 API 湲곕낯 二쇱냼. ?? https://api.dongriarchive.com",
+        "Cloudflare 연동 API 기본 주소. 예: https://api.dongriarchive.com",
     ),
     "cloudflare_blog_m2m_token": DefaultSetting(
         settings.cloudflare_blog_m2m_token,
-        "Cloudflare integration Bearer ?좏겙",
+        "Cloudflare integration Bearer 토큰",
         True,
     ),
     "google_sheet_url": DefaultSetting(

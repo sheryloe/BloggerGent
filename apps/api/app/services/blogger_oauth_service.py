@@ -62,7 +62,7 @@ def build_blogger_authorization_url(db: Session) -> str:
     values = get_settings_map(db)
     client_id = (values.get("blogger_client_id") or "").strip()
     if not client_id:
-        raise BloggerOAuthError("Blogger Client ID가 설정되지 않았습니다.")
+        raise BloggerOAuthError("Blogger Client ID가 설정되어 있지 않습니다.")
 
     state = token_urlsafe(24)
     upsert_settings(db, {"blogger_oauth_state": state})

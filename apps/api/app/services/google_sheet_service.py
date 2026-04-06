@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
@@ -838,8 +838,8 @@ def _read_sheet_rows(db: Session, *, sheet_id: str, tab_name: str) -> list[list[
 
 def _resolve_blogger_tab_by_profile(*, profile_key: str, config: dict[str, str]) -> str:
     if profile_key == "world_mystery":
-        return config.get("mystery_tab") or "援ш?釉붾줈洹?"
-    return config.get("travel_tab") or "援ш?釉붾줈洹?"
+        return config.get("mystery_tab") or "미스터리 블로그"
+    return config.get("travel_tab") or "한국 블로그"
 
 
 def _build_header_index_map(header_row: list[str]) -> dict[str, int]:
@@ -1199,7 +1199,7 @@ def list_sheet_topic_history_entries_cloudflare(
     if not sheet_id:
         return []
 
-    tab_name = _safe_str(config.get("cloudflare_tab")) or "?대씪?곕뱶?뚮젅?대툝濡쒓렇"
+    tab_name = _safe_str(config.get("cloudflare_tab")) or "아일랜드 트래블로그"
     try:
         rows = _read_sheet_rows(db, sheet_id=sheet_id, tab_name=tab_name)
     except (BloggerOAuthError, httpx.HTTPError):
@@ -1251,12 +1251,12 @@ def get_google_sheet_sync_config(db: Session) -> dict[str, str]:
     sheet_sync_enabled = _is_enabled(values.get("sheet_sync_enabled"), default=False)
     return {
         "sheet_id": _extract_sheet_id(values) if sheet_sync_enabled else "",
-        "travel_tab": (values.get("google_sheet_travel_tab") or "援ш?釉붾줈洹?").strip() or "援ш?釉붾줈洹?",
-        "mystery_tab": (values.get("google_sheet_mystery_tab") or "援ш?釉붾줈洹?").strip() or "援ш?釉붾줈洹?",
-        "cloudflare_tab": (values.get("google_sheet_cloudflare_tab") or "?대씪?곕뱶?뚮젅?대툝濡쒓렇").strip() or "?대씪?곕뱶?뚮젅?대툝濡쒓렇",
+        "travel_tab": (values.get("google_sheet_travel_tab") or "한국 블로그").strip() or "한국 블로그",
+        "mystery_tab": (values.get("google_sheet_mystery_tab") or "미스터리 블로그").strip() or "미스터리 블로그",
+        "cloudflare_tab": (values.get("google_sheet_cloudflare_tab") or "아일랜드 트래블로그").strip() or "아일랜드 트래블로그",
         "cloudflare_category_tabs_enabled": (values.get("google_sheet_cloudflare_category_tabs_enabled") or "false").strip() or "false",
         "auto_format_enabled": (values.get("google_sheet_auto_format_enabled") or "true").strip() or "true",
-        "content_overview_tab": (values.get("content_overview_tab") or "?꾩껜 湲 ?꾪솴").strip() or "?꾩껜 湲 ?꾪솴",
+        "content_overview_tab": (values.get("content_overview_tab") or "전체 글 현황").strip() or "전체 글 현황",
     }
 
 
