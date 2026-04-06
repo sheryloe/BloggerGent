@@ -11,7 +11,11 @@ import {
   BloggerConfig,
   DashboardMetrics,
   GoogleBlogOverview,
+  GoogleBlogIndexingRequestRead,
+  GoogleBlogIndexingRefreshRead,
+  GoogleBlogIndexingTestRead,
   GoogleIntegrationConfig,
+  GoogleIndexingActionResult,
   IntegratedArchiveItem,
   IntegratedChannelSummary,
   IntegratedRunItem,
@@ -351,6 +355,87 @@ export async function getGoogleBlogOverview(blogId: number, days = 28) {
 
 export async function getSyncedBloggerPosts(blogId: number, page = 1, pageSize = 20) {
   return apiFetch<SyncedBloggerPostPage>(`/google/blogs/${blogId}/synced-posts?page=${page}&page_size=${pageSize}`);
+}
+
+function mapGoogleIndexingActionResult(item: any): GoogleIndexingActionResult {
+  return {
+    status: item.status ?? "unknown",
+    reason: item.reason ?? null,
+    blogId: item.blog_id,
+    url: item.url ?? "",
+    indexStatus: item.index_status ?? "unknown",
+    indexCoverageState: item.index_coverage_state ?? null,
+    lastCrawlTime: item.last_crawl_time ?? null,
+    lastNotifyTime: item.last_notify_time ?? null,
+    nextEligibleAt: item.next_eligible_at ?? null,
+    indexLastCheckedAt: item.index_last_checked_at ?? null,
+    lastError: item.last_error ?? null,
+  };
+}
+
+function mapGoogleBlogIndexingRefresh(item: any): GoogleBlogIndexingRefreshRead {
+  return {
+    status: item.status ?? "unknown",
+    blogId: item.blog_id,
+    requested: item.requested ?? 0,
+    refreshed: item.refreshed ?? 0,
+    failed: item.failed ?? 0,
+    results: (item.results ?? []).map(mapGoogleIndexingActionResult),
+  };
+}
+
+export async function testGoogleBlogIndexing(payload: { blogId: number; urls?: string[]; limit?: number }) {
+  const response = await apiFetch<any>(`/google/blogs/${payload.blogId}/indexing/test`, {
+    method: "POST",
+    body: JSON.stringify({
+      urls: payload.urls ?? null,
+      limit: payload.limit ?? 50,
+    }),
+  });
+  return {
+    status: response.status ?? "unknown",
+    blogId: response.blog_id,
+    refresh: mapGoogleBlogIndexingRefresh(response.refresh ?? {}),
+    ctrCache: response.ctr_cache ?? {},
+  } satisfies GoogleBlogIndexingTestRead;
+}
+
+export async function requestGoogleBlogIndexing(payload: {
+  blogId: number;
+  count: number;
+  urls?: string[];
+  force?: boolean;
+  runTest?: boolean;
+  testLimit?: number;
+}) {
+  const response = await apiFetch<any>(`/google/blogs/${payload.blogId}/indexing/request`, {
+    method: "POST",
+    body: JSON.stringify({
+      count: payload.count,
+      urls: payload.urls ?? null,
+      force: payload.force ?? false,
+      run_test: payload.runTest ?? true,
+      test_limit: payload.testLimit ?? 100,
+    }),
+  });
+  return {
+    status: response.status ?? "unknown",
+    reason: response.reason ?? null,
+    blogId: response.blog_id,
+    requestedCount: response.requested_count ?? payload.count,
+    plannedCount: response.planned_count ?? 0,
+    candidateCount: response.candidate_count ?? 0,
+    attempted: response.attempted ?? 0,
+    success: response.success ?? 0,
+    failed: response.failed ?? 0,
+    skipped: response.skipped ?? 0,
+    dailyQuota: response.daily_quota ?? 0,
+    remainingQuotaBefore: response.remaining_quota_before ?? 0,
+    remainingQuotaAfter: response.remaining_quota_after ?? 0,
+    runTest: response.run_test ?? false,
+    test: response.test ?? {},
+    results: (response.results ?? []).map(mapGoogleIndexingActionResult),
+  } satisfies GoogleBlogIndexingRequestRead;
 }
 
 export async function getBlogSeoMeta(blogId: number) {

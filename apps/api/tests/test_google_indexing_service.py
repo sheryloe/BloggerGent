@@ -293,6 +293,93 @@ def test_scheduler_enforces_global_cap_with_blog_allocation(db: Session, monkeyp
     assert call_counter["12"] == 1
 
 
+def test_manual_request_respects_daily_quota(db: Session) -> None:
+    blog = _create_blog(db, blog_id=13, slug="blog-thirteen")
+    url = "https://example.com/jobs/manual-quota"
+    now = datetime.now(timezone.utc)
+
+    upsert_settings(
+        db,
+        {
+            "google_indexing_daily_quota": "1",
+            "blogger_token_scope": "https://www.googleapis.com/auth/indexing",
+        },
+    )
+    db.add(
+        GoogleIndexRequestLog(
+            blog_id=blog.id,
+            url="https://example.com/jobs/already-used",
+            request_type="publish",
+            trigger_mode="manual",
+            is_force=False,
+            success=True,
+            http_status=200,
+            request_payload={},
+            response_payload={},
+            created_at=now,
+        )
+    )
+    db.commit()
+
+    result = indexing_service.request_indexing_for_url(
+        db,
+        blog_id=blog.id,
+        url=url,
+        force=False,
+    )
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "daily_quota_exhausted"
+    assert db.query(GoogleIndexRequestLog).filter(GoogleIndexRequestLog.request_type == "publish").count() == 1
+
+
+def test_blog_batch_request_runs_test_and_applies_quota(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    blog = _create_blog(db, blog_id=14, slug="blog-fourteen", site_url="sc-domain:example.com")
+    for index in range(6):
+        _create_post(db, blog_id=blog.id, remote_id=f"b14-{index}", url=f"https://example.com/jobs/b14-{index}")
+
+    upsert_settings(
+        db,
+        {
+            "google_indexing_daily_quota": "2",
+            "google_indexing_policy_mode": "mixed",
+            "google_indexing_cooldown_days": "7",
+            "blogger_token_scope": "https://www.googleapis.com/auth/indexing",
+        },
+    )
+
+    refresh_calls = {"count": 0}
+
+    def _fake_refresh(*_args, **_kwargs):
+        refresh_calls["count"] += 1
+        return {"status": "ok", "requested": 0, "refreshed": 0, "failed": 0, "results": []}
+
+    def _fake_request_single(_db, *, blog: Blog, url: str, force: bool, trigger_mode: str, policy_mode: str, cooldown_days: int):
+        return {
+            "status": "ok",
+            "blog_id": blog.id,
+            "url": url,
+            "index_status": "submitted",
+        }
+
+    monkeypatch.setattr(indexing_service, "refresh_indexing_status_for_blog", _fake_refresh)
+    monkeypatch.setattr(indexing_service, "request_single_url_indexing", _fake_request_single)
+
+    result = indexing_service.request_indexing_for_blog(
+        db,
+        blog_id=blog.id,
+        count=5,
+        run_test=True,
+        force=False,
+    )
+
+    assert result["status"] in {"ok", "partial"}
+    assert result["planned_count"] == 2
+    assert result["attempted"] == 2
+    assert result["success"] == 2
+    assert refresh_calls["count"] == 1
+
+
 def test_analytics_articles_include_ctr_and_index_fields(db: Session) -> None:
     blog = _create_blog(db, blog_id=21, slug="blog-twenty-one")
     url = "https://example.com/posts/enriched"

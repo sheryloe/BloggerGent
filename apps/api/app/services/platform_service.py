@@ -22,6 +22,8 @@ from app.models.entities import (
 from app.services.secret_service import decrypt_secret_value, encrypt_secret_value
 from app.services.settings_service import get_settings_map
 
+_MOJIBAKE_HINTS: tuple[str, ...] = ("�",)
+
 
 @dataclass(frozen=True, slots=True)
 class PlatformPromptStepDefinition:
@@ -171,6 +173,22 @@ PLATFORM_PROMPT_STEPS: dict[str, tuple[PlatformPromptStepDefinition, ...]] = {
 }
 
 
+def _looks_corrupted_text(value: str | None) -> bool:
+    raw = str(value or "").strip()
+    if not raw:
+        return True
+    if raw.count("?") >= 3:
+        return True
+    return any(token in raw for token in _MOJIBAKE_HINTS)
+
+
+def _safe_display_name(value: str | None, *, fallback: str) -> str:
+    raw = str(value or "").strip()
+    if _looks_corrupted_text(raw):
+        return str(fallback).strip() or "Channel"
+    return raw
+
+
 def _channel_query():
     return (
         select(ManagedChannel)
@@ -258,7 +276,7 @@ def ensure_managed_channels(db: Session) -> list[ManagedChannel]:
         payload = {
             "provider": "blogger",
             "channel_id": channel_id,
-            "display_name": blog.name,
+            "display_name": _safe_display_name(blog.name, fallback=f"Blogger Blog {blog.id}"),
             "remote_resource_id": blog.blogger_blog_id or None,
             "linked_blog_id": blog.id,
             "status": status,
@@ -453,7 +471,10 @@ def sync_managed_channel_state(
     if base_url is not None:
         channel.base_url = base_url
     if display_name is not None:
-        channel.display_name = display_name
+        channel.display_name = _safe_display_name(
+            display_name,
+            fallback=channel.display_name or channel.channel_id,
+        )
     if capabilities is not None:
         channel.capabilities = capabilities
     if quota_state is not None:
@@ -947,7 +968,7 @@ def serialize_channel(channel: ManagedChannel) -> dict:
     return {
         "provider": channel.provider,
         "channel_id": channel.channel_id,
-        "name": channel.display_name,
+        "name": _safe_display_name(channel.display_name, fallback=channel.channel_id),
         "is_enabled": bool(channel.is_enabled),
         "status": channel.status,
         "base_url": channel.base_url,

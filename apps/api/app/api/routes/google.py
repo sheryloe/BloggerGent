@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.schemas.api import (
     BloggerRemotePostRead,
+    GoogleBlogIndexingRequest,
+    GoogleBlogIndexingTestRequest,
     GoogleBlogOverviewRead,
     GoogleIntegrationConfigRead,
     SyncedBloggerPostPageRead,
@@ -23,6 +25,7 @@ from app.services.google_reporting_service import (
     list_blogger_posts,
     list_search_console_sites,
 )
+from app.services.google_indexing_service import refresh_indexing_for_blog, request_indexing_for_blog
 from app.services.settings_service import get_settings_map
 
 router = APIRouter()
@@ -147,3 +150,42 @@ def refresh_google_blog_synced_posts(
         "count": result["count"],
         "last_synced_at": result["last_synced_at"].isoformat() if result["last_synced_at"] else None,
     }
+
+
+@router.post("/blogs/{blog_id}/indexing/test")
+def test_google_blog_indexing(
+    blog_id: int,
+    payload: GoogleBlogIndexingTestRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    blog = get_blog(db, blog_id)
+    if not blog:
+        raise HTTPException(status_code=404, detail="Blog not found")
+
+    return refresh_indexing_for_blog(
+        db,
+        blog_id=blog_id,
+        urls=payload.urls,
+        limit=payload.limit,
+    )
+
+
+@router.post("/blogs/{blog_id}/indexing/request")
+def request_google_blog_indexing(
+    blog_id: int,
+    payload: GoogleBlogIndexingRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    blog = get_blog(db, blog_id)
+    if not blog:
+        raise HTTPException(status_code=404, detail="Blog not found")
+
+    return request_indexing_for_blog(
+        db,
+        blog_id=blog_id,
+        count=payload.count,
+        urls=payload.urls,
+        force=payload.force,
+        run_test=payload.run_test,
+        test_limit=payload.test_limit,
+    )

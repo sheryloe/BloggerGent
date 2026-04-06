@@ -868,6 +868,16 @@ def request_indexing_for_url(
         }
 
     config = get_google_indexing_config(db)
+    remaining_quota = remaining_publish_quota_for_la_day(db, config.daily_quota)
+    if remaining_quota <= 0:
+        return {
+            "status": "skipped",
+            "reason": "daily_quota_exhausted",
+            "blog_id": blog_id,
+            "url": _normalize_url(url),
+            "daily_quota": config.daily_quota,
+            "remaining_quota": 0,
+        }
     return request_single_url_indexing(
         db,
         blog=blog,
@@ -900,6 +910,158 @@ def refresh_indexing_for_blog(
         "blog_id": blog_id,
         "refresh": refreshed,
         "ctr_cache": ctr_result,
+    }
+
+
+def _normalize_unique_urls(urls: list[str] | None) -> list[str]:
+    seen: set[str] = set()
+    items: list[str] = []
+    for raw in urls or []:
+        normalized = _normalize_url(raw)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        items.append(normalized)
+    return items
+
+
+def request_indexing_for_blog(
+    db: Session,
+    *,
+    blog_id: int,
+    count: int = 10,
+    urls: list[str] | None = None,
+    force: bool = False,
+    run_test: bool = True,
+    test_limit: int = 100,
+) -> dict[str, Any]:
+    blog = db.execute(select(Blog).where(Blog.id == blog_id)).scalar_one_or_none()
+    if blog is None:
+        return {"status": "failed", "reason": "blog_not_found", "blog_id": blog_id}
+
+    settings_map = get_settings_map(db)
+    if not has_required_indexing_scope(settings_map):
+        return {
+            "status": "skipped",
+            "reason": "reauth_required_missing_indexing_scope",
+            "blog_id": blog_id,
+        }
+
+    config = get_google_indexing_config(db)
+    requested_count = max(int(count or 0), 1)
+    remaining_quota_before = remaining_publish_quota_for_la_day(db, config.daily_quota)
+    planned_count = min(requested_count, remaining_quota_before)
+
+    candidate_urls = _normalize_unique_urls(urls)
+    if not candidate_urls:
+        candidate_urls = _list_candidate_urls(
+            db,
+            blog_id=blog_id,
+            limit=max(planned_count * 6, requested_count * 3, 120),
+        )
+
+    if not candidate_urls:
+        return {
+            "status": "idle",
+            "reason": "no_candidate_urls",
+            "blog_id": blog_id,
+            "requested_count": requested_count,
+            "planned_count": planned_count,
+            "daily_quota": config.daily_quota,
+            "remaining_quota_before": remaining_quota_before,
+            "remaining_quota_after": remaining_quota_before,
+            "run_test": bool(run_test),
+            "test": {"status": "skipped", "reason": "no_candidate_urls"},
+            "results": [],
+        }
+
+    normalized_test_limit = max(1, min(int(test_limit or 100), 1000))
+    test_result: dict[str, Any] | None = None
+    if run_test:
+        if urls:
+            test_urls = candidate_urls[:normalized_test_limit]
+        else:
+            test_target = max(requested_count * 2, planned_count * 2, 20)
+            test_urls = candidate_urls[: min(test_target, normalized_test_limit)]
+        test_result = refresh_indexing_status_for_blog(
+            db,
+            blog=blog,
+            urls=test_urls,
+            limit=max(1, len(test_urls)),
+            trigger_mode="manual",
+        )
+
+    if remaining_quota_before <= 0:
+        return {
+            "status": "skipped",
+            "reason": "daily_quota_exhausted",
+            "blog_id": blog_id,
+            "requested_count": requested_count,
+            "planned_count": 0,
+            "daily_quota": config.daily_quota,
+            "remaining_quota_before": remaining_quota_before,
+            "remaining_quota_after": remaining_quota_before,
+            "candidate_count": len(candidate_urls),
+            "run_test": bool(run_test),
+            "test": test_result or {"status": "skipped", "reason": "not_requested"},
+            "results": [],
+        }
+
+    attempted = 0
+    success = 0
+    failed = 0
+    skipped = 0
+    results: list[dict[str, Any]] = []
+
+    for url in candidate_urls:
+        if attempted >= planned_count:
+            break
+        result = request_single_url_indexing(
+            db,
+            blog=blog,
+            url=url,
+            force=force,
+            trigger_mode="manual",
+            policy_mode=config.policy_mode,
+            cooldown_days=config.cooldown_days,
+        )
+        results.append(result)
+        status = str(result.get("status") or "")
+        if status == "ok":
+            attempted += 1
+            success += 1
+        elif status == "failed":
+            attempted += 1
+            failed += 1
+        else:
+            skipped += 1
+
+    remaining_quota_after = remaining_publish_quota_for_la_day(db, config.daily_quota)
+
+    status_value = "ok"
+    if attempted == 0 and failed == 0 and success == 0:
+        status_value = "idle"
+    elif success == 0 and failed > 0:
+        status_value = "failed"
+    elif failed > 0 or skipped > 0:
+        status_value = "partial"
+
+    return {
+        "status": status_value,
+        "blog_id": blog_id,
+        "requested_count": requested_count,
+        "planned_count": planned_count,
+        "candidate_count": len(candidate_urls),
+        "attempted": attempted,
+        "success": success,
+        "failed": failed,
+        "skipped": skipped,
+        "daily_quota": config.daily_quota,
+        "remaining_quota_before": remaining_quota_before,
+        "remaining_quota_after": remaining_quota_after,
+        "run_test": bool(run_test),
+        "test": test_result or {"status": "skipped", "reason": "not_requested"},
+        "results": results,
     }
 
 

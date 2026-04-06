@@ -11,6 +11,17 @@ from app.services.workspace_service import list_managed_channels
 
 router = APIRouter(prefix="/seo", tags=["seo"])
 
+_MOJIBAKE_HINTS: tuple[str, ...] = ("�",)
+
+
+def _safe_blog_label(value: str | None, *, blog_id: int) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return f"Blogger Blog {blog_id}"
+    if raw.count("?") >= 3 or any(token in raw for token in _MOJIBAKE_HINTS):
+        return f"Blogger Blog {blog_id}"
+    return raw
+
 
 @router.get("/targets", response_model=list[SeoTargetRead])
 def get_seo_targets(db: Session = Depends(get_db)) -> list[SeoTargetRead]:
@@ -20,12 +31,13 @@ def get_seo_targets(db: Session = Depends(get_db)) -> list[SeoTargetRead]:
     for blog in list_connected_blogs(db):
         channel_id = f"blogger:{blog.id}"
         channel = channels.get(channel_id)
+        preferred_label = channel.display_name if channel else blog.name
         targets.append(
             SeoTargetRead(
                 target_id=channel_id,
                 provider="blogger",
                 channel_id=channel_id,
-                label=blog.name,
+                label=_safe_blog_label(preferred_label, blog_id=blog.id),
                 base_url=blog.blogger_url,
                 linked_blog_id=blog.id,
                 search_console_site_url=blog.search_console_site_url,

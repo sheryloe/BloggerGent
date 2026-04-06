@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { GoogleIndexingControls } from "@/components/dashboard/google-indexing-controls";
 import { GooglePostSyncButton } from "@/components/dashboard/google-post-sync-button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -210,6 +211,8 @@ export default async function GoogleDataPage({
                   ))
                 )}
               </div>
+
+              {selectedTarget.linkedBlogId ? <GoogleIndexingControls blogId={selectedTarget.linkedBlogId} /> : null}
             </>
           ) : (
             <>

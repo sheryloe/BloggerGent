@@ -1162,6 +1162,19 @@ class GoogleIntegrationConfigRead(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class GoogleBlogIndexingTestRequest(BaseModel):
+    urls: list[str] | None = None
+    limit: int = Field(default=50, ge=1, le=500)
+
+
+class GoogleBlogIndexingRequest(BaseModel):
+    count: int = Field(default=10, ge=1, le=500)
+    urls: list[str] | None = None
+    force: bool = False
+    run_test: bool = True
+    test_limit: int = Field(default=100, ge=1, le=1000)
+
+
 class GoogleSheetSyncRequest(BaseModel):
     initial: bool = False
 

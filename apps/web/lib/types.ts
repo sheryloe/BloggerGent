@@ -951,6 +951,55 @@ export interface GoogleIntegrationConfig {
   warnings: string[];
 }
 
+export interface GoogleIndexingActionResult {
+  status: string;
+  reason?: string | null;
+  blogId: number;
+  url: string;
+  indexStatus: string;
+  indexCoverageState?: string | null;
+  lastCrawlTime?: string | null;
+  lastNotifyTime?: string | null;
+  nextEligibleAt?: string | null;
+  indexLastCheckedAt?: string | null;
+  lastError?: string | null;
+}
+
+export interface GoogleBlogIndexingRefreshRead {
+  status: string;
+  blogId: number;
+  requested: number;
+  refreshed: number;
+  failed: number;
+  results: GoogleIndexingActionResult[];
+}
+
+export interface GoogleBlogIndexingTestRead {
+  status: string;
+  blogId: number;
+  refresh: GoogleBlogIndexingRefreshRead;
+  ctrCache: Record<string, unknown>;
+}
+
+export interface GoogleBlogIndexingRequestRead {
+  status: string;
+  reason?: string | null;
+  blogId: number;
+  requestedCount: number;
+  plannedCount: number;
+  candidateCount: number;
+  attempted: number;
+  success: number;
+  failed: number;
+  skipped: number;
+  dailyQuota: number;
+  remainingQuotaBefore: number;
+  remainingQuotaAfter: number;
+  runTest: boolean;
+  test: Record<string, unknown>;
+  results: GoogleIndexingActionResult[];
+}
+
 export interface BloggerConfig {
   client_name: string;
   client_id_configured: boolean;
