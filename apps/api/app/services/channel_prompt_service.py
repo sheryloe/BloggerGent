@@ -12,9 +12,10 @@ from slugify import slugify
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models.entities import BlogAgentConfig
+from app.models.entities import BlogAgentConfig, WorkflowStageType
 from app.schemas.api import PromptFlowRead, PromptFlowStepRead, PromptFlowStepUpdate
 from app.services.blog_service import (
+    get_stage_definition,
     get_blog,
     get_profile_definition,
     get_missing_optional_stage_types,
@@ -35,6 +36,15 @@ _BLOGGER_AUXILIARY_PROMPT_FILES: dict[str, tuple[str, ...]] = {
     "world_mystery": ("mystery_inline_collage_prompt.md",),
     "custom": (),
 }
+_CLOUDFLARE_CANONICAL_STAGE_TYPES: tuple[WorkflowStageType, ...] = (
+    WorkflowStageType.TOPIC_DISCOVERY,
+    WorkflowStageType.ARTICLE_GENERATION,
+    WorkflowStageType.IMAGE_PROMPT_GENERATION,
+    WorkflowStageType.RELATED_POSTS,
+    WorkflowStageType.IMAGE_GENERATION,
+    WorkflowStageType.HTML_ASSEMBLY,
+    WorkflowStageType.PUBLISHING,
+)
 
 
 def _utc_now_iso() -> str:
@@ -228,6 +238,53 @@ def _default_platform_prompt(channel_name: str, definition) -> str:
     )
 
 
+def _cloudflare_step_objective(category_name: str, stage_type: WorkflowStageType) -> str:
+    definition = get_stage_definition(stage_type)
+    return f"{category_name} 카테고리에서 {definition.default_objective}"
+
+
+def _default_cloudflare_prompt(channel_name: str, category_name: str, stage_type: WorkflowStageType) -> str:
+    definition = get_stage_definition(stage_type)
+    return _normalize_prompt_text(
+        dedent(
+            f"""
+            You are the {definition.default_role_name} for the "{category_name}" category in the "{channel_name}" Cloudflare channel.
+
+            Objective
+            - {_cloudflare_step_objective(category_name, stage_type)}
+
+            Execution rules
+            - Stay inside the `{stage_type.value}` stage only.
+            - Keep the output aligned with the "{category_name}" category positioning.
+            - Return concrete, production-ready deliverables without filler analysis.
+            """
+        ).strip()
+    )
+
+
+def _cloudflare_system_step_backup(channel_name: str, category_name: str, stage_type: WorkflowStageType) -> str:
+    definition = get_stage_definition(stage_type)
+    return _normalize_prompt_text(
+        dedent(
+            f"""
+            [Cloudflare System Step Backup]
+            Channel: {channel_name}
+            Category: {category_name}
+            Stage: {stage_type.value}
+
+            Objective
+            - {_cloudflare_step_objective(category_name, stage_type)}
+
+            Notes
+            - This stage is part of the fixed 7-step Cloudflare blog pipeline.
+            - The runtime executes this stage automatically.
+            - This file is written to keep the backup folder structure consistent with the settings UI.
+            - Prompt editing is not supported for this stage.
+            """
+        ).strip()
+    )
+
+
 def _resolve_platform_definition(provider: str, step_id: str):
     definitions = PLATFORM_PROMPT_STEPS.get(provider, ())
     if not definitions:
@@ -370,44 +427,77 @@ def _build_blogger_flow(db: Session, channel_id: str, blog_id: int) -> PromptFlo
 def _build_cloudflare_flow(db: Session, channel_id: str) -> PromptFlowRead:
     overview = get_cloudflare_overview(db)
     bundle = get_cloudflare_prompt_bundle(db)
-    stage_order = {stage: index for index, stage in enumerate(bundle.get("stages", []), start=1)}
+    channel_name = overview.get("channel_name") or overview.get("site_title") or "Cloudflare"
+    stage_order = {
+        stage_type.value: index for index, stage_type in enumerate(_CLOUDFLARE_CANONICAL_STAGE_TYPES, start=1)
+    }
     category_order = {item.get("slug"): index for index, item in enumerate(bundle.get("categories", []), start=1)}
-    templates = sorted(
-        bundle.get("templates", []),
-        key=lambda item: (
-            category_order.get(item.get("categorySlug"), 999),
-            stage_order.get(item.get("stage"), 999),
-            item.get("id", ""),
-        ),
-    )
-    steps = [
-        PromptFlowStepRead(
-            id=f"{template.get('categorySlug')}::{template.get('stage')}",
-            channel_id=channel_id,
-            provider="cloudflare",
-            stage_type=template.get("stage", "prompt"),
-            stage_label=template.get("stage", "prompt"),
-            name=template.get("name") or f"{template.get('categoryName')} {template.get('stage')}",
-            role_name=None,
-            objective=template.get("objective") or f"{template.get('categoryName')} prompt",
-            prompt_template=template.get("content", ""),
-            provider_hint="cloudflare",
-            provider_model=template.get("providerModel"),
-            is_enabled=bool(template.get("isEnabled", True)),
-            is_required=False,
-            removable=False,
-            prompt_enabled=True,
-            editable=True,
-            structure_editable=False,
-            content_editable=True,
-            sort_order=(category_order.get(template.get("categorySlug"), 999) * 100)
-            + stage_order.get(template.get("stage"), 0),
-        )
-        for template in templates
-    ]
+    templates_by_key = {
+        (str(item.get("categorySlug") or "").strip(), str(item.get("stage") or "").strip()): item
+        for item in bundle.get("templates", [])
+        if str(item.get("categorySlug") or "").strip() and str(item.get("stage") or "").strip()
+    }
+    steps: list[PromptFlowStepRead] = []
+    for category in bundle.get("categories", []):
+        category_slug = str(category.get("slug") or "").strip()
+        category_name = str(category.get("name") or category_slug or "Cloudflare").strip() or "Cloudflare"
+        if not category_slug:
+            continue
+        category_rank = category_order.get(category_slug, 999)
+        for stage_type in _CLOUDFLARE_CANONICAL_STAGE_TYPES:
+            template = templates_by_key.get((category_slug, stage_type.value))
+            definition = get_stage_definition(stage_type)
+            prompt_enabled = stage_supports_prompt(stage_type)
+            steps.append(
+                PromptFlowStepRead(
+                    id=f"{category_slug}::{stage_type.value}",
+                    channel_id=channel_id,
+                    provider="cloudflare",
+                    stage_type=stage_type.value,
+                    stage_label=stage_label(stage_type),
+                    name=(
+                        str(template.get("name") or "").strip()
+                        if template
+                        else f"{category_name} · {definition.default_name}"
+                    ),
+                    role_name=definition.default_role_name,
+                    objective=(
+                        str(template.get("objective") or "").strip()
+                        if template
+                        else _cloudflare_step_objective(category_name, stage_type)
+                    ),
+                    prompt_template=(
+                        _normalize_prompt_text(str(template.get("content") or ""))
+                        if template
+                        else (
+                            _default_cloudflare_prompt(channel_name, category_name, stage_type)
+                            if prompt_enabled
+                            else _cloudflare_system_step_backup(channel_name, category_name, stage_type)
+                        )
+                    ),
+                    provider_hint=(
+                        "cloudflare"
+                        if prompt_enabled
+                        else (definition.provider_hint or "cloudflare")
+                    ),
+                    provider_model=(
+                        str(template.get("providerModel") or "").strip() or definition.provider_model
+                        if template
+                        else definition.provider_model
+                    ),
+                    is_enabled=bool(template.get("isEnabled", True)) if template else True,
+                    is_required=definition.is_required,
+                    removable=False,
+                    prompt_enabled=prompt_enabled,
+                    editable=prompt_enabled,
+                    structure_editable=False,
+                    content_editable=prompt_enabled,
+                    sort_order=(category_rank * 100) + stage_order[stage_type.value],
+                )
+            )
     return PromptFlowRead(
         channel_id=channel_id,
-        channel_name=overview.get("channel_name") or overview.get("site_title") or "Cloudflare",
+        channel_name=channel_name,
         provider="cloudflare",
         structure_editable=False,
         content_editable=True,
@@ -415,7 +505,7 @@ def _build_cloudflare_flow(db: Session, channel_id: str) -> PromptFlowRead:
         steps=steps,
         backup_directory=_named_channel_backup_relative_dir(
             "cloudflare",
-            overview.get("channel_name") or overview.get("site_title") or "Cloudflare",
+            channel_name,
             channel_id=channel_id,
         ),
     )
@@ -466,6 +556,9 @@ def _build_platform_flow(db: Session, channel_id: str) -> PromptFlowRead:
 
 
 def _step_backup_file_name(db: Session, flow: PromptFlowRead, step: PromptFlowStepRead) -> str | None:
+    if flow.provider == "cloudflare":
+        return _stage_prompt_file_name(step.stage_type)
+
     if not step.prompt_enabled:
         return None
 

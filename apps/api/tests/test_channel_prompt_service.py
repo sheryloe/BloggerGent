@@ -211,10 +211,28 @@ def test_build_prompt_flow_syncs_cloudflare_backups_to_channel_name_dir(
     flow = channel_prompt_service.build_prompt_flow(db, "cloudflare:dongriarchive", sync_backup=True)
 
     assert flow.backup_directory == "channels/cloudflare/dongri-archive"
+    assert [step.stage_type for step in flow.steps] == [
+        "topic_discovery",
+        "article_generation",
+        "image_prompt_generation",
+        "related_posts",
+        "image_generation",
+        "html_assembly",
+        "publishing",
+    ]
     assert flow.steps[0].backup_relative_path == "channels/cloudflare/dongri-archive/mystery/topic_discovery.md"
     assert (
         tmp_path / "prompts" / "channels" / "cloudflare" / "dongri-archive" / "mystery" / "topic_discovery.md"
     ).read_text(encoding="utf-8") == "Investigate unexplained stories\n"
+    assert (
+        tmp_path / "prompts" / "channels" / "cloudflare" / "dongri-archive" / "mystery" / "article_generation.md"
+    ).exists()
+    assert (
+        tmp_path / "prompts" / "channels" / "cloudflare" / "dongri-archive" / "mystery" / "image_prompt_generation.md"
+    ).exists()
+    assert (
+        tmp_path / "prompts" / "channels" / "cloudflare" / "dongri-archive" / "mystery" / "publishing.md"
+    ).read_text(encoding="utf-8").startswith("[Cloudflare System Step Backup]\n")
 
 
 def test_travel_blogger_backup_includes_profile_prompt_files_and_inline_prompt(db: Session, tmp_path: Path) -> None:
