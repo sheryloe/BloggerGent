@@ -1464,8 +1464,13 @@ def _base_delivery_metadata(*, provider: str, local_public_url: str) -> dict:
     }
 
 
-def _normalize_binary_for_filename(*, content: bytes, filename: str) -> bytes:
-    if Path(filename).suffix.lower() != ".webp":
+def _ensure_webp_filename(filename: str) -> str:
+    return str(Path(filename).with_suffix(".webp"))
+
+
+def _normalize_binary_for_filename(*, content: bytes, filename: str, force_webp: bool = False) -> bytes:
+    should_convert = force_webp or Path(filename).suffix.lower() == ".webp"
+    if not should_convert:
         return content
     try:
         with Image.open(io.BytesIO(content)) as loaded:
@@ -1473,7 +1478,9 @@ def _normalize_binary_for_filename(*, content: bytes, filename: str) -> bytes:
             converted = loaded if loaded.mode in {"RGB", "RGBA"} else loaded.convert("RGB")
             converted.save(output, format="WEBP", quality=88, method=6)
             return output.getvalue()
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        if force_webp:
+            raise ValueError("Failed to convert image to WebP.") from exc
         return content
 
 
@@ -1486,21 +1493,30 @@ def save_public_binary(
     provider_override: str | None = None,
 ) -> tuple[str, str, dict]:
     values = get_settings_map(db)
+    provider = (provider_override or values.get("public_image_provider") or "local").strip().lower()
     local_base_url = _resolve_local_public_base_url(values)
-    normalized_content = _normalize_binary_for_filename(content=content, filename=filename)
+    normalized_filename = filename
+    force_webp = False
+    if provider == "cloudflare_r2":
+        normalized_filename = _ensure_webp_filename(filename)
+        force_webp = True
+    normalized_content = _normalize_binary_for_filename(
+        content=content,
+        filename=normalized_filename,
+        force_webp=force_webp,
+    )
     file_path, local_public_url = save_binary(
         subdir=subdir,
-        filename=filename,
+        filename=normalized_filename,
         content=normalized_content,
         public_base_url=local_base_url,
     )
-    provider = (provider_override or values.get("public_image_provider") or "local").strip().lower()
     delivery_meta = _base_delivery_metadata(provider=provider, local_public_url=local_public_url)
 
     if provider == "cloudflare_r2":
         public_url, _, provider_delivery = upload_binary_to_cloudflare_r2(
             db,
-            filename=filename,
+            filename=normalized_filename,
             content=normalized_content,
         )
         provider_delivery.update(delivery_meta)
@@ -1544,10 +1560,16 @@ def ensure_existing_public_image_url(db: Session, *, file_path: str) -> tuple[st
     delivery_meta = _base_delivery_metadata(provider=provider, local_public_url=local_public_url)
 
     if provider == "cloudflare_r2":
+        upload_filename = _ensure_webp_filename(path.name)
+        upload_content = _normalize_binary_for_filename(
+            content=path.read_bytes(),
+            filename=upload_filename,
+            force_webp=True,
+        )
         public_url, _, provider_delivery = upload_binary_to_cloudflare_r2(
             db,
-            filename=path.name,
-            content=path.read_bytes(),
+            filename=upload_filename,
+            content=upload_content,
         )
         provider_delivery.update(delivery_meta)
         provider_delivery["public_url"] = public_url

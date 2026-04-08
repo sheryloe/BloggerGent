@@ -34,13 +34,19 @@ def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Session:
         engine.dispose()
 
 
-def _create_blog(db: Session, *, profile_key: str, blogger_blog_id: str) -> Blog:
+def _create_blog(
+    db: Session,
+    *,
+    profile_key: str,
+    blogger_blog_id: str,
+    primary_language: str = "en",
+) -> Blog:
     blog = Blog(
         name=f"Blog {profile_key}",
         slug=f"blog-{profile_key}",
         description="test blog",
         content_category="travel" if profile_key == "korea_travel" else "mystery",
-        primary_language="en",
+        primary_language=primary_language,
         profile_key=profile_key,
         target_audience="testers",
         content_brief="test brief",
@@ -128,6 +134,55 @@ def test_ensure_article_editorial_labels_prepends_category_without_duplicates(db
     assert labels[0] == "Travel"
     assert labels.count("Travel") == 1
     assert article.editorial_category_label == "Travel"
+
+
+def test_ensure_article_editorial_labels_es_uses_template_label_and_keeps_canonical(db: Session) -> None:
+    blog = _create_blog(
+        db,
+        profile_key="korea_travel",
+        blogger_blog_id="travel-blog-es",
+        primary_language="es",
+    )
+    article = _create_article(
+        db,
+        blog=blog,
+        title="Ruta en Seul",
+        labels=["Travel", "Seoul", "Budget"],
+        editorial_key="travel",
+        editorial_label="Travel",
+    )
+
+    labels = ensure_article_editorial_labels(db, article)
+
+    assert labels[0] == "Viajes"
+    assert "Travel" in labels
+    assert labels.count("Travel") == 1
+    assert article.editorial_category_key == "travel"
+    assert article.editorial_category_label == "Viajes"
+
+
+def test_ensure_article_editorial_labels_ja_infers_from_localized_label(db: Session) -> None:
+    blog = _create_blog(
+        db,
+        profile_key="korea_travel",
+        blogger_blog_id="travel-blog-ja",
+        primary_language="ja",
+    )
+    article = _create_article(
+        db,
+        blog=blog,
+        title="Seoul Festival Route",
+        labels=["\u65c5\u884c\u30fb\u304a\u796d\u308a", "Korea", "Route"],
+        editorial_key="",
+        editorial_label="",
+    )
+
+    labels = ensure_article_editorial_labels(db, article)
+
+    assert labels[0] == "\u65c5\u884c\u30fb\u304a\u796d\u308a"
+    assert "Travel" in labels
+    assert article.editorial_category_key == "travel"
+    assert article.editorial_category_label == "\u65c5\u884c\u30fb\u304a\u796d\u308a"
 
 
 def test_blogger_editorial_label_backfill_dry_run_marks_missing_labels_processable(db: Session) -> None:

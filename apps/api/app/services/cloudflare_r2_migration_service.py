@@ -15,6 +15,8 @@ from app.services.providers.factory import get_blogger_provider
 from app.services.related_posts import find_related_articles
 from app.services.settings_service import get_settings_map
 from app.services.storage_service import (
+    _ensure_webp_filename,
+    _normalize_binary_for_filename,
     _resolve_cloudflare_integration_upload_configuration,
     _resolve_cloudflare_r2_configuration,
     build_cloudflare_r2_preview_url,
@@ -287,10 +289,16 @@ def run_cloudflare_r2_image_migration(
 
             try:
                 labels = ensure_article_editorial_labels(db, article)
+                upload_filename = _ensure_webp_filename(file_path.name)
+                upload_content = _normalize_binary_for_filename(
+                    content=file_path.read_bytes(),
+                    filename=upload_filename,
+                    force_webp=True,
+                )
                 new_public_url, upload_payload, delivery_meta = upload_binary_to_cloudflare_r2(
                     db,
-                    filename=file_path.name,
-                    content=file_path.read_bytes(),
+                    filename=upload_filename,
+                    content=upload_content,
                 )
                 uploaded_object_key = str(upload_payload.get("object_key") or "").strip()
 

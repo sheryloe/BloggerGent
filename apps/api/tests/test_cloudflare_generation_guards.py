@@ -13,11 +13,13 @@ def test_cloudflare_quality_gate_fail_reasons() -> None:
         similarity_score=75.0,
         seo_score=58.0,
         geo_score=55.0,
+        ctr_score=59.0,
         similarity_threshold=70.0,
         min_seo_score=60.0,
         min_geo_score=60.0,
+        min_ctr_score=60.0,
     )
-    assert reasons == ["similarity_threshold", "seo_below_min", "geo_below_min"]
+    assert reasons == ["similarity_threshold", "seo_below_min", "geo_below_min", "ctr_below_min"]
 
 
 def test_cloudflare_blossom_cap_allows_bootstrap_pick() -> None:

@@ -4,14 +4,17 @@ import json
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import or_
+
 from app.core.celery_app import celery_app
 from app.db.session import SessionLocal
-from app.models.entities import WorkflowStageType
+from app.models.entities import ContentPlanDay, ContentPlanSlot, PublishMode, WorkflowStageType
 from app.services.blog_service import enforce_free_tier_model_policy, get_workflow_step, list_active_blogs
 from app.services.cloudflare_channel_service import run_cloudflare_daily_schedule
 from app.services.content_ops_service import sync_live_content_reviews
 from app.services.metric_ingestion_service import run_workspace_metric_sync_schedule
 from app.services.google_indexing_service import run_google_indexing_schedule
+from app.services.planner_service import run_slot_generation
 from app.services.google_sheet_service import sync_google_sheet_snapshot
 from app.services.publishing_service import process_publish_queue_batch
 from app.services.platform_publish_service import process_platform_publish_queue
@@ -312,6 +315,119 @@ WEEKDAY_NAMES = {
 }
 
 
+def _scheduler_slot_ready(slot: ContentPlanSlot) -> bool:
+    if slot.scheduled_for is None:
+        return False
+    if not str(slot.category_key or "").strip():
+        return False
+    if not str(slot.brief_topic or "").strip():
+        return False
+    if not str(slot.brief_audience or "").strip():
+        return False
+    return True
+
+
+def _run_planner_due_slots(db, *, now: datetime) -> dict:
+    now_naive = now.replace(tzinfo=None)
+    due_slots = (
+        db.query(ContentPlanSlot)
+        .join(ContentPlanDay, ContentPlanSlot.plan_day_id == ContentPlanDay.id)
+        .filter(ContentPlanSlot.status.in_(["planned", "brief_ready"]))
+        .filter(ContentPlanSlot.scheduled_for.is_not(None))
+        .filter(ContentPlanSlot.scheduled_for <= now_naive)
+        .filter(
+            or_(
+                ContentPlanDay.channel_id.like("blogger:%"),
+                ContentPlanDay.channel_id.like("cloudflare:%"),
+            )
+        )
+        .order_by(ContentPlanDay.channel_id.asc(), ContentPlanSlot.scheduled_for.asc(), ContentPlanSlot.slot_order.asc(), ContentPlanSlot.id.asc())
+        .all()
+    )
+    if not due_slots:
+        return {"status": "idle", "processed": 0, "triggered": 0, "items": []}
+
+    first_due_by_channel: dict[str, ContentPlanSlot] = {}
+    for slot in due_slots:
+        channel_id = str(slot.plan_day.channel_id or "").strip()
+        if not channel_id or channel_id in first_due_by_channel:
+            continue
+        first_due_by_channel[channel_id] = slot
+
+    if not first_due_by_channel:
+        return {"status": "idle", "processed": 0, "triggered": 0, "items": []}
+
+    items: list[dict] = []
+    triggered = 0
+    for channel_id in sorted(first_due_by_channel):
+        slot = first_due_by_channel[channel_id]
+        provider = channel_id.split(":", maxsplit=1)[0]
+        if not _scheduler_slot_ready(slot):
+            items.append(
+                {
+                    "slot_id": slot.id,
+                    "channel_id": channel_id,
+                    "provider": provider,
+                    "status": "blocked",
+                    "reason": "slot_not_ready",
+                }
+            )
+            continue
+        try:
+            run_slot_generation(db, slot.id, publish_mode_override=PublishMode.PUBLISH)
+        except ValueError as exc:
+            db.rollback()
+            items.append(
+                {
+                    "slot_id": slot.id,
+                    "channel_id": channel_id,
+                    "provider": provider,
+                    "status": "blocked",
+                    "reason": str(exc),
+                }
+            )
+            continue
+        except Exception as exc:  # noqa: BLE001
+            db.rollback()
+            send_telegram_error_notification(
+                db,
+                title="Planner scheduled slot execution failed",
+                detail=str(exc),
+                context={
+                    "slot_id": slot.id,
+                    "channel_id": channel_id,
+                    "provider": provider,
+                },
+            )
+            items.append(
+                {
+                    "slot_id": slot.id,
+                    "channel_id": channel_id,
+                    "provider": provider,
+                    "status": "failed",
+                    "reason": str(exc),
+                }
+            )
+            continue
+
+        triggered += 1
+        items.append(
+            {
+                "slot_id": slot.id,
+                "channel_id": channel_id,
+                "provider": provider,
+                "status": "triggered",
+            }
+        )
+
+    return {
+        "status": "triggered" if triggered else "idle",
+        "processed": len(items),
+        "triggered": triggered,
+        "items": items,
+    }
+
+
 @celery_app.task(name="app.tasks.scheduler.run_scheduler_tick")
 def run_scheduler_tick() -> dict:
     db = SessionLocal()
@@ -333,6 +449,7 @@ def run_scheduler_tick() -> dict:
 
         profile_runs: list[dict] = []
         run_marker_updates: dict[str, str] = {}
+        planner_slot_result: dict | None = None
         cloudflare_daily_result: dict | None = None
         google_indexing_result: dict | None = None
         workspace_metric_sync_result: dict | None = None
@@ -513,6 +630,18 @@ def run_scheduler_tick() -> dict:
             upsert_settings(db, run_marker_updates)
 
         try:
+            planner_slot_result = _run_planner_due_slots(db, now=now)
+        except Exception as exc:  # noqa: BLE001
+            db.rollback()
+            planner_slot_result = {"status": "failed", "detail": str(exc)}
+            send_telegram_error_notification(
+                db,
+                title="Planner schedule tick failed",
+                detail=str(exc),
+                context={"current_time": current_time, "timezone": str(tz)},
+            )
+
+        try:
             cloudflare_daily_result = run_cloudflare_daily_schedule(db, now=now)
         except Exception as exc:  # noqa: BLE001
             db.rollback()
@@ -626,6 +755,7 @@ def run_scheduler_tick() -> dict:
             "current_time": current_time,
             "timezone": str(tz),
             "profile_runs": profile_runs,
+            "planner_slots": planner_slot_result,
             "cloudflare_daily": cloudflare_daily_result,
             "google_indexing": google_indexing_result,
             "workspace_metrics": workspace_metric_sync_result,

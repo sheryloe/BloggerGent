@@ -6,14 +6,24 @@ import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  applyPlannerDayBrief,
   buildPlannerMonthPlan,
   cancelPlannerSlot,
   createPlannerSlot,
   generatePlannerSlot,
+  getPlannerDayBriefRuns,
   getPlannerCalendar,
+  runPlannerDayBriefAnalysis,
   updatePlannerSlot,
 } from "@/lib/api";
-import type { ManagedChannelRead, PlannerCalendarRead, PlannerCategoryRead, PlannerDayRead } from "@/lib/types";
+import type {
+  ManagedChannelRead,
+  PlannerBriefRun,
+  PlannerBriefSuggestion,
+  PlannerCalendarRead,
+  PlannerCategoryRead,
+  PlannerDayRead,
+} from "@/lib/types";
 
 type PlannerManagerProps = {
   channels: ManagedChannelRead[];
@@ -28,6 +38,20 @@ type SlotDraft = {
   briefAudience: string;
   briefInformationLevel: string;
   briefExtraContext: string;
+};
+
+type BriefSuggestionDraft = {
+  slotId: number;
+  slotOrder: number;
+  categoryKey: string;
+  topic: string;
+  audience: string;
+  informationLevel: string;
+  extraContext: string;
+  expectedCtrLift: string;
+  confidence: string;
+  signalSource: string;
+  reason: string;
 };
 
 type CalendarCell = {
@@ -157,6 +181,35 @@ function defaultDraft(dateKey: string, categories: PlannerCategoryRead[]): SlotD
   };
 }
 
+function confidenceToInput(value?: number | null) {
+  if (value == null || Number.isNaN(value)) return "";
+  return String(value);
+}
+
+function buildSuggestionDrafts(day: PlannerDayRead | null, run: PlannerBriefRun | null): BriefSuggestionDraft[] {
+  if (!day) return [];
+  const suggestionMap = new Map<number, PlannerBriefSuggestion>((run?.slotSuggestions ?? []).map((item) => [item.slotId, item]));
+  return day.slots
+    .slice()
+    .sort((a, b) => a.slotOrder - b.slotOrder)
+    .map((slot) => {
+      const suggestion = suggestionMap.get(slot.id);
+      return {
+        slotId: slot.id,
+        slotOrder: slot.slotOrder,
+        categoryKey: slot.categoryKey ?? suggestion?.categoryKey ?? "",
+        topic: suggestion?.topic ?? slot.briefTopic ?? "",
+        audience: suggestion?.audience ?? slot.briefAudience ?? "",
+        informationLevel: suggestion?.informationLevel ?? slot.briefInformationLevel ?? "",
+        extraContext: suggestion?.extraContext ?? slot.briefExtraContext ?? "",
+        expectedCtrLift: suggestion?.expectedCtrLift ?? "",
+        confidence: confidenceToInput(suggestion?.confidence),
+        signalSource: suggestion?.signalSource ?? "",
+        reason: suggestion?.reason ?? "",
+      };
+    });
+}
+
 export function PlannerManager({ channels }: PlannerManagerProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -187,6 +240,10 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
   const [statusMessage, setStatusMessage] = useState("");
   const [selectedSlotId, setSelectedSlotId] = useState<number | null>(null);
   const [draft, setDraft] = useState<SlotDraft | null>(null);
+  const [analysisPromptOverride, setAnalysisPromptOverride] = useState("");
+  const [briefRuns, setBriefRuns] = useState<PlannerBriefRun[]>([]);
+  const [selectedBriefRunId, setSelectedBriefRunId] = useState<number | null>(null);
+  const [suggestionDrafts, setSuggestionDrafts] = useState<BriefSuggestionDraft[]>([]);
 
   const categories = calendar?.categories ?? [];
   const categoryMap = useMemo(() => new Map(categories.map((item) => [item.key, item])), [categories]);
@@ -201,6 +258,10 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
     if (!selectedDay?.slots.length) return null;
     return selectedDay.slots.find((slot) => slot.id === selectedSlotId) ?? selectedDay.slots[0] ?? null;
   }, [selectedDay, selectedSlotId]);
+  const selectedBriefRun = useMemo(() => {
+    if (!briefRuns.length) return null;
+    return briefRuns.find((run) => run.id === selectedBriefRunId) ?? briefRuns[0] ?? null;
+  }, [briefRuns, selectedBriefRunId]);
 
   const monthCells = useMemo(() => buildMonthCells(month, calendar?.days ?? []), [calendar, month]);
   const monthSummary = useMemo(() => {
@@ -259,10 +320,44 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
     }
   }
 
+  async function loadBriefRuns(day: PlannerDayRead, preferredRunId?: number | null) {
+    try {
+      const runs = await getPlannerDayBriefRuns(day.id, 20);
+      setBriefRuns(runs);
+      const resolvedRunId =
+        preferredRunId && runs.some((run) => run.id === preferredRunId)
+          ? preferredRunId
+          : runs[0]?.id ?? null;
+      setSelectedBriefRunId(resolvedRunId);
+      const resolvedRun = runs.find((run) => run.id === resolvedRunId) ?? null;
+      setSuggestionDrafts(buildSuggestionDrafts(day, resolvedRun));
+    } catch (error) {
+      setBriefRuns([]);
+      setSelectedBriefRunId(null);
+      setSuggestionDrafts(buildSuggestionDrafts(day, null));
+      setStatusMessage(error instanceof Error ? error.message : "분석 이력을 불러오지 못했습니다.");
+    }
+  }
+
   useEffect(() => {
     if (!selectedChannelId) return;
     void loadCalendar(searchParams.get("selectedDate"));
   }, [selectedChannelId, month]);
+
+  useEffect(() => {
+    if (!selectedDay) {
+      setBriefRuns([]);
+      setSelectedBriefRunId(null);
+      setSuggestionDrafts([]);
+      return;
+    }
+    void loadBriefRuns(selectedDay);
+  }, [selectedDay?.id]);
+
+  useEffect(() => {
+    if (!selectedDay) return;
+    setSuggestionDrafts(buildSuggestionDrafts(selectedDay, selectedBriefRun));
+  }, [selectedDay?.id, selectedBriefRun?.id, briefRuns]);
 
   useEffect(() => {
     if (!selectedDay?.slots.length) {
@@ -371,6 +466,55 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "슬롯 취소에 실패했습니다.");
     }
+  }
+
+  async function handleRunDayAnalysis() {
+    if (!selectedDay) return;
+    try {
+      setStatusMessage("일별 CTR 분석을 실행하는 중입니다.");
+      const response = await runPlannerDayBriefAnalysis(selectedDay.id, {
+        promptOverride: analysisPromptOverride || null,
+      });
+      await loadBriefRuns(selectedDay, response.run.id);
+      setStatusMessage("일별 CTR 분석 결과를 불러왔습니다.");
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "일별 CTR 분석에 실패했습니다.");
+    }
+  }
+
+  async function handleApplyDayAnalysis() {
+    if (!selectedDay || !suggestionDrafts.length) return;
+    try {
+      setStatusMessage("분석 결과를 적용하는 중입니다. (빈 칸만 채우기)");
+      const response = await applyPlannerDayBrief(selectedDay.id, {
+        runId: selectedBriefRun?.id ?? null,
+        slotSuggestions: suggestionDrafts.map((item) => {
+          const confidence = item.confidence.trim() === "" ? null : Number(item.confidence);
+          return {
+            slotId: item.slotId,
+            topic: item.topic || null,
+            audience: item.audience || null,
+            informationLevel: item.informationLevel || null,
+            extraContext: item.extraContext || null,
+            expectedCtrLift: item.expectedCtrLift || null,
+            confidence: Number.isFinite(confidence as number) ? (confidence as number) : null,
+            signalSource: item.signalSource || null,
+            reason: item.reason || null,
+          };
+        }),
+      });
+      await loadCalendar(selectedDay.planDate);
+      await loadBriefRuns(selectedDay, response.runId ?? selectedBriefRun?.id ?? null);
+      setStatusMessage(`적용 완료: ${response.appliedSlotIds.length}개 반영, ${response.skippedSlotIds.length}개 유지`);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "분석 결과 적용에 실패했습니다.");
+    }
+  }
+
+  function updateSuggestionDraft(slotId: number, key: keyof BriefSuggestionDraft, value: string) {
+    setSuggestionDrafts((current) =>
+      current.map((item) => (item.slotId === slotId ? { ...item, [key]: value } : item)),
+    );
   }
 
   const selectedChannel = typeFilteredChannels.find((item) => item.channelId === selectedChannelId) ?? typeFilteredChannels[0] ?? null;
@@ -521,6 +665,134 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
                 <button type="button" onClick={handleAddSlot} disabled={!selectedDay || !draft} className="rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300">
                   슬롯 추가
                 </button>
+              </div>
+
+              <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-950">일별 CTR 분석</p>
+                    <p className="mt-1 text-xs text-slate-500">슬롯별 주제/독자타겟/정보수준/기타정보를 제안하고, 검토 후 빈 칸만 반영합니다.</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={handleRunDayAnalysis}
+                      disabled={!selectedDay}
+                      className="rounded-full bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-200"
+                    >
+                      분석 실행
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRunDayAnalysis}
+                      disabled={!selectedDay}
+                      className="rounded-full bg-slate-800 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                    >
+                      분석 재실행
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleApplyDayAnalysis}
+                      disabled={!selectedDay || !suggestionDrafts.length}
+                      className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-emerald-200"
+                    >
+                      적용(빈 칸만 채우기)
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-4">
+                  <Field label="분석 프롬프트 오버라이드">
+                    <textarea
+                      value={analysisPromptOverride}
+                      onChange={(event) => setAnalysisPromptOverride(event.target.value)}
+                      rows={3}
+                      placeholder="추가 지시가 있으면 입력하세요. 비우면 기본 템플릿만 사용합니다."
+                      className={textareaClass()}
+                    />
+                  </Field>
+
+                  <Field label="분석 실행 이력">
+                    <select
+                      value={selectedBriefRun?.id ?? ""}
+                      onChange={(event) => setSelectedBriefRunId(event.target.value ? Number(event.target.value) : null)}
+                      className={inputClass()}
+                    >
+                      {!briefRuns.length ? <option value="">이력이 없습니다</option> : null}
+                      {briefRuns.map((run) => (
+                        <option key={run.id} value={run.id}>
+                          #{run.id} · {run.status} · {run.model ?? "model n/a"} · {run.createdAt.slice(0, 16).replace("T", " ")}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+
+                  {selectedBriefRun ? (
+                    <details className="rounded-[20px] border border-slate-200 bg-white p-4">
+                      <summary className="cursor-pointer text-sm font-semibold text-slate-900">원본 프롬프트 / 모델 응답(raw)</summary>
+                      <div className="mt-4 grid gap-4">
+                        <Field label="실행 프롬프트">
+                          <textarea value={selectedBriefRun.prompt} readOnly rows={6} className={textareaClass()} />
+                        </Field>
+                        <Field label="모델 원응답(raw JSON)">
+                          <textarea
+                            value={JSON.stringify(selectedBriefRun.rawResponse ?? {}, null, 2)}
+                            readOnly
+                            rows={8}
+                            className={`${textareaClass()} font-mono text-xs`}
+                          />
+                        </Field>
+                      </div>
+                    </details>
+                  ) : null}
+
+                  {suggestionDrafts.length ? (
+                    <div className="space-y-3">
+                      {suggestionDrafts.map((item) => (
+                        <div key={item.slotId} className="rounded-[20px] border border-slate-200 bg-white p-4">
+                          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-sm font-semibold text-slate-900">
+                              슬롯 #{item.slotOrder} · {item.categoryKey || "카테고리 미지정"}
+                            </p>
+                            <FlagPill tone="slate">slot_id {item.slotId}</FlagPill>
+                          </div>
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <Field label="주제">
+                              <input value={item.topic} onChange={(event) => updateSuggestionDraft(item.slotId, "topic", event.target.value)} className={inputClass()} />
+                            </Field>
+                            <Field label="독자 타겟">
+                              <input value={item.audience} onChange={(event) => updateSuggestionDraft(item.slotId, "audience", event.target.value)} className={inputClass()} />
+                            </Field>
+                            <Field label="정보 수준">
+                              <input value={item.informationLevel} onChange={(event) => updateSuggestionDraft(item.slotId, "informationLevel", event.target.value)} className={inputClass()} />
+                            </Field>
+                            <Field label="예상 CTR 개선">
+                              <input value={item.expectedCtrLift} onChange={(event) => updateSuggestionDraft(item.slotId, "expectedCtrLift", event.target.value)} className={inputClass()} />
+                            </Field>
+                            <Field label="신뢰도 (0~1)">
+                              <input value={item.confidence} onChange={(event) => updateSuggestionDraft(item.slotId, "confidence", event.target.value)} className={inputClass()} />
+                            </Field>
+                            <Field label="신호 출처">
+                              <input value={item.signalSource} onChange={(event) => updateSuggestionDraft(item.slotId, "signalSource", event.target.value)} className={inputClass()} />
+                            </Field>
+                          </div>
+                          <div className="mt-3 grid gap-3">
+                            <Field label="기타 정보">
+                              <textarea value={item.extraContext} onChange={(event) => updateSuggestionDraft(item.slotId, "extraContext", event.target.value)} rows={3} className={textareaClass()} />
+                            </Field>
+                            <Field label="근거">
+                              <textarea value={item.reason} onChange={(event) => updateSuggestionDraft(item.slotId, "reason", event.target.value)} rows={2} className={textareaClass()} />
+                            </Field>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-[20px] border border-dashed border-slate-200 bg-white px-4 py-6 text-sm text-slate-500">
+                      분석 이력을 선택하거나 분석 실행 버튼으로 추천값을 생성하세요.
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="space-y-2">

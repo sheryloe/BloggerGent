@@ -1,27 +1,38 @@
 ﻿from __future__ import annotations
 
 import calendar
+import json
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Iterable
 
+import httpx
 from sqlalchemy import and_
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.entities import (
+    AnalyticsArticleFact,
+    AnalyticsBlogMonthlyReport,
+    AnalyticsThemeMonthlyStat,
     Article,
     Blog,
     BlogTheme,
     ContentPlanDay,
     ContentPlanSlot,
+    PlannerBriefRun,
     PublishMode,
     Topic,
     WorkflowStageType,
 )
 from app.schemas.api import (
+    PlannerBriefRunRead,
+    PlannerBriefSuggestionInput,
+    PlannerBriefSuggestionRead,
     PlannerCalendarRead,
     PlannerCategoryRead,
     PlannerDayRead,
+    PlannerDayBriefApplyResponse,
+    PlannerDayBriefAnalysisResponse,
     PlannerMonthPlanRequest,
     PlannerSlotCreate,
     PlannerSlotRead,
@@ -34,6 +45,7 @@ from app.services.cloudflare_channel_service import (
     list_cloudflare_categories,
 )
 from app.services.blog_service import get_blog, get_workflow_step, sync_stage_prompts_from_profile_files
+from app.services.google_indexing_service import load_fact_enrichment_maps
 from app.services.job_service import create_job
 from app.services.multilingual_bundle_service import (
     bundle_publish_offset_minutes,
@@ -42,7 +54,14 @@ from app.services.multilingual_bundle_service import (
     resolve_blog_bundle_language,
 )
 from app.services.platform_publish_service import content_item_missing_asset_reason
-from app.services.platform_service import create_content_item as create_platform_content_item
+from app.services.platform_service import (
+    create_content_item as create_platform_content_item,
+    resolve_blogger_channel_display_name,
+)
+from app.services.prompt_service import get_prompt_template, render_prompt_template
+from app.services.providers.base import ProviderRuntimeError
+from app.services.providers.factory import get_runtime_config
+from app.services.openai_usage_service import route_openai_free_tier_text_model
 from app.services.settings_service import get_settings_map
 from app.services.workspace_service import get_managed_channel, list_channel_categories
 from app.tasks.pipeline import run_job
@@ -87,6 +106,13 @@ MULTILINGUAL_FIXED_WORKFLOW_STAGES: tuple[WorkflowStageType, ...] = (
     WorkflowStageType.IMAGE_GENERATION,
     WorkflowStageType.HTML_ASSEMBLY,
     WorkflowStageType.PUBLISHING,
+)
+PLANNER_DAILY_BRIEF_PROMPT_KEY = "planner_daily_brief_analysis"
+BRIEF_APPLY_FIELD_MAP: tuple[tuple[str, str], ...] = (
+    ("brief_topic", "topic"),
+    ("brief_audience", "audience"),
+    ("brief_information_level", "information_level"),
+    ("brief_extra_context", "extra_context"),
 )
 
 
@@ -310,7 +336,7 @@ def _resolve_channel_context(
         return PlannerChannelContext(
             channel_id=normalized_channel_id,
             provider="blogger",
-            channel_name=blog.name,
+            channel_name=resolve_blogger_channel_display_name(blog),
             categories=categories,
             blog=blog,
         )
@@ -375,12 +401,12 @@ def _slot_category_color(slot: ContentPlanSlot) -> str | None:
 
 
 def _slot_publish_mode(slot: ContentPlanSlot) -> str | None:
-    if slot.plan_day.blog and slot.plan_day.blog.publish_mode:
-        return slot.plan_day.blog.publish_mode.value if hasattr(slot.plan_day.blog.publish_mode, "value") else str(slot.plan_day.blog.publish_mode)
     if isinstance(slot.result_payload, dict):
         requested_status = slot.result_payload.get("requested_status")
         if requested_status:
             return str(requested_status)
+    if slot.plan_day.blog and slot.plan_day.blog.publish_mode:
+        return slot.plan_day.blog.publish_mode.value if hasattr(slot.plan_day.blog.publish_mode, "value") else str(slot.plan_day.blog.publish_mode)
     return "draft"
 
 
@@ -732,6 +758,598 @@ def _planner_manual_topic_payload(slot: ContentPlanSlot) -> dict[str, list[dict[
     }
 
 
+def _is_blank_text(value: Any) -> bool:
+    return not str(value or "").strip()
+
+
+def _clean_text(value: Any, *, max_length: int = 1000) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    return text[:max_length]
+
+
+def _parse_confidence(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return round(max(0.0, min(parsed, 1.0)), 3)
+
+
+def _extract_json_payload(content: str) -> dict[str, Any]:
+    normalized = str(content or "").strip()
+    if not normalized:
+        raise ValueError("analysis response is empty")
+    try:
+        parsed = json.loads(normalized)
+    except json.JSONDecodeError:
+        start = normalized.find("{")
+        end = normalized.rfind("}")
+        if start < 0 or end <= start:
+            raise ValueError("analysis response is not valid JSON") from None
+        parsed = json.loads(normalized[start : end + 1])
+    if not isinstance(parsed, dict):
+        raise ValueError("analysis response root must be a JSON object")
+    return parsed
+
+
+def _fact_url_key_for_planner(*, blog_id: int, url: str | None) -> tuple[int, str] | None:
+    normalized = str(url or "").strip()
+    if not normalized:
+        return None
+    return (blog_id, normalized)
+
+
+def _load_monthly_signal_payload(db: Session, *, blog: Blog, month: str) -> dict[str, Any]:
+    report = (
+        db.query(AnalyticsBlogMonthlyReport)
+        .filter(AnalyticsBlogMonthlyReport.blog_id == blog.id, AnalyticsBlogMonthlyReport.month == month)
+        .one_or_none()
+    )
+    theme_stats = (
+        db.query(AnalyticsThemeMonthlyStat)
+        .filter(AnalyticsThemeMonthlyStat.blog_id == blog.id, AnalyticsThemeMonthlyStat.month == month)
+        .order_by(AnalyticsThemeMonthlyStat.theme_name.asc())
+        .all()
+    )
+    facts = (
+        db.query(AnalyticsArticleFact)
+        .filter(AnalyticsArticleFact.blog_id == blog.id, AnalyticsArticleFact.month == month)
+        .order_by(AnalyticsArticleFact.published_at.desc(), AnalyticsArticleFact.id.desc())
+        .limit(40)
+        .all()
+    )
+    pairs = {
+        key
+        for key in (_fact_url_key_for_planner(blog_id=item.blog_id, url=item.actual_url) for item in facts)
+        if key is not None
+    }
+    _index_state_map, ctr_map = load_fact_enrichment_maps(db, pairs=pairs)
+
+    fact_items: list[dict[str, Any]] = []
+    for fact in facts:
+        key = _fact_url_key_for_planner(blog_id=fact.blog_id, url=fact.actual_url)
+        ctr_row = ctr_map.get(key) if key else None
+        ctr_value = float(ctr_row.ctr) if ctr_row and ctr_row.ctr is not None else None
+        fact_items.append(
+            {
+                "id": fact.id,
+                "title": fact.title,
+                "theme_key": fact.theme_key,
+                "theme_name": fact.theme_name,
+                "category": fact.category,
+                "published_at": fact.published_at.isoformat() if fact.published_at else None,
+                "ctr": ctr_value,
+                "seo_score": fact.seo_score,
+                "geo_score": fact.geo_score,
+                "status": fact.status,
+                "actual_url": fact.actual_url,
+            }
+        )
+
+    ctr_facts = [item for item in fact_items if item.get("ctr") is not None]
+    ctr_facts.sort(key=lambda item: float(item.get("ctr") or 0), reverse=True)
+    top_ctr_facts = ctr_facts[:8]
+
+    return {
+        "month": month,
+        "total_posts": int(report.total_posts) if report else len(fact_items),
+        "avg_seo_score": float(report.avg_seo_score) if report and report.avg_seo_score is not None else None,
+        "avg_geo_score": float(report.avg_geo_score) if report and report.avg_geo_score is not None else None,
+        "avg_similarity_score": (
+            float(report.avg_similarity_score) if report and report.avg_similarity_score is not None else None
+        ),
+        "report_summary": report.report_summary if report else None,
+        "next_month_focus": report.next_month_focus if report else None,
+        "theme_stats": [
+            {
+                "theme_key": item.theme_key,
+                "theme_name": item.theme_name,
+                "planned_posts": item.planned_posts,
+                "actual_posts": item.actual_posts,
+                "planned_share": item.planned_share,
+                "actual_share": item.actual_share,
+                "gap_share": item.gap_share,
+                "next_month_weight_suggestion": item.next_month_weight_suggestion,
+            }
+            for item in theme_stats
+        ],
+        "article_facts": fact_items,
+        "top_ctr_facts": top_ctr_facts,
+        "ctr_data_points": len(ctr_facts),
+    }
+
+
+def _build_day_analysis_context(
+    db: Session,
+    *,
+    plan_day: ContentPlanDay,
+    context: PlannerChannelContext,
+) -> dict[str, Any]:
+    slots = sorted(plan_day.slots, key=lambda item: (item.slot_order, item.id))
+    month = plan_day.plan_date.strftime("%Y-%m")
+    category_weights = [
+        {
+            "key": category.key,
+            "name": category.name,
+            "weight": category.weight,
+            "color": category.color,
+        }
+        for category in context.categories
+    ]
+    slot_payload = [
+        {
+            "slot_id": slot.id,
+            "slot_order": slot.slot_order,
+            "scheduled_for": slot.scheduled_for.isoformat() if slot.scheduled_for else None,
+            "category_key": _slot_category_key(slot),
+            "category_name": _slot_category_name(slot),
+            "brief_topic": slot.brief_topic,
+            "brief_audience": slot.brief_audience,
+            "brief_information_level": slot.brief_information_level,
+            "brief_extra_context": slot.brief_extra_context,
+        }
+        for slot in slots
+    ]
+
+    monthly_signals: dict[str, Any] = {
+        "month": month,
+        "total_posts": 0,
+        "theme_stats": [],
+        "article_facts": [],
+        "top_ctr_facts": [],
+        "ctr_data_points": 0,
+    }
+    if context.blog is not None:
+        monthly_signals = _load_monthly_signal_payload(db, blog=context.blog, month=month)
+
+    return {
+        "channel": {
+            "channel_id": context.channel_id,
+            "provider": context.provider,
+            "channel_name": context.channel_name,
+            "blog_id": context.blog_id,
+            "blog_slug": context.blog.slug if context.blog else None,
+            "primary_language": context.blog.primary_language if context.blog else None,
+        },
+        "plan_day": {
+            "id": plan_day.id,
+            "date": plan_day.plan_date.isoformat(),
+            "target_post_count": plan_day.target_post_count,
+            "status": plan_day.status,
+        },
+        "slots": slot_payload,
+        "category_weights": category_weights,
+        "monthly_signals": monthly_signals,
+        "signal_policy": {
+            "priority": [
+                "ctr_data",
+                "monthly_report",
+                "article_facts",
+                "category_weights",
+                "fallback",
+            ]
+        },
+    }
+
+
+def _build_day_analysis_prompt(*, analysis_context: dict[str, Any], prompt_override: str | None) -> str:
+    template = get_prompt_template(PLANNER_DAILY_BRIEF_PROMPT_KEY).get("content") or ""
+    if not str(template).strip():
+        raise ValueError("planner daily brief analysis prompt template is empty")
+    return render_prompt_template(
+        template,
+        analysis_context_json=json.dumps(analysis_context, ensure_ascii=False, indent=2),
+        user_prompt_override=(prompt_override or "").strip() or "(none)",
+    )
+
+
+def _run_daily_analysis_with_openai(
+    db: Session,
+    *,
+    prompt: str,
+    requested_model: str | None,
+) -> tuple[dict[str, Any], dict[str, Any], str]:
+    runtime = get_runtime_config(db)
+    if str(runtime.provider_mode or "").strip().lower() != "live":
+        raise ValueError("planner daily analysis requires provider_mode=live")
+    if not str(runtime.openai_api_key or "").strip():
+        raise ValueError("planner daily analysis requires openai_api_key")
+
+    decision = route_openai_free_tier_text_model(
+        db,
+        requested_model=requested_model or runtime.openai_text_model,
+        allow_large=False,
+        minimum_remaining_tokens=1,
+    )
+    response = httpx.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers={"Authorization": f"Bearer {runtime.openai_api_key}"},
+        json={
+            "model": decision.resolved_model,
+            "temperature": 0.3,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "Return strict JSON only. Never include markdown fences.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+        },
+        timeout=120.0,
+    )
+    if not response.is_success:
+        detail = response.text
+        try:
+            detail = response.json().get("error", {}).get("message", detail)
+        except ValueError:
+            pass
+        raise ProviderRuntimeError(
+            provider="openai_text",
+            status_code=response.status_code,
+            message="Planner daily brief analysis failed.",
+            detail=detail,
+        )
+
+    response_payload = response.json()
+    try:
+        content = str(response_payload["choices"][0]["message"]["content"] or "")
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ValueError("analysis response shape is invalid") from exc
+    parsed = _extract_json_payload(content)
+    raw_response = {
+        "routing": decision.to_payload(),
+        "response": response_payload,
+    }
+    return parsed, raw_response, decision.resolved_model
+
+
+def _normalize_analysis_suggestions(
+    raw_payload: dict[str, Any],
+    *,
+    slots: list[ContentPlanSlot],
+) -> list[dict[str, Any]]:
+    items = raw_payload.get("slot_suggestions")
+    if not isinstance(items, list):
+        raise ValueError("analysis response missing slot_suggestions list")
+
+    slot_map = {slot.id: slot for slot in slots}
+    normalized: list[dict[str, Any]] = []
+    seen_slot_ids: set[int] = set()
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            slot_id = int(item.get("slot_id"))
+        except (TypeError, ValueError):
+            continue
+        slot = slot_map.get(slot_id)
+        if slot is None or slot_id in seen_slot_ids:
+            continue
+        seen_slot_ids.add(slot_id)
+        normalized.append(
+            {
+                "slot_id": slot_id,
+                "slot_order": slot.slot_order,
+                "category_key": _slot_category_key(slot),
+                "topic": _clean_text(item.get("topic"), max_length=500),
+                "audience": _clean_text(item.get("audience"), max_length=500),
+                "information_level": _clean_text(item.get("information_level"), max_length=250),
+                "extra_context": _clean_text(item.get("extra_context"), max_length=2000),
+                "expected_ctr_lift": _clean_text(item.get("expected_ctr_lift"), max_length=120),
+                "confidence": _parse_confidence(item.get("confidence")),
+                "signal_source": _clean_text(item.get("signal_source"), max_length=120),
+                "reason": _clean_text(item.get("reason"), max_length=240),
+            }
+        )
+
+    if not normalized:
+        raise ValueError("analysis response did not include valid slot suggestions")
+
+    normalized.sort(key=lambda item: (int(item.get("slot_order") or 0), int(item.get("slot_id") or 0)))
+    return normalized
+
+
+def _serialize_brief_run(
+    run: PlannerBriefRun,
+    *,
+    slot_lookup: dict[int, ContentPlanSlot] | None = None,
+) -> PlannerBriefRunRead:
+    slot_lookup = slot_lookup or {}
+    suggestions: list[PlannerBriefSuggestionRead] = []
+    raw_suggestions = run.slot_suggestions if isinstance(run.slot_suggestions, list) else []
+    for item in raw_suggestions:
+        if not isinstance(item, dict):
+            continue
+        try:
+            slot_id = int(item.get("slot_id"))
+        except (TypeError, ValueError):
+            continue
+        slot = slot_lookup.get(slot_id)
+        suggestions.append(
+            PlannerBriefSuggestionRead(
+                slot_id=slot_id,
+                slot_order=int(item.get("slot_order") or (slot.slot_order if slot else 0) or 0),
+                category_key=_clean_text(item.get("category_key"), max_length=100)
+                or (_slot_category_key(slot) if slot else None),
+                topic=_clean_text(item.get("topic"), max_length=500),
+                audience=_clean_text(item.get("audience"), max_length=500),
+                information_level=_clean_text(item.get("information_level"), max_length=250),
+                extra_context=_clean_text(item.get("extra_context"), max_length=2000),
+                expected_ctr_lift=_clean_text(item.get("expected_ctr_lift"), max_length=120),
+                confidence=_parse_confidence(item.get("confidence")),
+                signal_source=_clean_text(item.get("signal_source"), max_length=120),
+                reason=_clean_text(item.get("reason"), max_length=240),
+            )
+        )
+
+    applied_ids: list[int] = []
+    for item in run.applied_slot_ids if isinstance(run.applied_slot_ids, list) else []:
+        try:
+            applied_ids.append(int(item))
+        except (TypeError, ValueError):
+            continue
+
+    return PlannerBriefRunRead(
+        id=run.id,
+        plan_day_id=run.plan_day_id,
+        channel_id=run.channel_id,
+        blog_id=run.blog_id,
+        provider=run.provider,
+        model=run.model,
+        prompt=run.prompt,
+        raw_response=run.raw_response if isinstance(run.raw_response, dict) else {},
+        slot_suggestions=suggestions,
+        status=run.status,
+        error_message=run.error_message,
+        applied_slot_ids=applied_ids,
+        created_at=run.created_at,
+        updated_at=run.updated_at,
+    )
+
+
+def analyze_day_briefs(
+    db: Session,
+    *,
+    plan_day_id: int,
+    prompt_override: str | None = None,
+) -> PlannerDayBriefAnalysisResponse:
+    plan_day = (
+        db.query(ContentPlanDay)
+        .options(*_plan_day_options())
+        .filter(ContentPlanDay.id == plan_day_id)
+        .one_or_none()
+    )
+    if plan_day is None:
+        raise ValueError("planner day not found")
+
+    ordered_slots = sorted(plan_day.slots, key=lambda item: (item.slot_order, item.id))
+    if not ordered_slots:
+        raise ValueError("planner day has no slots")
+
+    settings_map = get_settings_map(db)
+    context = _resolve_channel_context(
+        db,
+        channel_id=plan_day.channel_id,
+        blog_id=plan_day.blog_id,
+        settings_map=settings_map,
+    )
+    analysis_context = _build_day_analysis_context(db, plan_day=plan_day, context=context)
+    prompt = _build_day_analysis_prompt(analysis_context=analysis_context, prompt_override=prompt_override)
+
+    run = PlannerBriefRun(
+        plan_day_id=plan_day.id,
+        channel_id=plan_day.channel_id,
+        blog_id=plan_day.blog_id,
+        provider=context.provider,
+        model=None,
+        prompt=prompt,
+        raw_response={},
+        slot_suggestions=[],
+        status="running",
+        error_message=None,
+        applied_slot_ids=[],
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+
+    try:
+        parsed_payload, raw_response, resolved_model = _run_daily_analysis_with_openai(
+            db,
+            prompt=prompt,
+            requested_model=settings_map.get("openai_text_model"),
+        )
+        slot_suggestions = _normalize_analysis_suggestions(parsed_payload, slots=ordered_slots)
+        run.model = resolved_model
+        run.raw_response = raw_response
+        run.slot_suggestions = slot_suggestions
+        run.status = "completed"
+        run.error_message = None
+    except Exception as exc:  # noqa: BLE001
+        run.status = "failed"
+        run.error_message = str(exc)
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+
+    slot_lookup = {slot.id: slot for slot in ordered_slots}
+    return PlannerDayBriefAnalysisResponse(run=_serialize_brief_run(run, slot_lookup=slot_lookup))
+
+
+def _normalize_apply_suggestions(
+    *,
+    raw_items: list[PlannerBriefSuggestionInput] | list[dict[str, Any]],
+    slot_map: dict[int, ContentPlanSlot],
+) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    seen_slot_ids: set[int] = set()
+
+    for entry in raw_items:
+        payload = entry.model_dump() if hasattr(entry, "model_dump") else dict(entry)
+        try:
+            slot_id = int(payload.get("slot_id"))
+        except (TypeError, ValueError):
+            raise ValueError("slot_suggestions must include valid slot_id") from None
+        if slot_id in seen_slot_ids:
+            continue
+        slot = slot_map.get(slot_id)
+        if slot is None:
+            raise ValueError(f"slot_id {slot_id} is not in this planner day")
+        seen_slot_ids.add(slot_id)
+        normalized.append(
+            {
+                "slot_id": slot_id,
+                "topic": _clean_text(payload.get("topic"), max_length=500),
+                "audience": _clean_text(payload.get("audience"), max_length=500),
+                "information_level": _clean_text(payload.get("information_level"), max_length=250),
+                "extra_context": _clean_text(payload.get("extra_context"), max_length=2000),
+                "expected_ctr_lift": _clean_text(payload.get("expected_ctr_lift"), max_length=120),
+                "confidence": _parse_confidence(payload.get("confidence")),
+                "signal_source": _clean_text(payload.get("signal_source"), max_length=120),
+                "reason": _clean_text(payload.get("reason"), max_length=240),
+            }
+        )
+
+    if not normalized:
+        raise ValueError("slot_suggestions is empty")
+    return normalized
+
+
+def apply_day_briefs(
+    db: Session,
+    *,
+    plan_day_id: int,
+    run_id: int | None = None,
+    slot_suggestions: list[PlannerBriefSuggestionInput] | None = None,
+) -> PlannerDayBriefApplyResponse:
+    plan_day = (
+        db.query(ContentPlanDay)
+        .options(*_plan_day_options())
+        .filter(ContentPlanDay.id == plan_day_id)
+        .one_or_none()
+    )
+    if plan_day is None:
+        raise ValueError("planner day not found")
+
+    ordered_slots = sorted(plan_day.slots, key=lambda item: (item.slot_order, item.id))
+    if not ordered_slots:
+        raise ValueError("planner day has no slots")
+    slot_map = {slot.id: slot for slot in ordered_slots}
+
+    selected_run: PlannerBriefRun | None = None
+    raw_items: list[PlannerBriefSuggestionInput] | list[dict[str, Any]]
+    if run_id is not None:
+        selected_run = (
+            db.query(PlannerBriefRun)
+            .filter(PlannerBriefRun.id == run_id, PlannerBriefRun.plan_day_id == plan_day_id)
+            .one_or_none()
+        )
+        if selected_run is None:
+            raise ValueError("planner brief run not found")
+        if selected_run.status == "failed" and not slot_suggestions:
+            raise ValueError("cannot apply a failed planner brief run")
+    if slot_suggestions:
+        raw_items = slot_suggestions
+    elif selected_run is not None:
+        raw_items = selected_run.slot_suggestions if isinstance(selected_run.slot_suggestions, list) else []
+    else:
+        raise ValueError("run_id or slot_suggestions is required")
+
+    normalized = _normalize_apply_suggestions(raw_items=raw_items, slot_map=slot_map)
+    applied_slot_ids: list[int] = []
+    skipped_slot_ids: list[int] = []
+
+    for suggestion in normalized:
+        slot = slot_map[suggestion["slot_id"]]
+        changed = False
+        for slot_field, suggestion_field in BRIEF_APPLY_FIELD_MAP:
+            incoming_value = suggestion.get(suggestion_field)
+            if _is_blank_text(incoming_value):
+                continue
+            current_value = getattr(slot, slot_field)
+            if _is_blank_text(current_value):
+                setattr(slot, slot_field, str(incoming_value).strip())
+                changed = True
+        if changed:
+            slot.status = _slot_status(slot)
+            db.add(slot)
+            applied_slot_ids.append(slot.id)
+        else:
+            next_status = _slot_status(slot)
+            if slot.status != next_status:
+                slot.status = next_status
+                db.add(slot)
+            skipped_slot_ids.append(slot.id)
+
+    if selected_run is not None:
+        existing_applied = {
+            int(item)
+            for item in (selected_run.applied_slot_ids if isinstance(selected_run.applied_slot_ids, list) else [])
+            if str(item).strip().isdigit()
+        }
+        existing_applied.update(applied_slot_ids)
+        selected_run.applied_slot_ids = sorted(existing_applied)
+        if selected_run.status != "failed":
+            selected_run.status = "applied"
+        selected_run.error_message = None
+        db.add(selected_run)
+
+    db.commit()
+    return PlannerDayBriefApplyResponse(
+        plan_day_id=plan_day_id,
+        applied_slot_ids=applied_slot_ids,
+        skipped_slot_ids=skipped_slot_ids,
+        run_id=selected_run.id if selected_run else None,
+        status="applied",
+    )
+
+
+def list_day_brief_runs(db: Session, *, plan_day_id: int, limit: int = 20) -> list[PlannerBriefRunRead]:
+    plan_day = (
+        db.query(ContentPlanDay)
+        .options(*_plan_day_options())
+        .filter(ContentPlanDay.id == plan_day_id)
+        .one_or_none()
+    )
+    if plan_day is None:
+        raise ValueError("planner day not found")
+    slot_lookup = {slot.id: slot for slot in plan_day.slots}
+    runs = (
+        db.query(PlannerBriefRun)
+        .filter(PlannerBriefRun.plan_day_id == plan_day_id)
+        .order_by(PlannerBriefRun.created_at.desc(), PlannerBriefRun.id.desc())
+        .limit(max(1, min(limit, 100)))
+        .all()
+    )
+    return [_serialize_brief_run(run, slot_lookup=slot_lookup) for run in runs]
+
+
 def get_calendar(db: Session, channel_id: str | None, month: str, blog_id: int | None = None) -> PlannerCalendarRead:
     settings_map = get_settings_map(db)
     context = _resolve_channel_context(db, channel_id=channel_id, blog_id=blog_id, settings_map=settings_map)
@@ -949,7 +1567,7 @@ def _ensure_sequential_order(db: Session, slot: ContentPlanSlot) -> None:
         .join(ContentPlanDay, ContentPlanSlot.plan_day_id == ContentPlanDay.id)
         .filter(ContentPlanDay.channel_id == slot.plan_day.channel_id)
         .filter(ContentPlanSlot.id != slot.id)
-        .filter(ContentPlanSlot.status.in_(["brief_ready", "queued", "generating"]))
+        .filter(ContentPlanSlot.status.in_(["planned", "brief_ready", "queued", "generating"]))
         .filter(
             (ContentPlanSlot.scheduled_for < slot.scheduled_for)
             | (
@@ -966,7 +1584,12 @@ def _ensure_sequential_order(db: Session, slot: ContentPlanSlot) -> None:
     if prior is not None:
         raise ValueError("earlier planner slots must run first")
 
-def _run_blogger_slot_generation(db: Session, slot: ContentPlanSlot) -> None:
+def _run_blogger_slot_generation(
+    db: Session,
+    slot: ContentPlanSlot,
+    *,
+    publish_mode_override: PublishMode | None = None,
+) -> None:
     if slot.plan_day.blog is None:
         raise ValueError("blog channel context is missing")
 
@@ -1010,12 +1633,13 @@ def _run_blogger_slot_generation(db: Session, slot: ContentPlanSlot) -> None:
         db.add(topic)
         db.flush()
 
+    requested_publish_mode = publish_mode_override or PublishMode.DRAFT
     job = create_job(
         db,
         blog_id=blog.id,
         keyword=title_seed,
         topic_id=topic.id,
-        publish_mode=PublishMode.DRAFT,
+        publish_mode=requested_publish_mode,
         raw_prompts={
             "planner_brief": planner_brief_payload
         },
@@ -1025,6 +1649,7 @@ def _run_blogger_slot_generation(db: Session, slot: ContentPlanSlot) -> None:
         "bundle_key": planner_brief_payload.get("bundle_key"),
         "language": planner_brief_payload.get("language"),
         "recommended_publish_at": planner_brief_payload.get("recommended_publish_at"),
+        "requested_status": requested_publish_mode.value,
     }
     slot.status = "queued"
     slot.last_run_at = datetime.now(UTC).replace(tzinfo=None)
@@ -1033,16 +1658,22 @@ def _run_blogger_slot_generation(db: Session, slot: ContentPlanSlot) -> None:
     run_job.delay(job.id)
 
 
-def _run_cloudflare_slot_generation(db: Session, slot: ContentPlanSlot) -> None:
+def _run_cloudflare_slot_generation(
+    db: Session,
+    slot: ContentPlanSlot,
+    *,
+    publish_mode_override: PublishMode | None = None,
+) -> None:
     category_key = _slot_category_key(slot)
     if not category_key:
         raise ValueError("category_key is required")
+    requested_status = "published" if publish_mode_override == PublishMode.PUBLISH else "draft"
 
     result = generate_cloudflare_posts(
         db,
         per_category=1,
         category_plan={category_key: 1},
-        status="draft",
+        status=requested_status,
         manual_topic_plan=_planner_manual_topic_payload(slot),
     )
     category_result = next(
@@ -1059,7 +1690,7 @@ def _run_cloudflare_slot_generation(db: Session, slot: ContentPlanSlot) -> None:
 
     result_payload = {
         "provider": "cloudflare",
-        "requested_status": "draft",
+        "requested_status": requested_status,
         "status": str((item or {}).get("status") or result.get("status") or "").strip(),
         "title": str((item or {}).get("title") or slot.brief_topic or "").strip(),
         "public_url": str((item or {}).get("public_url") or "").strip(),
@@ -1144,7 +1775,12 @@ def _run_platform_slot_generation(db: Session, slot: ContentPlanSlot, *, provide
     db.commit()
 
 
-def run_slot_generation(db: Session, slot_id: int) -> PlannerSlotRead:
+def run_slot_generation(
+    db: Session,
+    slot_id: int,
+    *,
+    publish_mode_override: PublishMode | None = None,
+) -> PlannerSlotRead:
     slot = (
         db.query(ContentPlanSlot)
         .options(
@@ -1160,9 +1796,9 @@ def run_slot_generation(db: Session, slot_id: int) -> PlannerSlotRead:
 
     provider, _raw_id = _parse_channel_id(slot.plan_day.channel_id)
     if provider == "blogger":
-        _run_blogger_slot_generation(db, slot)
+        _run_blogger_slot_generation(db, slot, publish_mode_override=publish_mode_override)
     elif provider == "cloudflare":
-        _run_cloudflare_slot_generation(db, slot)
+        _run_cloudflare_slot_generation(db, slot, publish_mode_override=publish_mode_override)
     elif provider in {"youtube", "instagram"}:
         _run_platform_slot_generation(db, slot, provider=provider)
     else:

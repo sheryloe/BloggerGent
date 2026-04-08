@@ -73,7 +73,11 @@ from app.services.providers.factory import (
     get_runtime_config,
     get_topic_provider,
 )
-from app.services.publish_trust_gate_service import assess_publish_trust_requirements, enforce_publish_trust_requirements
+from app.services.publish_trust_gate_service import (
+    assess_publish_trust_requirements,
+    enforce_publish_trust_requirements,
+    ensure_trust_gate_appendix,
+)
 from app.services.openai_usage_service import (
     FREE_TIER_DEFAULT_LARGE_TEXT_MODEL,
     route_openai_free_tier_text_model,
@@ -2023,6 +2027,12 @@ def _publish_article(
 ) -> tuple[dict, dict, str]:
     labels = ensure_article_editorial_labels(db, article)
     publish_content = (article.assembled_html or article.html_article or "").strip()
+    publish_content, trust_assessment = ensure_trust_gate_appendix(publish_content)
+    if publish_content != (article.assembled_html or "").strip():
+        article.assembled_html = publish_content
+        db.add(article)
+        db.commit()
+        db.refresh(article)
     enforce_publish_trust_requirements(
         publish_content,
         context=f"blogger_job_{job.id}_article_{article.id}",
@@ -2317,7 +2327,7 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
         file_path, public_url, delivery_meta = save_public_binary(
             db,
             subdir="images",
-            filename=f"{article.slug}.png",
+            filename=f"{article.slug}.webp",
             content=image_bytes,
         )
         image = _upsert_image(
@@ -2397,7 +2407,7 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
                 inline_file_path, inline_public_url, inline_delivery = save_public_binary(
                     db,
                     subdir="images",
-                    filename=f"{article.slug}-inline-3x2.png",
+                    filename=f"{article.slug}-inline-3x2.webp",
                     content=inline_bytes,
                 )
                 article.inline_media = [
@@ -2564,7 +2574,7 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
                     inline_file_path, inline_public_url, inline_delivery = save_public_binary(
                         db,
                         subdir="images",
-                        filename=f"{article.slug}-inline-3x2.png",
+                        filename=f"{article.slug}-inline-3x2.webp",
                         content=inline_bytes,
                     )
                     article.inline_media = [
@@ -2676,6 +2686,7 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
         related_posts,
         language_switch_html=language_switch_html,
     )
+    assembled_html, trust_assessment = ensure_trust_gate_appendix(assembled_html)
     article.assembled_html = assembled_html
     db.add(article)
     db.commit()

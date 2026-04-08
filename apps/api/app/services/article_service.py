@@ -43,7 +43,18 @@ MYSTERY_EDITORIAL_CATEGORY_MAP: dict[str, tuple[str, tuple[str, ...]]] = {
         ("archive", "historical", "record", "document", "expedition", "manuscript", "chronology"),
     ),
 }
-
+TRAVEL_EDITORIAL_LOCALIZED_CATEGORY_LABELS: dict[str, dict[str, str]] = {
+    "es": {
+        "travel": "Viajes",
+        "culture": "Cultura",
+        "food": "Gastronom\u00eda",
+    },
+    "ja": {
+        "travel": "\u65c5\u884c\u30fb\u304a\u796d\u308a",
+        "culture": "\u30e9\u30a4\u30d5\u30b9\u30bf\u30a4\u30eb",
+        "food": "\u30b0\u30eb\u30e1\u30fb\u30ab\u30d5\u30a7",
+    },
+}
 
 def estimate_reading_time(html_fragment: str) -> int:
     text = TAG_RE.sub(" ", html_fragment)
@@ -93,6 +104,38 @@ def _editorial_category_map(profile_key: str) -> dict[str, tuple[str, tuple[str,
     return {}
 
 
+def _travel_localized_category_map(primary_language: str | None) -> dict[str, str]:
+    language = (primary_language or "").strip().lower()
+    return TRAVEL_EDITORIAL_LOCALIZED_CATEGORY_LABELS.get(language, {})
+
+
+def _canonical_editorial_label(*, profile_key: str, category_key: str | None) -> str | None:
+    if not category_key:
+        return None
+    category_map = _editorial_category_map(profile_key)
+    bucket = category_map.get(category_key)
+    if not bucket:
+        return None
+    return bucket[0]
+
+
+def _resolved_editorial_label(
+    *,
+    profile_key: str,
+    primary_language: str | None,
+    category_key: str | None,
+) -> str | None:
+    if not category_key:
+        return None
+    normalized_profile = (profile_key or "").strip().lower()
+    if normalized_profile == "korea_travel":
+        localized_map = _travel_localized_category_map(primary_language)
+        localized = localized_map.get(category_key)
+        if localized:
+            return localized
+    return _canonical_editorial_label(profile_key=profile_key, category_key=category_key)
+
+
 def _normalize_label_key(value: str | None) -> str:
     return " ".join(str(value or "").strip().casefold().split())
 
@@ -115,6 +158,7 @@ def _dedupe_labels(labels: list[str] | None) -> list[str]:
 def infer_editorial_category(
     *,
     profile_key: str,
+    primary_language: str | None = None,
     labels: list[str],
     title: str,
     summary: str,
@@ -124,9 +168,19 @@ def infer_editorial_category(
         return "", ""
 
     normalized_labels = {_normalize_label_key(label) for label in labels if str(label or "").strip()}
+    localized_travel_map = (
+        _travel_localized_category_map(primary_language)
+        if (profile_key or "").strip().lower() == "korea_travel"
+        else {}
+    )
     for key, (label, _keywords) in category_map.items():
         if _normalize_label_key(label) in normalized_labels or _normalize_label_key(key) in normalized_labels:
-            return key, label
+            return key, localized_travel_map.get(key, label)
+
+    for key, localized_label in localized_travel_map.items():
+        if _normalize_label_key(localized_label) in normalized_labels:
+            canonical_label = _canonical_editorial_label(profile_key=profile_key, category_key=key)
+            return key, localized_label or canonical_label or ""
 
     haystack = f"{title} {summary} {' '.join(labels)}".casefold()
     best_key = ""
@@ -140,15 +194,16 @@ def infer_editorial_category(
             best_score = score
 
     if best_key and best_label:
-        return best_key, best_label
+        return best_key, localized_travel_map.get(best_key, best_label)
 
     first_key, (first_label, _keywords) = next(iter(category_map.items()))
-    return first_key, first_label
+    return first_key, localized_travel_map.get(first_key, first_label)
 
 
 def canonicalize_editorial_labels(
     *,
     profile_key: str,
+    primary_language: str | None = None,
     editorial_category_key: str | None,
     editorial_category_label: str | None,
     labels: list[str] | None,
@@ -159,10 +214,13 @@ def canonicalize_editorial_labels(
     cleaned_labels = _dedupe_labels(labels)
     key = (editorial_category_key or "").strip().lower() or None
     label = (editorial_category_label or "").strip() or None
+    if key and category_map and key not in category_map:
+        key = None
 
     if category_map and (not key or not label):
         inferred_key, inferred_label = infer_editorial_category(
             profile_key=profile_key,
+            primary_language=primary_language,
             labels=cleaned_labels,
             title=title,
             summary=summary,
@@ -170,19 +228,44 @@ def canonicalize_editorial_labels(
         key = key or inferred_key or None
         label = label or inferred_label or None
 
-    if label:
-        without_label = [item for item in cleaned_labels if _normalize_label_key(item) != _normalize_label_key(label)]
-        cleaned_labels = [label, *without_label]
+    resolved_label = label
+    canonical_label = None
+    if category_map and key:
+        resolved_label = _resolved_editorial_label(
+            profile_key=profile_key,
+            primary_language=primary_language,
+            category_key=key,
+        ) or resolved_label
+        canonical_label = _canonical_editorial_label(profile_key=profile_key, category_key=key)
 
-    return key, label, cleaned_labels[:8]
+    ordered_labels: list[str] = []
+    seen: set[str] = set()
+    for candidate in (resolved_label, canonical_label):
+        normalized_candidate = _normalize_label_key(candidate)
+        if not normalized_candidate or normalized_candidate in seen:
+            continue
+        seen.add(normalized_candidate)
+        ordered_labels.append(candidate or "")
+
+    for raw in cleaned_labels:
+        normalized_raw = _normalize_label_key(raw)
+        if not normalized_raw or normalized_raw in seen:
+            continue
+        seen.add(normalized_raw)
+        ordered_labels.append(raw)
+
+    return key, resolved_label, ordered_labels[:8]
 
 
 def resolve_article_editorial_labels(article: Article) -> tuple[str | None, str | None, list[str]]:
     profile_key = ""
+    primary_language = ""
     if getattr(article, "blog", None) is not None and getattr(article.blog, "profile_key", None):
         profile_key = str(article.blog.profile_key)
+        primary_language = str(getattr(article.blog, "primary_language", "") or "")
     return canonicalize_editorial_labels(
         profile_key=profile_key,
+        primary_language=primary_language,
         editorial_category_key=article.editorial_category_key,
         editorial_category_label=article.editorial_category_label,
         labels=list(article.labels or []),
@@ -223,12 +306,16 @@ def save_article(db: Session, *, job: Job, topic: Topic | None, output: ArticleG
     )
     sanitized_html = sanitize_blog_html(output.html_article)
     profile_key = ""
+    primary_language = ""
     if getattr(job, "blog", None) is not None and getattr(job.blog, "profile_key", None):
         profile_key = str(job.blog.profile_key)
+        primary_language = str(getattr(job.blog, "primary_language", "") or "")
     elif topic is not None and getattr(topic, "blog", None) is not None and getattr(topic.blog, "profile_key", None):
         profile_key = str(topic.blog.profile_key)
+        primary_language = str(getattr(topic.blog, "primary_language", "") or "")
     resolved_editorial_key, resolved_editorial_label, resolved_labels = canonicalize_editorial_labels(
         profile_key=profile_key,
+        primary_language=primary_language,
         editorial_category_key=(topic.editorial_category_key if topic else None),
         editorial_category_label=(topic.editorial_category_label if topic else None),
         labels=list(output.labels or []),

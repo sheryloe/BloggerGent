@@ -56,7 +56,7 @@ def _seed_completed_post(db, *, blog_slug: str, keyword: str, publish_mode: Publ
     file_path, public_url, delivery_meta = save_public_binary(
         db,
         subdir="images",
-        filename=f"{article.slug}.png",
+        filename=f"{article.slug}.webp",
         content=image_bytes,
     )
     image = Image(

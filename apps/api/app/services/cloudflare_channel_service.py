@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 import hashlib
+import io
 import json
 import math
 from pathlib import Path
@@ -14,6 +15,7 @@ from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 import httpx
+from PIL import Image
 from slugify import slugify
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -2050,6 +2052,8 @@ def _upload_integration_asset(
     filename: str,
     image_bytes: bytes,
 ) -> str:
+    normalized_filename = str(Path(filename).with_suffix(".webp"))
+    normalized_image_bytes = _normalize_integration_asset_image(image_bytes)
     response = _integration_request(
         db,
         method="POST",
@@ -2058,7 +2062,7 @@ def _upload_integration_asset(
             "postSlug": post_slug,
             "altText": alt_text,
         },
-        files={"file": (filename, image_bytes, "image/png")},
+        files={"file": (normalized_filename, normalized_image_bytes, "image/webp")},
         timeout=120.0,
     )
     data = _integration_data_or_raise(response)
@@ -2079,6 +2083,19 @@ def _upload_integration_asset(
     if not public_url:
         raise ValueError("Cloudflare asset upload returned no public URL.")
     return public_url
+
+
+def _normalize_integration_asset_image(image_bytes: bytes) -> bytes:
+    if not image_bytes:
+        raise ValueError("Integration asset image is empty.")
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as loaded:
+            output = io.BytesIO()
+            converted = loaded if loaded.mode in {"RGB", "RGBA"} else loaded.convert("RGB")
+            converted.save(output, format="WEBP", quality=88, optimize=True, method=6)
+            return output.getvalue()
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError("Failed to convert integration asset image to WebP.") from exc
 
 
 def _ensure_unique_title(title: str, existing_titles: list[str]) -> str:
@@ -3318,7 +3335,7 @@ def generate_cloudflare_posts(
                             db,
                             post_slug=slug_candidate,
                             alt_text=cover_alt,
-                            filename=f"{slug_candidate}.png",
+                            filename=f"{slug_candidate}.webp",
                             image_bytes=image_bytes,
                         )
                     except Exception as asset_exc:  # noqa: BLE001
@@ -3379,7 +3396,7 @@ def generate_cloudflare_posts(
                                 db,
                                 post_slug=slug_candidate,
                                 alt_text=f"{title} inline collage",
-                                filename=f"{slug_candidate}-inline-3x2.png",
+                                filename=f"{slug_candidate}-inline-3x2.webp",
                                 image_bytes=inline_bytes,
                             )
                             body_markdown = _insert_markdown_inline_image(

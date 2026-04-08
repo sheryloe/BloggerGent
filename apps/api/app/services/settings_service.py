@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import re
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -74,7 +76,7 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     ),
     "cloudflare_r2_prefix": DefaultSetting(
         settings.cloudflare_r2_prefix,
-        "Object key prefix inside the R2 bucket. Files are stored as <prefix>/<slug>.png",
+        "Object key prefix inside the R2 bucket. Files are stored as <prefix>/<slug>.webp",
     ),
     "cloudflare_cdn_transform_enabled": DefaultSetting(
         str(settings.cloudflare_cdn_transform_enabled).lower(),
@@ -565,6 +567,7 @@ def _extract_google_sheet_id(value: str) -> str:
 def ensure_default_settings(db: Session) -> None:
     existing = {item.key: item for item in db.execute(select(Setting)).scalars().all()}
     changed = False
+    missing_rows: list[dict] = []
     for key, default in DEFAULT_SETTINGS.items():
         item = existing.get(key)
         if item:
@@ -581,13 +584,13 @@ def ensure_default_settings(db: Session) -> None:
                 item.value = default.value
                 changed = True
             continue
-        db.add(
-            Setting(
-                key=key,
-                value=encrypt_secret_value(default.value) if default.is_secret and default.value else default.value,
-                description=default.description,
-                is_secret=default.is_secret,
-            )
+        missing_rows.append(
+            {
+                "key": key,
+                "value": encrypt_secret_value(default.value) if default.is_secret and default.value else default.value,
+                "description": default.description,
+                "is_secret": default.is_secret,
+            }
         )
         changed = True
     for key, description in SETTING_DESCRIPTION_OVERRIDES_KO.items():
@@ -596,6 +599,18 @@ def ensure_default_settings(db: Session) -> None:
             item.description = description
             changed = True
     if changed:
+        if missing_rows:
+            try:
+                if db.bind and db.bind.dialect.name == "postgresql":
+                    stmt = pg_insert(Setting).values(missing_rows)
+                    stmt = stmt.on_conflict_do_nothing(index_elements=[Setting.key])
+                    db.execute(stmt)
+                else:
+                    for row in missing_rows:
+                        db.add(Setting(**row))
+            except IntegrityError:
+                db.rollback()
+                missing_rows = []
         db.commit()
 
 

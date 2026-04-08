@@ -1806,6 +1806,72 @@ class PlannerMonthPlanRequest(BaseModel):
     overwrite: bool = False
 
 
+class PlannerBriefSuggestionRead(BaseModel):
+    slot_id: int
+    slot_order: int | None = None
+    category_key: str | None = None
+    topic: str | None = None
+    audience: str | None = None
+    information_level: str | None = None
+    extra_context: str | None = None
+    expected_ctr_lift: str | None = None
+    confidence: float | None = None
+    signal_source: str | None = None
+    reason: str | None = None
+
+
+class PlannerBriefRunRead(BaseModel):
+    id: int
+    plan_day_id: int
+    channel_id: str
+    blog_id: int | None = None
+    provider: str
+    model: str | None = None
+    prompt: str
+    raw_response: dict
+    slot_suggestions: list[PlannerBriefSuggestionRead] = Field(default_factory=list)
+    status: str
+    error_message: str | None = None
+    applied_slot_ids: list[int] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PlannerDayBriefAnalysisRequest(BaseModel):
+    prompt_override: str | None = None
+
+
+class PlannerDayBriefAnalysisResponse(BaseModel):
+    run: PlannerBriefRunRead
+
+
+class PlannerBriefSuggestionInput(BaseModel):
+    slot_id: int = Field(ge=1)
+    topic: str | None = None
+    audience: str | None = None
+    information_level: str | None = None
+    extra_context: str | None = None
+    expected_ctr_lift: str | None = None
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    signal_source: str | None = None
+    reason: str | None = None
+
+
+class PlannerDayBriefApplyRequest(BaseModel):
+    run_id: int | None = Field(default=None, ge=1)
+    slot_suggestions: list[PlannerBriefSuggestionInput] | None = None
+
+
+class PlannerDayBriefApplyResponse(BaseModel):
+    plan_day_id: int
+    applied_slot_ids: list[int] = Field(default_factory=list)
+    skipped_slot_ids: list[int] = Field(default_factory=list)
+    run_id: int | None = None
+    status: str = "applied"
+
+
 class AnalyticsArticleFactRead(BaseModel):
     id: int
     blog_id: int

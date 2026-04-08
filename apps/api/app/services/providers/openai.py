@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 
 import httpx
 
@@ -62,6 +63,81 @@ class OpenAITopicDiscoveryProvider:
         return payload, data
 
 
+def _fallback_faq_items(keyword: str) -> list[dict[str, str]]:
+    base = (keyword or "").strip() or "this topic"
+    return [
+        {
+            "question": f"What should readers know about {base}?",
+            "answer": (
+                f"This section summarizes the essential context, expectations, and constraints around {base} "
+                "so readers can act with confidence."
+            ),
+        },
+        {
+            "question": f"How can readers apply {base} effectively?",
+            "answer": (
+                f"Use a short checklist and the key steps in this article to plan, evaluate, and execute {base} "
+                "without missing critical details."
+            ),
+        },
+    ]
+
+
+def _normalize_faq_section(value, keyword: str) -> list[dict[str, str]]:
+    if isinstance(value, list):
+        normalized: list[dict[str, str]] = []
+        for item in value:
+            if isinstance(item, dict):
+                question = str(item.get("question") or item.get("q") or item.get("title") or "").strip()
+                answer = str(item.get("answer") or item.get("a") or item.get("text") or "").strip()
+                if not question:
+                    question = f"What should readers know about {(keyword or '').strip() or 'this topic'}?"
+                if not answer:
+                    answer = (
+                        "Use this answer to clarify the core context, the practical steps involved, "
+                        "and what readers should avoid."
+                    )
+                normalized.append({"question": question, "answer": answer})
+            elif isinstance(item, str) and item.strip():
+                normalized.append(
+                    {
+                        "question": item.strip().rstrip("?") + "?",
+                        "answer": (
+                            "This answer highlights the main takeaway, the necessary preparation, "
+                            "and how to use the guidance safely."
+                        ),
+                    }
+                )
+        if len(normalized) >= 2:
+            return normalized
+        return normalized + _fallback_faq_items(keyword)
+
+    if isinstance(value, dict):
+        question = str(value.get("question") or value.get("q") or value.get("title") or "").strip()
+        answer = str(value.get("answer") or value.get("a") or value.get("text") or "").strip()
+        if not question or not answer:
+            return _fallback_faq_items(keyword)
+        return [{"question": question, "answer": answer}] + _fallback_faq_items(keyword)[:1]
+
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            return _fallback_faq_items(keyword)
+        return _normalize_faq_section(parsed, keyword)
+
+    return _fallback_faq_items(keyword)
+
+
+def _coerce_article_payload(content: str, keyword: str) -> ArticleGenerationOutput:
+    try:
+        return ArticleGenerationOutput.model_validate_json(content)
+    except Exception:
+        data = json.loads(content)
+        data["faq_section"] = _normalize_faq_section(data.get("faq_section"), keyword)
+        return ArticleGenerationOutput.model_validate(data)
+
+
 class OpenAIArticleProvider:
     def __init__(self, *, api_key: str, model: str, allow_large: bool = False) -> None:
         self.api_key = api_key
@@ -88,7 +164,15 @@ class OpenAIArticleProvider:
         response.raise_for_status()
         data = response.json()
         content = data["choices"][0]["message"]["content"]
-        payload = ArticleGenerationOutput.model_validate_json(content)
+        try:
+            payload = _coerce_article_payload(content, keyword)
+        except Exception as exc:
+            raise ProviderRuntimeError(
+                provider="openai_text",
+                status_code=502,
+                message="OpenAI returned an unexpected article payload.",
+                detail=str(exc),
+            ) from exc
         return payload, data
 
     def generate_visual_prompt(self, prompt: str) -> tuple[str, dict]:

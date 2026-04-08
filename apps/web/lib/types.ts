@@ -1154,6 +1154,70 @@ export interface PlannerSlotUpdateRequest {
   errorMessage?: string | null;
 }
 
+export interface PlannerBriefSuggestion {
+  slotId: number;
+  slotOrder: number | null;
+  categoryKey: string | null;
+  topic: string | null;
+  audience: string | null;
+  informationLevel: string | null;
+  extraContext: string | null;
+  expectedCtrLift: string | null;
+  confidence: number | null;
+  signalSource: string | null;
+  reason: string | null;
+}
+
+export interface PlannerBriefRun {
+  id: number;
+  planDayId: number;
+  channelId: string;
+  blogId: number | null;
+  provider: string;
+  model: string | null;
+  prompt: string;
+  rawResponse: Record<string, unknown>;
+  slotSuggestions: PlannerBriefSuggestion[];
+  status: string;
+  errorMessage: string | null;
+  appliedSlotIds: number[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PlannerDayBriefAnalysisRequest {
+  promptOverride?: string | null;
+}
+
+export interface PlannerDayBriefAnalysisResponse {
+  run: PlannerBriefRun;
+}
+
+export interface PlannerBriefSuggestionInput {
+  slotId: number;
+  topic?: string | null;
+  audience?: string | null;
+  informationLevel?: string | null;
+  extraContext?: string | null;
+  expectedCtrLift?: string | null;
+  confidence?: number | null;
+  signalSource?: string | null;
+  reason?: string | null;
+}
+
+export interface PlannerDayBriefApplyRequest {
+  runId?: number | null;
+  slotSuggestions?: PlannerBriefSuggestionInput[] | null;
+}
+
+export interface PlannerDayBriefApplyResponse {
+  planDayId: number;
+  appliedSlotIds: number[];
+  skippedSlotIds: number[];
+  runId: number | null;
+  status: string;
+}
+
 export interface ManagedChannelRead {
   provider: string;
   channelId: string;
@@ -1402,10 +1466,10 @@ export interface PromptFlowStepRead {
   promptEnabled: boolean;
   editable: boolean;
   structureEditable: boolean;
-  backupRelativePath: string | null;
-  backupExists: boolean;
   contentEditable: boolean;
   sortOrder: number;
+  backupRelativePath: string | null;
+  backupExists: boolean;
 }
 
 export interface PromptFlowRead {
@@ -1414,9 +1478,9 @@ export interface PromptFlowRead {
   provider: string;
   structureEditable: boolean;
   contentEditable: boolean;
-  backupDirectory: string | null;
   availableStageTypes: string[];
   steps: PromptFlowStepRead[];
+  backupDirectory: string | null;
 }
 
 export interface AnalyticsArticleFactRead {

@@ -99,6 +99,13 @@ PROMPT_DEFINITIONS: list[PromptDefinition] = [
         file_name="mystery_collage_prompt.md",
         placeholders=["{keyword}", "{blog_name}", "{article_title}", "{article_excerpt}", "{article_context}"],
     ),
+    PromptDefinition(
+        key="planner_daily_brief_analysis",
+        title="Planner Daily CTR Brief Analysis",
+        description="Generate slot-level planner brief suggestions from CTR-first monthly signals.",
+        file_name="planner_daily_brief_analysis.md",
+        placeholders=["{analysis_context_json}", "{user_prompt_override}"],
+    ),
 ]
 
 

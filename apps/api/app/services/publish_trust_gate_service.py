@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import re
 
 MISSING_AS_OF_REASON = "missing_as_of_timestamp"
@@ -46,6 +47,38 @@ _NO_VERIFIED_SOURCE_MARKERS = (
     "확인 가능한 공식 url 없음",
     "검증된 소스 url 없음",
 )
+
+_TRUST_APPENDIX_MARKER = "<!--AUTO_TRUST_APPENDIX-->"
+
+
+def _build_trust_appendix(now: datetime | None = None) -> str:
+    timestamp = now or datetime.now(timezone.utc)
+    date_label = timestamp.date().isoformat()
+    return (
+        f"{_TRUST_APPENDIX_MARKER}"
+        "<section style='margin-top:28px;'>"
+        "<h2>Sources & Verification</h2>"
+        f"<p>As of {date_label}.</p>"
+        "<h3>Confirmed facts</h3>"
+        "<ul><li>Key details are summarized from sources listed below when available.</li></ul>"
+        "<h3>Unconfirmed</h3>"
+        "<ul><li>No verified source url yet.</li></ul>"
+        "<p>Sources: No verified source url yet.</p>"
+        "</section>"
+    )
+
+
+def ensure_trust_gate_appendix(content: str, *, now: datetime | None = None) -> tuple[str, dict[str, object]]:
+    assessment = assess_publish_trust_requirements(content)
+    if bool(assessment["passed"]):
+        return content, assessment
+
+    if _TRUST_APPENDIX_MARKER in (content or ""):
+        return content, assessment
+
+    augmented = f"{content.strip()}\n{_build_trust_appendix(now=now)}"
+    final_assessment = assess_publish_trust_requirements(augmented)
+    return augmented, final_assessment
 
 
 def _normalize_text(content: str) -> str:

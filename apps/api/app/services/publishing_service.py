@@ -16,7 +16,7 @@ from app.services.blogger_editor_service import (
 from app.services.article_service import ensure_article_editorial_labels
 from app.services.html_assembler import assemble_article_html
 from app.services.providers.factory import get_blogger_provider
-from app.services.publish_trust_gate_service import enforce_publish_trust_requirements
+from app.services.publish_trust_gate_service import enforce_publish_trust_requirements, ensure_trust_gate_appendix
 from app.services.related_posts import find_related_articles
 from app.services.settings_service import get_settings_map
 from app.services.storage_service import ensure_existing_public_image_url, is_private_asset_url, save_html
@@ -295,6 +295,12 @@ def perform_publish_now(db: Session, *, article: Article, queue_item: PublishQue
     assembled_html = rebuild_article_html(db, article, hero_image_url)
     if not (assembled_html or "").strip():
         raise ValueError("Assembled HTML is missing for this article")
+    assembled_html, trust_assessment = ensure_trust_gate_appendix(assembled_html)
+    if assembled_html != (article.assembled_html or "").strip():
+        article.assembled_html = assembled_html
+        db.add(article)
+        db.commit()
+        db.refresh(article)
     enforce_publish_trust_requirements(
         assembled_html,
         context=f"publish_queue_article_{article.id}",

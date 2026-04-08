@@ -7,16 +7,24 @@ from app.db.session import get_db
 from app.schemas.api import (
     PlannerCalendarRead,
     PlannerCategoryRead,
+    PlannerDayBriefAnalysisRequest,
+    PlannerDayBriefAnalysisResponse,
+    PlannerDayBriefApplyRequest,
+    PlannerDayBriefApplyResponse,
+    PlannerBriefRunRead,
     PlannerMonthPlanRequest,
     PlannerSlotCreate,
     PlannerSlotRead,
     PlannerSlotUpdate,
 )
 from app.services.planner_service import (
+    analyze_day_briefs,
+    apply_day_briefs,
     cancel_slot,
     create_month_plan,
     create_slot,
     get_calendar,
+    list_day_brief_runs,
     list_categories,
     run_slot_generation,
     update_slot,
@@ -92,3 +100,44 @@ def generate_slot(slot_id: int, db: Session = Depends(get_db)) -> PlannerSlotRea
 @router.post("/slots/{slot_id}/cancel", response_model=PlannerSlotRead)
 def cancel_planner_slot(slot_id: int, db: Session = Depends(get_db)) -> PlannerSlotRead:
     return cancel_slot(db, slot_id=slot_id)
+
+
+@router.post("/days/{plan_day_id}/brief-analysis", response_model=PlannerDayBriefAnalysisResponse)
+def analyze_planner_day_brief(
+    plan_day_id: int,
+    payload: PlannerDayBriefAnalysisRequest,
+    db: Session = Depends(get_db),
+) -> PlannerDayBriefAnalysisResponse:
+    try:
+        return analyze_day_briefs(db, plan_day_id=plan_day_id, prompt_override=payload.prompt_override)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/days/{plan_day_id}/brief-apply", response_model=PlannerDayBriefApplyResponse)
+def apply_planner_day_brief(
+    plan_day_id: int,
+    payload: PlannerDayBriefApplyRequest,
+    db: Session = Depends(get_db),
+) -> PlannerDayBriefApplyResponse:
+    try:
+        return apply_day_briefs(
+            db,
+            plan_day_id=plan_day_id,
+            run_id=payload.run_id,
+            slot_suggestions=payload.slot_suggestions,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/days/{plan_day_id}/brief-runs", response_model=list[PlannerBriefRunRead])
+def read_planner_day_brief_runs(
+    plan_day_id: int,
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> list[PlannerBriefRunRead]:
+    try:
+        return list_day_brief_runs(db, plan_day_id=plan_day_id, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

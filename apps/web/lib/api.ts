@@ -47,6 +47,13 @@ import {
   PlatformIntegrationRead,
   PlannerCalendarRead,
   PlannerCategoryRead,
+  PlannerDayBriefApplyRequest,
+  PlannerDayBriefApplyResponse,
+  PlannerDayBriefAnalysisRequest,
+  PlannerDayBriefAnalysisResponse,
+  PlannerBriefRun,
+  PlannerBriefSuggestion,
+  PlannerBriefSuggestionInput,
   PlatformCredentialRead,
   PlannerMonthPlanRequest,
   PromptFlowRead,
@@ -507,6 +514,41 @@ function mapPlannerSlot(item: any): PlannerSlotRead {
     resultUrl: item.result_url ?? null,
     resultStatus: item.result_status ?? null,
     qualityGateStatus: item.quality_gate_status ?? null,
+  };
+}
+
+function mapPlannerBriefSuggestion(item: any): PlannerBriefSuggestion {
+  return {
+    slotId: item.slot_id,
+    slotOrder: item.slot_order ?? null,
+    categoryKey: item.category_key ?? null,
+    topic: item.topic ?? null,
+    audience: item.audience ?? null,
+    informationLevel: item.information_level ?? null,
+    extraContext: item.extra_context ?? null,
+    expectedCtrLift: item.expected_ctr_lift ?? null,
+    confidence: item.confidence ?? null,
+    signalSource: item.signal_source ?? null,
+    reason: item.reason ?? null,
+  };
+}
+
+function mapPlannerBriefRun(item: any): PlannerBriefRun {
+  return {
+    id: item.id,
+    planDayId: item.plan_day_id,
+    channelId: item.channel_id,
+    blogId: item.blog_id ?? null,
+    provider: item.provider,
+    model: item.model ?? null,
+    prompt: item.prompt ?? "",
+    rawResponse: item.raw_response ?? {},
+    slotSuggestions: (item.slot_suggestions ?? []).map(mapPlannerBriefSuggestion),
+    status: item.status ?? "unknown",
+    errorMessage: item.error_message ?? null,
+    appliedSlotIds: (item.applied_slot_ids ?? []).map((entry: any) => Number(entry)).filter((entry: number) => Number.isFinite(entry)),
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
   };
 }
 
@@ -1136,6 +1178,50 @@ export async function cancelPlannerSlot(slotId: number) {
     body: JSON.stringify({}),
   });
   return mapPlannerSlot(response);
+}
+
+export async function runPlannerDayBriefAnalysis(planDayId: number, payload: PlannerDayBriefAnalysisRequest = {}) {
+  const response = await apiFetch<any>(`/planner/days/${planDayId}/brief-analysis`, {
+    method: "POST",
+    body: JSON.stringify({
+      prompt_override: payload.promptOverride ?? null,
+    }),
+  });
+  return {
+    run: mapPlannerBriefRun(response.run ?? {}),
+  } satisfies PlannerDayBriefAnalysisResponse;
+}
+
+export async function applyPlannerDayBrief(planDayId: number, payload: PlannerDayBriefApplyRequest) {
+  const response = await apiFetch<any>(`/planner/days/${planDayId}/brief-apply`, {
+    method: "POST",
+    body: JSON.stringify({
+      run_id: payload.runId ?? null,
+      slot_suggestions: (payload.slotSuggestions ?? null)?.map((item: PlannerBriefSuggestionInput) => ({
+        slot_id: item.slotId,
+        topic: item.topic ?? null,
+        audience: item.audience ?? null,
+        information_level: item.informationLevel ?? null,
+        extra_context: item.extraContext ?? null,
+        expected_ctr_lift: item.expectedCtrLift ?? null,
+        confidence: item.confidence ?? null,
+        signal_source: item.signalSource ?? null,
+        reason: item.reason ?? null,
+      })),
+    }),
+  });
+  return {
+    planDayId: response.plan_day_id,
+    appliedSlotIds: (response.applied_slot_ids ?? []).map((item: any) => Number(item)).filter((item: number) => Number.isFinite(item)),
+    skippedSlotIds: (response.skipped_slot_ids ?? []).map((item: any) => Number(item)).filter((item: number) => Number.isFinite(item)),
+    runId: response.run_id ?? null,
+    status: response.status ?? "applied",
+  } satisfies PlannerDayBriefApplyResponse;
+}
+
+export async function getPlannerDayBriefRuns(planDayId: number, limit = 20) {
+  const response = await apiFetch<any[]>(`/planner/days/${planDayId}/brief-runs?limit=${limit}`, { revalidate: false });
+  return response.map(mapPlannerBriefRun);
 }
 
 export async function getAnalyticsMonthly(month: string) {

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import hashlib
 import json
+from urllib.parse import urlparse
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, load_only, selectinload
@@ -189,6 +190,38 @@ def _safe_display_name(value: str | None, *, fallback: str) -> str:
     return raw
 
 
+def _humanize_channel_label(value: str | None) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    parts = [part for part in raw.replace("_", "-").split("-") if part]
+    if not parts:
+        return ""
+    return " ".join(part[:1].upper() + part[1:] for part in parts)
+
+
+def _blogger_fallback_display_name(blog: Blog) -> str:
+    slug_label = _humanize_channel_label(blog.slug)
+    host_label = ""
+    parsed = urlparse(str(blog.blogger_url or "").strip())
+    if parsed.netloc:
+        host_label = parsed.netloc.strip().lower()
+        if host_label.startswith("www."):
+            host_label = host_label[4:]
+
+    if slug_label and host_label:
+        return f"{slug_label} ({host_label})"
+    if slug_label:
+        return slug_label
+    if host_label:
+        return host_label
+    return f"Blogger Channel {blog.id}"
+
+
+def resolve_blogger_channel_display_name(blog: Blog) -> str:
+    return _safe_display_name(blog.name, fallback=_blogger_fallback_display_name(blog))
+
+
 def _channel_query():
     return (
         select(ManagedChannel)
@@ -276,7 +309,7 @@ def ensure_managed_channels(db: Session) -> list[ManagedChannel]:
         payload = {
             "provider": "blogger",
             "channel_id": channel_id,
-            "display_name": _safe_display_name(blog.name, fallback=f"Blogger Blog {blog.id}"),
+            "display_name": resolve_blogger_channel_display_name(blog),
             "remote_resource_id": blog.blogger_blog_id or None,
             "linked_blog_id": blog.id,
             "status": status,
