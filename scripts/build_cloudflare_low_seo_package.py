@@ -39,6 +39,7 @@ def build_row(detail: dict[str, Any], markdown_path: Path, snapshot_path: Path) 
     tags = extract_tag_names(detail)
     content = str(detail.get("content") or "")
     return {
+        "review_status": "draft",
         "source_slug": normalize_space(str(detail.get("slug") or "")),
         "source_url": normalize_space(str(detail.get("publicUrl") or "")),
         "post_id": normalize_space(str(detail.get("id") or "")),
@@ -144,6 +145,7 @@ def run() -> int:
         output_root / "dongri-archive" / "manifest.csv",
         manifest_rows,
         [
+            "review_status",
             "source_slug",
             "source_url",
             "post_id",

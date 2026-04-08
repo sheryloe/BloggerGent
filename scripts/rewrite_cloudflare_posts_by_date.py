@@ -87,11 +87,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--backup-dir", default=str(BACKUP_ROOT), help="Backup/report root directory.")
     parser.add_argument("--report-prefix", default="cloudflare-range-rewrite", help="Report filename prefix.")
     parser.add_argument("--apply", action="store_true", help="Apply live updates.")
-    parser.add_argument("--dry-run", action="store_true", help="Plan only. Default when --apply is absent.")
+    parser.add_argument(
+        "--preview",
+        action="store_true",
+        help="Generate rewrite payloads but do not update remote posts (still uses the article provider).",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Plan only: fetch and backup the target scope without generating rewrites (default).",
+    )
     args = parser.parse_args()
 
-    if args.apply and args.dry_run:
-        parser.error("--apply and --dry-run cannot be used together.")
+    if args.apply and args.preview:
+        parser.error("--apply and --preview cannot be used together.")
+    if args.dry_run and (args.apply or args.preview):
+        parser.error("--dry-run cannot be used with --apply/--preview.")
     return args
 
 
@@ -470,7 +481,8 @@ def _in_range(local_date: str, start_date: date, end_date: date) -> bool:
 
 def main() -> int:
     args = parse_args()
-    mode = "apply" if args.apply else "dry-run"
+    generation_enabled = bool(args.apply or args.preview)
+    mode = "apply" if args.apply else ("preview" if args.preview else "dry-run")
     min_body_chars = max(int(args.min_body_chars), 1600)
     max_body_chars = max(int(args.max_body_chars), min_body_chars + 200)
     backup_dir = Path(args.backup_dir).resolve()
@@ -497,27 +509,34 @@ def main() -> int:
         "updated": 0,
         "skipped": 0,
         "failed": 0,
-        "free_tier_usage": "used/unknown",
+        "cloudflare_api_rate_limit": "used/unknown",
     }
     report_rows: list[dict[str, Any]] = []
 
     with SessionLocal() as db:
         runtime = get_runtime_config(db)
-        if runtime.provider_mode != "live":
-            raise RuntimeError("provider_mode must be 'live' to rewrite published Cloudflare posts.")
+        if generation_enabled and runtime.provider_mode != "live":
+            raise RuntimeError(
+                "provider_mode must be 'live' to generate rewrite candidates. "
+                "Use --dry-run for backup/scope planning without content generation."
+            )
 
-        settings_map = get_settings_map(db)
-        model = (
-            normalize_space(args.model)
-            or normalize_space(str(settings_map.get("article_generation_model") or ""))
-            or normalize_space(str(settings_map.get("openai_large_text_model") or ""))
-            or normalize_space(str(settings_map.get("openai_text_model") or ""))
-            or "gpt-5.4"
-        )
-        prompt_template = _read_prompt_template()
-        article_provider = get_article_provider(db, model_override=model, allow_large=True)
         client = CloudflareIntegrationClient.from_db(db)
         summaries = client.list_posts()
+        article_provider = None
+        prompt_template = ""
+        model = ""
+        if generation_enabled:
+            settings_map = get_settings_map(db)
+            model = (
+                normalize_space(args.model)
+                or normalize_space(str(settings_map.get("article_generation_model") or ""))
+                or normalize_space(str(settings_map.get("openai_large_text_model") or ""))
+                or normalize_space(str(settings_map.get("openai_text_model") or ""))
+                or "gpt-5.4"
+            )
+            prompt_template = _read_prompt_template()
+            article_provider = get_article_provider(db, model_override=model, allow_large=True)
 
         target_summaries: list[dict[str, Any]] = []
         for item in summaries:
@@ -573,7 +592,7 @@ def main() -> int:
                         "title_before": normalize_space(str(summary_row.get("title") or "")),
                         "title_after": "",
                         "url": summary_row.get("publicUrl") or summary_row.get("url") or "",
-                        "usage": client.get_last_usage_ratio(),
+                        "rate_limit": client.get_last_usage_ratio(),
                     }
                 )
                 continue
@@ -602,6 +621,32 @@ def main() -> int:
                 ),
                 target_tz,
             )
+
+            if not generation_enabled:
+                print(f"[{index}/{len(detailed_rows)}] plan {slug}", flush=True)
+                usage_ratio = client.get_last_usage_ratio()
+                if usage_ratio != "used/unknown":
+                    summary["cloudflare_api_rate_limit"] = usage_ratio
+                summary["processed"] += 1
+                summary["planned"] += 1
+                report_rows.append(
+                    {
+                        "status": "planned",
+                        "reason": "dry_run_no_generation",
+                        "slug": slug,
+                        "post_id": post_id,
+                        "publish_local_date": publish_local_date,
+                        "title_before": title_before,
+                        "title_after": "",
+                        "url": detail.get("publicUrl") or detail.get("url") or "",
+                        "rate_limit": usage_ratio,
+                    }
+                )
+                print(f"[rate-limit] cloudflare-api {usage_ratio}", flush=True)
+                continue
+
+            if article_provider is None:
+                raise RuntimeError("Internal error: article provider is missing in generation mode.")
 
             print(f"[{index}/{len(detailed_rows)}] rewrite {slug}", flush=True)
             best_payload: dict[str, Any] | None = None
@@ -676,13 +721,13 @@ def main() -> int:
                         "title_before": title_before,
                         "title_after": "",
                         "url": detail.get("publicUrl") or detail.get("url") or "",
-                        "usage": client.get_last_usage_ratio(),
+                        "rate_limit": client.get_last_usage_ratio(),
                     }
                 )
                 continue
 
             row_status = "planned"
-            row_reason = "dry_run"
+            row_reason = "preview" if args.preview else "dry_run"
             if args.apply:
                 try:
                     client.update_post(post_id, best_payload)
@@ -701,14 +746,14 @@ def main() -> int:
                             "title_before": title_before,
                             "title_after": best_payload["title"],
                             "url": detail.get("publicUrl") or detail.get("url") or "",
-                            "usage": client.get_last_usage_ratio(),
+                            "rate_limit": client.get_last_usage_ratio(),
                         }
                     )
                     continue
 
             usage_ratio = client.get_last_usage_ratio()
             if usage_ratio != "used/unknown":
-                summary["free_tier_usage"] = usage_ratio
+                summary["cloudflare_api_rate_limit"] = usage_ratio
 
             write_json(
                 backup_dir / f"{safe_filename(slug, 'post')}-after.json",
@@ -726,7 +771,7 @@ def main() -> int:
                         "tagNames": existing_tags,
                     },
                     "after": best_payload,
-                    "usage": usage_ratio,
+                    "rate_limit": usage_ratio,
                 },
             )
 
@@ -746,10 +791,10 @@ def main() -> int:
                     "title_after": best_payload["title"],
                     "url": detail.get("publicUrl") or detail.get("url") or "",
                     "tags": best_payload["tagNames"],
-                    "usage": usage_ratio,
+                    "rate_limit": usage_ratio,
                 }
             )
-            print(f"[usage] free-tier {usage_ratio}", flush=True)
+            print(f"[rate-limit] cloudflare-api {usage_ratio}", flush=True)
 
     report_path = _write_report(
         backup_dir=backup_dir,
@@ -770,7 +815,7 @@ def main() -> int:
                 "planned": summary["planned"],
                 "skipped": summary["skipped"],
                 "failed": summary["failed"],
-                "free_tier_usage": summary["free_tier_usage"],
+                "cloudflare_api_rate_limit": summary["cloudflare_api_rate_limit"],
                 "report": str(report_path),
             },
             ensure_ascii=False,
