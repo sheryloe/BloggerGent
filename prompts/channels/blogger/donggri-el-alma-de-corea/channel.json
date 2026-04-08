@@ -3,7 +3,13 @@
   "channel_name": "Donggri: El Alma de Corea",
   "provider": "blogger",
   "backup_directory": "channels/blogger/donggri-el-alma-de-corea",
-  "synced_at": "2026-04-08T07:31:09.252071+00:00",
+  "synced_at": "2026-04-08T07:53:39.072151+00:00",
+  "backup_files": [
+    "channels/blogger/donggri-el-alma-de-corea/travel_article_generation.md",
+    "channels/blogger/donggri-el-alma-de-corea/travel_collage_prompt.md",
+    "channels/blogger/donggri-el-alma-de-corea/travel_inline_collage_prompt.md",
+    "channels/blogger/donggri-el-alma-de-corea/travel_topic_discovery.md"
+  ],
   "steps": [
     {
       "id": "48",
@@ -18,7 +24,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 10,
-      "backup_relative_path": "channels/blogger/donggri-el-alma-de-corea/steps/01-topic-discovery.md"
+      "backup_relative_path": "channels/blogger/donggri-el-alma-de-corea/travel_topic_discovery.md"
     },
     {
       "id": "49",
@@ -33,7 +39,7 @@
       "is_required": true,
       "prompt_enabled": true,
       "sort_order": 20,
-      "backup_relative_path": "channels/blogger/donggri-el-alma-de-corea/steps/02-article-generation.md"
+      "backup_relative_path": "channels/blogger/donggri-el-alma-de-corea/travel_article_generation.md"
     },
     {
       "id": "50",
@@ -48,7 +54,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 30,
-      "backup_relative_path": "channels/blogger/donggri-el-alma-de-corea/steps/03-image-prompt-generation.md"
+      "backup_relative_path": "channels/blogger/donggri-el-alma-de-corea/travel_collage_prompt.md"
     },
     {
       "id": "51",

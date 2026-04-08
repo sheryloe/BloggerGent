@@ -3,7 +3,13 @@
   "channel_name": "YouTube Studio",
   "provider": "youtube",
   "backup_directory": "channels/youtube/youtube-studio",
-  "synced_at": "2026-04-08T07:31:04.497546+00:00",
+  "synced_at": "2026-04-08T07:53:32.055014+00:00",
+  "backup_files": [
+    "channels/youtube/youtube-studio/performance_review.md",
+    "channels/youtube/youtube-studio/platform_publish.md",
+    "channels/youtube/youtube-studio/thumbnail_generation.md",
+    "channels/youtube/youtube-studio/video_metadata_generation.md"
+  ],
   "steps": [
     {
       "id": "youtube:1",
@@ -18,7 +24,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 10,
-      "backup_relative_path": "channels/youtube/youtube-studio/steps/01-video-metadata-generation.md"
+      "backup_relative_path": "channels/youtube/youtube-studio/video_metadata_generation.md"
     },
     {
       "id": "youtube:2",
@@ -33,7 +39,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 20,
-      "backup_relative_path": "channels/youtube/youtube-studio/steps/02-thumbnail-generation.md"
+      "backup_relative_path": "channels/youtube/youtube-studio/thumbnail_generation.md"
     },
     {
       "id": "youtube:3",
@@ -48,7 +54,7 @@
       "is_required": true,
       "prompt_enabled": true,
       "sort_order": 30,
-      "backup_relative_path": "channels/youtube/youtube-studio/steps/03-platform-publish.md"
+      "backup_relative_path": "channels/youtube/youtube-studio/platform_publish.md"
     },
     {
       "id": "youtube:4",
@@ -63,7 +69,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 40,
-      "backup_relative_path": "channels/youtube/youtube-studio/steps/04-performance-review.md"
+      "backup_relative_path": "channels/youtube/youtube-studio/performance_review.md"
     }
   ]
 }

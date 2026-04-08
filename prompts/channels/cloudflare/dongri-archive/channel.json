@@ -3,7 +3,57 @@
   "channel_name": "Dongri Archive",
   "provider": "cloudflare",
   "backup_directory": "channels/cloudflare/dongri-archive",
-  "synced_at": "2026-04-08T07:31:09.188070+00:00",
+  "synced_at": "2026-04-08T07:53:38.820997+00:00",
+  "backup_files": [
+    "channels/cloudflare/dongri-archive/cugjewa-hyeonjang/article_generation.md",
+    "channels/cloudflare/dongri-archive/cugjewa-hyeonjang/image_prompt_generation.md",
+    "channels/cloudflare/dongri-archive/cugjewa-hyeonjang/topic_discovery.md",
+    "channels/cloudflare/dongri-archive/donggeuriyi-girog/article_generation.md",
+    "channels/cloudflare/dongri-archive/donggeuriyi-girog/image_prompt_generation.md",
+    "channels/cloudflare/dongri-archive/donggeuriyi-girog/topic_discovery.md",
+    "channels/cloudflare/dongri-archive/donggeuriyi-saenggag/article_generation.md",
+    "channels/cloudflare/dongri-archive/donggeuriyi-saenggag/image_prompt_generation.md",
+    "channels/cloudflare/dongri-archive/donggeuriyi-saenggag/topic_discovery.md",
+    "channels/cloudflare/dongri-archive/gaebalgwa-peurogeuraeming/article_generation.md",
+    "channels/cloudflare/dongri-archive/gaebalgwa-peurogeuraeming/image_prompt_generation.md",
+    "channels/cloudflare/dongri-archive/gaebalgwa-peurogeuraeming/topic_discovery.md",
+    "channels/cloudflare/dongri-archive/gisulyi-girog/article_generation.md",
+    "channels/cloudflare/dongri-archive/gisulyi-girog/image_prompt_generation.md",
+    "channels/cloudflare/dongri-archive/gisulyi-girog/topic_discovery.md",
+    "channels/cloudflare/dongri-archive/ilsanggwa-memo/article_generation.md",
+    "channels/cloudflare/dongri-archive/ilsanggwa-memo/image_prompt_generation.md",
+    "channels/cloudflare/dongri-archive/ilsanggwa-memo/topic_discovery.md",
+    "channels/cloudflare/dongri-archive/jeongboyi-girog/article_generation.md",
+    "channels/cloudflare/dongri-archive/jeongboyi-girog/image_prompt_generation.md",
+    "channels/cloudflare/dongri-archive/jeongboyi-girog/topic_discovery.md",
+    "channels/cloudflare/dongri-archive/jusigyi-heureum/article_generation.md",
+    "channels/cloudflare/dongri-archive/jusigyi-heureum/image_prompt_generation.md",
+    "channels/cloudflare/dongri-archive/jusigyi-heureum/topic_discovery.md",
+    "channels/cloudflare/dongri-archive/keuribtoyi-heureum/article_generation.md",
+    "channels/cloudflare/dongri-archive/keuribtoyi-heureum/image_prompt_generation.md",
+    "channels/cloudflare/dongri-archive/keuribtoyi-heureum/topic_discovery.md",
+    "channels/cloudflare/dongri-archive/miseuteria-seutori/article_generation.md",
+    "channels/cloudflare/dongri-archive/miseuteria-seutori/image_prompt_generation.md",
+    "channels/cloudflare/dongri-archive/miseuteria-seutori/topic_discovery.md",
+    "channels/cloudflare/dongri-archive/munhwawa-gonggan/article_generation.md",
+    "channels/cloudflare/dongri-archive/munhwawa-gonggan/image_prompt_generation.md",
+    "channels/cloudflare/dongri-archive/munhwawa-gonggan/topic_discovery.md",
+    "channels/cloudflare/dongri-archive/salmeul-yuyonghage/article_generation.md",
+    "channels/cloudflare/dongri-archive/salmeul-yuyonghage/image_prompt_generation.md",
+    "channels/cloudflare/dongri-archive/salmeul-yuyonghage/topic_discovery.md",
+    "channels/cloudflare/dongri-archive/salmyi-gireumcil/article_generation.md",
+    "channels/cloudflare/dongri-archive/salmyi-gireumcil/image_prompt_generation.md",
+    "channels/cloudflare/dongri-archive/salmyi-gireumcil/topic_discovery.md",
+    "channels/cloudflare/dongri-archive/sesangyi-girog/article_generation.md",
+    "channels/cloudflare/dongri-archive/sesangyi-girog/image_prompt_generation.md",
+    "channels/cloudflare/dongri-archive/sesangyi-girog/topic_discovery.md",
+    "channels/cloudflare/dongri-archive/sijangyi-girog/article_generation.md",
+    "channels/cloudflare/dongri-archive/sijangyi-girog/image_prompt_generation.md",
+    "channels/cloudflare/dongri-archive/sijangyi-girog/topic_discovery.md",
+    "channels/cloudflare/dongri-archive/yeohaenggwa-girog/article_generation.md",
+    "channels/cloudflare/dongri-archive/yeohaenggwa-girog/image_prompt_generation.md",
+    "channels/cloudflare/dongri-archive/yeohaenggwa-girog/topic_discovery.md"
+  ],
   "steps": [
     {
       "id": "개발과-프로그래밍::topic_discovery",
@@ -18,7 +68,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 101,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/gaebalgwa-peurogeuraeming/01-topic-discovery.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/gaebalgwa-peurogeuraeming/topic_discovery.md"
     },
     {
       "id": "개발과-프로그래밍::article_generation",
@@ -33,7 +83,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 102,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/gaebalgwa-peurogeuraeming/02-article-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/gaebalgwa-peurogeuraeming/article_generation.md"
     },
     {
       "id": "개발과-프로그래밍::image_prompt_generation",
@@ -48,7 +98,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 103,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/gaebalgwa-peurogeuraeming/03-image-prompt-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/gaebalgwa-peurogeuraeming/image_prompt_generation.md"
     },
     {
       "id": "기술의-기록::topic_discovery",
@@ -63,7 +113,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 201,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/gisulyi-girog/01-topic-discovery.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/gisulyi-girog/topic_discovery.md"
     },
     {
       "id": "기술의-기록::article_generation",
@@ -78,7 +128,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 202,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/gisulyi-girog/02-article-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/gisulyi-girog/article_generation.md"
     },
     {
       "id": "기술의-기록::image_prompt_generation",
@@ -93,7 +143,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 203,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/gisulyi-girog/03-image-prompt-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/gisulyi-girog/image_prompt_generation.md"
     },
     {
       "id": "동그리의-기록::topic_discovery",
@@ -108,7 +158,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 301,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/donggeuriyi-girog/01-topic-discovery.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/donggeuriyi-girog/topic_discovery.md"
     },
     {
       "id": "동그리의-기록::article_generation",
@@ -123,7 +173,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 302,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/donggeuriyi-girog/02-article-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/donggeuriyi-girog/article_generation.md"
     },
     {
       "id": "동그리의-기록::image_prompt_generation",
@@ -138,7 +188,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 303,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/donggeuriyi-girog/03-image-prompt-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/donggeuriyi-girog/image_prompt_generation.md"
     },
     {
       "id": "동그리의-생각::topic_discovery",
@@ -153,7 +203,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 401,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/donggeuriyi-saenggag/01-topic-discovery.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/donggeuriyi-saenggag/topic_discovery.md"
     },
     {
       "id": "동그리의-생각::article_generation",
@@ -168,7 +218,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 402,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/donggeuriyi-saenggag/02-article-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/donggeuriyi-saenggag/article_generation.md"
     },
     {
       "id": "동그리의-생각::image_prompt_generation",
@@ -183,7 +233,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 403,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/donggeuriyi-saenggag/03-image-prompt-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/donggeuriyi-saenggag/image_prompt_generation.md"
     },
     {
       "id": "문화와-공간::topic_discovery",
@@ -198,7 +248,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 501,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/munhwawa-gonggan/01-topic-discovery.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/munhwawa-gonggan/topic_discovery.md"
     },
     {
       "id": "문화와-공간::article_generation",
@@ -213,7 +263,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 502,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/munhwawa-gonggan/02-article-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/munhwawa-gonggan/article_generation.md"
     },
     {
       "id": "문화와-공간::image_prompt_generation",
@@ -228,7 +278,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 503,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/munhwawa-gonggan/03-image-prompt-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/munhwawa-gonggan/image_prompt_generation.md"
     },
     {
       "id": "미스테리아-스토리::topic_discovery",
@@ -243,7 +293,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 601,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/miseuteria-seutori/01-topic-discovery.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/miseuteria-seutori/topic_discovery.md"
     },
     {
       "id": "미스테리아-스토리::article_generation",
@@ -258,7 +308,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 602,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/miseuteria-seutori/02-article-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/miseuteria-seutori/article_generation.md"
     },
     {
       "id": "미스테리아-스토리::image_prompt_generation",
@@ -273,7 +323,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 603,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/miseuteria-seutori/03-image-prompt-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/miseuteria-seutori/image_prompt_generation.md"
     },
     {
       "id": "삶을-유용하게::topic_discovery",
@@ -288,7 +338,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 701,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/salmeul-yuyonghage/01-topic-discovery.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/salmeul-yuyonghage/topic_discovery.md"
     },
     {
       "id": "삶을-유용하게::article_generation",
@@ -303,7 +353,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 702,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/salmeul-yuyonghage/02-article-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/salmeul-yuyonghage/article_generation.md"
     },
     {
       "id": "삶을-유용하게::image_prompt_generation",
@@ -318,7 +368,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 703,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/salmeul-yuyonghage/03-image-prompt-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/salmeul-yuyonghage/image_prompt_generation.md"
     },
     {
       "id": "삶의-기름칠::topic_discovery",
@@ -333,7 +383,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 801,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/salmyi-gireumcil/01-topic-discovery.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/salmyi-gireumcil/topic_discovery.md"
     },
     {
       "id": "삶의-기름칠::article_generation",
@@ -348,7 +398,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 802,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/salmyi-gireumcil/02-article-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/salmyi-gireumcil/article_generation.md"
     },
     {
       "id": "삶의-기름칠::image_prompt_generation",
@@ -363,7 +413,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 803,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/salmyi-gireumcil/03-image-prompt-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/salmyi-gireumcil/image_prompt_generation.md"
     },
     {
       "id": "세상의-기록::topic_discovery",
@@ -378,7 +428,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 901,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/sesangyi-girog/01-topic-discovery.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/sesangyi-girog/topic_discovery.md"
     },
     {
       "id": "세상의-기록::article_generation",
@@ -393,7 +443,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 902,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/sesangyi-girog/02-article-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/sesangyi-girog/article_generation.md"
     },
     {
       "id": "세상의-기록::image_prompt_generation",
@@ -408,7 +458,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 903,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/sesangyi-girog/03-image-prompt-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/sesangyi-girog/image_prompt_generation.md"
     },
     {
       "id": "시장의-기록::topic_discovery",
@@ -423,7 +473,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 1001,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/sijangyi-girog/01-topic-discovery.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/sijangyi-girog/topic_discovery.md"
     },
     {
       "id": "시장의-기록::article_generation",
@@ -438,7 +488,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 1002,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/sijangyi-girog/02-article-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/sijangyi-girog/article_generation.md"
     },
     {
       "id": "시장의-기록::image_prompt_generation",
@@ -453,7 +503,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 1003,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/sijangyi-girog/03-image-prompt-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/sijangyi-girog/image_prompt_generation.md"
     },
     {
       "id": "여행과-기록::topic_discovery",
@@ -468,7 +518,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 1101,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/yeohaenggwa-girog/01-topic-discovery.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/yeohaenggwa-girog/topic_discovery.md"
     },
     {
       "id": "여행과-기록::article_generation",
@@ -483,7 +533,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 1102,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/yeohaenggwa-girog/02-article-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/yeohaenggwa-girog/article_generation.md"
     },
     {
       "id": "여행과-기록::image_prompt_generation",
@@ -498,7 +548,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 1103,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/yeohaenggwa-girog/03-image-prompt-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/yeohaenggwa-girog/image_prompt_generation.md"
     },
     {
       "id": "일상과-메모::topic_discovery",
@@ -513,7 +563,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 1201,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/ilsanggwa-memo/01-topic-discovery.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/ilsanggwa-memo/topic_discovery.md"
     },
     {
       "id": "일상과-메모::article_generation",
@@ -528,7 +578,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 1202,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/ilsanggwa-memo/02-article-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/ilsanggwa-memo/article_generation.md"
     },
     {
       "id": "일상과-메모::image_prompt_generation",
@@ -543,7 +593,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 1203,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/ilsanggwa-memo/03-image-prompt-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/ilsanggwa-memo/image_prompt_generation.md"
     },
     {
       "id": "정보의-기록::topic_discovery",
@@ -558,7 +608,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 1301,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/jeongboyi-girog/01-topic-discovery.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/jeongboyi-girog/topic_discovery.md"
     },
     {
       "id": "정보의-기록::article_generation",
@@ -573,7 +623,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 1302,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/jeongboyi-girog/02-article-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/jeongboyi-girog/article_generation.md"
     },
     {
       "id": "정보의-기록::image_prompt_generation",
@@ -588,7 +638,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 1303,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/jeongboyi-girog/03-image-prompt-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/jeongboyi-girog/image_prompt_generation.md"
     },
     {
       "id": "주식의-흐름::topic_discovery",
@@ -603,7 +653,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 1401,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/jusigyi-heureum/01-topic-discovery.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/jusigyi-heureum/topic_discovery.md"
     },
     {
       "id": "주식의-흐름::article_generation",
@@ -618,7 +668,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 1402,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/jusigyi-heureum/02-article-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/jusigyi-heureum/article_generation.md"
     },
     {
       "id": "주식의-흐름::image_prompt_generation",
@@ -633,7 +683,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 1403,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/jusigyi-heureum/03-image-prompt-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/jusigyi-heureum/image_prompt_generation.md"
     },
     {
       "id": "축제와-현장::topic_discovery",
@@ -648,7 +698,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 1501,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/cugjewa-hyeonjang/01-topic-discovery.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/cugjewa-hyeonjang/topic_discovery.md"
     },
     {
       "id": "축제와-현장::article_generation",
@@ -663,7 +713,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 1502,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/cugjewa-hyeonjang/02-article-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/cugjewa-hyeonjang/article_generation.md"
     },
     {
       "id": "축제와-현장::image_prompt_generation",
@@ -678,7 +728,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 1503,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/cugjewa-hyeonjang/03-image-prompt-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/cugjewa-hyeonjang/image_prompt_generation.md"
     },
     {
       "id": "크립토의-흐름::topic_discovery",
@@ -693,7 +743,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 1601,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/keuribtoyi-heureum/01-topic-discovery.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/keuribtoyi-heureum/topic_discovery.md"
     },
     {
       "id": "크립토의-흐름::article_generation",
@@ -708,7 +758,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 1602,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/keuribtoyi-heureum/02-article-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/keuribtoyi-heureum/article_generation.md"
     },
     {
       "id": "크립토의-흐름::image_prompt_generation",
@@ -723,7 +773,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 1603,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/steps/keuribtoyi-heureum/03-image-prompt-generation.md"
+      "backup_relative_path": "channels/cloudflare/dongri-archive/keuribtoyi-heureum/image_prompt_generation.md"
     }
   ]
 }

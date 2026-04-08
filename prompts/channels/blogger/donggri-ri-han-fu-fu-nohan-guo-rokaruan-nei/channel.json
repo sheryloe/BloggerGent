@@ -3,7 +3,13 @@
   "channel_name": "Donggri｜日韓夫婦の韓国ローカル案内",
   "provider": "blogger",
   "backup_directory": "channels/blogger/donggri-ri-han-fu-fu-nohan-guo-rokaruan-nei",
-  "synced_at": "2026-04-08T07:31:09.285070+00:00",
+  "synced_at": "2026-04-08T07:53:39.311766+00:00",
+  "backup_files": [
+    "channels/blogger/donggri-ri-han-fu-fu-nohan-guo-rokaruan-nei/travel_article_generation.md",
+    "channels/blogger/donggri-ri-han-fu-fu-nohan-guo-rokaruan-nei/travel_collage_prompt.md",
+    "channels/blogger/donggri-ri-han-fu-fu-nohan-guo-rokaruan-nei/travel_inline_collage_prompt.md",
+    "channels/blogger/donggri-ri-han-fu-fu-nohan-guo-rokaruan-nei/travel_topic_discovery.md"
+  ],
   "steps": [
     {
       "id": "55",
@@ -18,7 +24,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 10,
-      "backup_relative_path": "channels/blogger/donggri-ri-han-fu-fu-nohan-guo-rokaruan-nei/steps/01-topic-discovery.md"
+      "backup_relative_path": "channels/blogger/donggri-ri-han-fu-fu-nohan-guo-rokaruan-nei/travel_topic_discovery.md"
     },
     {
       "id": "56",
@@ -33,7 +39,7 @@
       "is_required": true,
       "prompt_enabled": true,
       "sort_order": 20,
-      "backup_relative_path": "channels/blogger/donggri-ri-han-fu-fu-nohan-guo-rokaruan-nei/steps/02-article-generation.md"
+      "backup_relative_path": "channels/blogger/donggri-ri-han-fu-fu-nohan-guo-rokaruan-nei/travel_article_generation.md"
     },
     {
       "id": "57",
@@ -48,7 +54,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 30,
-      "backup_relative_path": "channels/blogger/donggri-ri-han-fu-fu-nohan-guo-rokaruan-nei/steps/03-image-prompt-generation.md"
+      "backup_relative_path": "channels/blogger/donggri-ri-han-fu-fu-nohan-guo-rokaruan-nei/travel_collage_prompt.md"
     },
     {
       "id": "58",

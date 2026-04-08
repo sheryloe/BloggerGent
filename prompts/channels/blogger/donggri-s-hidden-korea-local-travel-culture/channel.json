@@ -3,7 +3,13 @@
   "channel_name": "Donggri's Hidden Korea: Local Travel & Culture",
   "provider": "blogger",
   "backup_directory": "channels/blogger/donggri-s-hidden-korea-local-travel-culture",
-  "synced_at": "2026-04-08T07:31:04.354091+00:00",
+  "synced_at": "2026-04-08T07:53:31.672544+00:00",
+  "backup_files": [
+    "channels/blogger/donggri-s-hidden-korea-local-travel-culture/travel_article_generation.md",
+    "channels/blogger/donggri-s-hidden-korea-local-travel-culture/travel_collage_prompt.md",
+    "channels/blogger/donggri-s-hidden-korea-local-travel-culture/travel_inline_collage_prompt.md",
+    "channels/blogger/donggri-s-hidden-korea-local-travel-culture/travel_topic_discovery.md"
+  ],
   "steps": [
     {
       "id": "34",
@@ -18,7 +24,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 10,
-      "backup_relative_path": "channels/blogger/donggri-s-hidden-korea-local-travel-culture/steps/01-topic-discovery.md"
+      "backup_relative_path": "channels/blogger/donggri-s-hidden-korea-local-travel-culture/travel_topic_discovery.md"
     },
     {
       "id": "35",
@@ -33,7 +39,7 @@
       "is_required": true,
       "prompt_enabled": true,
       "sort_order": 20,
-      "backup_relative_path": "channels/blogger/donggri-s-hidden-korea-local-travel-culture/steps/02-article-generation.md"
+      "backup_relative_path": "channels/blogger/donggri-s-hidden-korea-local-travel-culture/travel_article_generation.md"
     },
     {
       "id": "36",
@@ -48,7 +54,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 30,
-      "backup_relative_path": "channels/blogger/donggri-s-hidden-korea-local-travel-culture/steps/03-image-prompt-generation.md"
+      "backup_relative_path": "channels/blogger/donggri-s-hidden-korea-local-travel-culture/travel_collage_prompt.md"
     },
     {
       "id": "37",

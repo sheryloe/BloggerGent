@@ -16,19 +16,25 @@ from app.models.entities import BlogAgentConfig
 from app.schemas.api import PromptFlowRead, PromptFlowStepRead, PromptFlowStepUpdate
 from app.services.blog_service import (
     get_blog,
+    get_profile_definition,
     get_missing_optional_stage_types,
     list_workflow_steps,
     stage_is_removable,
     stage_label,
     stage_supports_prompt,
 )
-from app.services.cloudflare_channel_service import DEFAULT_PROMPT_STAGES, get_cloudflare_overview, get_cloudflare_prompt_bundle
+from app.services.cloudflare_channel_service import get_cloudflare_overview, get_cloudflare_prompt_bundle
 from app.services.platform_service import PLATFORM_PROMPT_STEPS
 from app.services.settings_service import get_settings_map, upsert_settings
 from app.services.workspace_service import get_managed_channel, list_managed_channels
 
 _SAFE_SEGMENT_RE = re.compile(r"[^a-zA-Z0-9._-]+")
 _PLATFORM_REQUIRED_STAGE_TYPES = {"platform_publish"}
+_BLOGGER_AUXILIARY_PROMPT_FILES: dict[str, tuple[str, ...]] = {
+    "korea_travel": ("travel_inline_collage_prompt.md",),
+    "world_mystery": ("mystery_inline_collage_prompt.md",),
+    "custom": (),
+}
 
 
 def _utc_now_iso() -> str:
@@ -101,9 +107,50 @@ def _blogger_backup_relative_dir(blog) -> str:
     )
 
 
+def _resolve_blogger_profile_key(blog) -> str:
+    profile_key = str(getattr(blog, "profile_key", "") or "").strip()
+    if profile_key:
+        return profile_key
+    if str(getattr(blog, "content_category", "") or "").strip() == "travel":
+        return "korea_travel"
+    if str(getattr(blog, "content_category", "") or "").strip() == "mystery":
+        return "world_mystery"
+    return "custom"
+
+
+def _read_root_prompt_file(file_name: str | None) -> str | None:
+    normalized = str(file_name or "").strip()
+    if not normalized:
+        return None
+    path = _prompt_root() / normalized
+    if not path.exists():
+        return None
+    return path.read_text(encoding="utf-8")
+
+
+def _blogger_prompt_file_map(blog) -> dict[str, str]:
+    profile = get_profile_definition(_resolve_blogger_profile_key(blog))
+    return {
+        blueprint.stage_type.value if hasattr(blueprint.stage_type, "value") else str(blueprint.stage_type): blueprint.prompt_file
+        for blueprint in profile.workflow_steps
+        if blueprint.prompt_file
+    }
+
+
+def _blogger_auxiliary_prompt_files(blog) -> list[str]:
+    profile_key = _resolve_blogger_profile_key(blog)
+    return list(_BLOGGER_AUXILIARY_PROMPT_FILES.get(profile_key, ()))
+
+
 def _stage_file_slug(stage_type: str) -> str:
     normalized = slugify(str(stage_type or "").strip(), separator="-") or _safe_segment(stage_type, "prompt")
     return normalized or "prompt"
+
+
+def _stage_prompt_file_name(stage_type: str) -> str:
+    normalized = str(stage_type or "").strip()
+    safe_name = normalized or _stage_file_slug(stage_type)
+    return f"{safe_name}.md"
 
 
 def _normalize_prompt_text(content: str | None) -> str:
@@ -418,48 +465,80 @@ def _build_platform_flow(db: Session, channel_id: str) -> PromptFlowRead:
     )
 
 
-def _step_backup_relative_path(flow: PromptFlowRead, step: PromptFlowStepRead, index: int) -> str | None:
+def _step_backup_file_name(db: Session, flow: PromptFlowRead, step: PromptFlowStepRead) -> str | None:
     if not step.prompt_enabled:
+        return None
+
+    if flow.provider == "blogger":
+        _provider, raw_id = _parse_channel_id(flow.channel_id)
+        blog = get_blog(db, int(raw_id))
+        if blog:
+            prompt_file_name = _blogger_prompt_file_map(blog).get(step.stage_type)
+            if prompt_file_name:
+                return prompt_file_name
+
+    return _stage_prompt_file_name(step.stage_type)
+
+
+def _step_backup_relative_path(db: Session, flow: PromptFlowRead, step: PromptFlowStepRead, index: int) -> str | None:
+    file_name = _step_backup_file_name(db, flow, step)
+    if not file_name:
         return None
 
     channel_dir = Path(flow.backup_directory or _default_channel_backup_relative_dir(flow.channel_id))
     if flow.provider == "cloudflare":
         category_slug, _separator, _stage = str(step.id).partition("::")
-        stage_index = DEFAULT_PROMPT_STAGES.index(step.stage_type) + 1 if step.stage_type in DEFAULT_PROMPT_STAGES else index
-        return (
-            channel_dir
-            / "steps"
-            / _safe_segment(category_slug, "default")
-            / f"{stage_index:02d}-{_stage_file_slug(step.stage_type)}.md"
-        ).as_posix()
+        return (channel_dir / _safe_segment(category_slug, "default") / file_name).as_posix()
 
-    return (channel_dir / "steps" / f"{index:02d}-{_stage_file_slug(step.stage_type)}.md").as_posix()
+    return (channel_dir / file_name).as_posix()
 
 
-def attach_backup_metadata(flow: PromptFlowRead) -> PromptFlowRead:
+def _auxiliary_backup_files(db: Session, flow: PromptFlowRead) -> dict[str, str]:
+    if flow.provider != "blogger":
+        return {}
+
+    _provider, raw_id = _parse_channel_id(flow.channel_id)
+    blog = get_blog(db, int(raw_id))
+    if not blog:
+        return {}
+
+    channel_dir = Path(flow.backup_directory or _default_channel_backup_relative_dir(flow.channel_id))
+    files: dict[str, str] = {}
+    for file_name in _blogger_auxiliary_prompt_files(blog):
+        content = _read_root_prompt_file(file_name)
+        if content is None:
+            continue
+        files[(channel_dir / file_name).as_posix()] = content
+    return files
+
+
+def attach_backup_metadata(db: Session, flow: PromptFlowRead) -> PromptFlowRead:
     flow.backup_directory = flow.backup_directory or _default_channel_backup_relative_dir(flow.channel_id)
     for index, step in enumerate(sorted(flow.steps, key=lambda item: (item.sort_order, item.id)), start=1):
-        step.backup_relative_path = _step_backup_relative_path(flow, step, index)
+        step.backup_relative_path = _step_backup_relative_path(db, flow, step, index)
         step.backup_exists = bool(step.backup_relative_path and (_prompt_root() / step.backup_relative_path).exists())
     return flow
 
 
-def sync_prompt_flow_backup(flow: PromptFlowRead) -> PromptFlowRead:
-    attach_backup_metadata(flow)
+def sync_prompt_flow_backup(db: Session, flow: PromptFlowRead) -> PromptFlowRead:
+    attach_backup_metadata(db, flow)
 
     root = _prompt_root()
     channel_dir = root / str(flow.backup_directory or _default_channel_backup_relative_dir(flow.channel_id))
-    steps_dir = channel_dir / "steps"
     legacy_channel_dir = root / _default_channel_backup_relative_dir(flow.channel_id)
 
+    if channel_dir.exists():
+        _safe_remove_tree(channel_dir, root=root)
     channel_dir.mkdir(parents=True, exist_ok=True)
-    _safe_remove_tree(steps_dir, root=root)
-    steps_dir.mkdir(parents=True, exist_ok=True)
 
     for step in flow.steps:
         if not step.backup_relative_path:
             continue
         _write_text(root / step.backup_relative_path, step.prompt_template)
+
+    auxiliary_files = _auxiliary_backup_files(db, flow)
+    for relative_path, content in auxiliary_files.items():
+        _write_text(root / relative_path, content)
 
     metadata = {
         "channel_id": flow.channel_id,
@@ -467,6 +546,9 @@ def sync_prompt_flow_backup(flow: PromptFlowRead) -> PromptFlowRead:
         "provider": flow.provider,
         "backup_directory": flow.backup_directory,
         "synced_at": _utc_now_iso(),
+        "backup_files": sorted(
+            [step.backup_relative_path for step in flow.steps if step.backup_relative_path] + list(auxiliary_files.keys())
+        ),
         "steps": [
             {
                 "id": step.id,
@@ -490,7 +572,7 @@ def sync_prompt_flow_backup(flow: PromptFlowRead) -> PromptFlowRead:
     _cleanup_stale_channel_dirs(flow, root=root, current_channel_dir=channel_dir)
     if legacy_channel_dir != channel_dir:
         _safe_remove_tree(legacy_channel_dir, root=root)
-    return attach_backup_metadata(flow)
+    return attach_backup_metadata(db, flow)
 
 
 def build_prompt_flow(db: Session, channel_id: str, *, sync_backup: bool = False) -> PromptFlowRead:
@@ -503,8 +585,8 @@ def build_prompt_flow(db: Session, channel_id: str, *, sync_backup: bool = False
         flow = _build_cloudflare_flow(db, channel_id)
 
     if sync_backup:
-        return sync_prompt_flow_backup(flow)
-    return attach_backup_metadata(flow)
+        return sync_prompt_flow_backup(db, flow)
+    return attach_backup_metadata(db, flow)
 
 
 def sync_all_channel_prompt_backups(db: Session, *, include_disconnected: bool = True) -> list[PromptFlowRead]:

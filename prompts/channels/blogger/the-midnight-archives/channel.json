@@ -3,7 +3,13 @@
   "channel_name": "The Midnight Archives",
   "provider": "blogger",
   "backup_directory": "channels/blogger/the-midnight-archives",
-  "synced_at": "2026-04-08T07:31:04.393953+00:00",
+  "synced_at": "2026-04-08T07:53:31.878547+00:00",
+  "backup_files": [
+    "channels/blogger/the-midnight-archives/mystery_article_generation.md",
+    "channels/blogger/the-midnight-archives/mystery_collage_prompt.md",
+    "channels/blogger/the-midnight-archives/mystery_inline_collage_prompt.md",
+    "channels/blogger/the-midnight-archives/mystery_topic_discovery.md"
+  ],
   "steps": [
     {
       "id": "41",
@@ -18,7 +24,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 10,
-      "backup_relative_path": "channels/blogger/the-midnight-archives/steps/01-topic-discovery.md"
+      "backup_relative_path": "channels/blogger/the-midnight-archives/mystery_topic_discovery.md"
     },
     {
       "id": "42",
@@ -33,7 +39,7 @@
       "is_required": true,
       "prompt_enabled": true,
       "sort_order": 20,
-      "backup_relative_path": "channels/blogger/the-midnight-archives/steps/02-article-generation.md"
+      "backup_relative_path": "channels/blogger/the-midnight-archives/mystery_article_generation.md"
     },
     {
       "id": "43",
@@ -48,7 +54,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 30,
-      "backup_relative_path": "channels/blogger/the-midnight-archives/steps/03-image-prompt-generation.md"
+      "backup_relative_path": "channels/blogger/the-midnight-archives/mystery_collage_prompt.md"
     },
     {
       "id": "44",

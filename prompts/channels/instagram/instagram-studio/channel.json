@@ -3,7 +3,14 @@
   "channel_name": "Instagram Studio",
   "provider": "instagram",
   "backup_directory": "channels/instagram/instagram-studio",
-  "synced_at": "2026-04-08T07:31:04.682067+00:00",
+  "synced_at": "2026-04-08T07:53:32.184796+00:00",
+  "backup_files": [
+    "channels/instagram/instagram-studio/article_generation.md",
+    "channels/instagram/instagram-studio/performance_review.md",
+    "channels/instagram/instagram-studio/platform_publish.md",
+    "channels/instagram/instagram-studio/reel_packaging.md",
+    "channels/instagram/instagram-studio/thumbnail_generation.md"
+  ],
   "steps": [
     {
       "id": "instagram:1",
@@ -18,7 +25,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 10,
-      "backup_relative_path": "channels/instagram/instagram-studio/steps/01-article-generation.md"
+      "backup_relative_path": "channels/instagram/instagram-studio/article_generation.md"
     },
     {
       "id": "instagram:2",
@@ -33,7 +40,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 20,
-      "backup_relative_path": "channels/instagram/instagram-studio/steps/02-thumbnail-generation.md"
+      "backup_relative_path": "channels/instagram/instagram-studio/thumbnail_generation.md"
     },
     {
       "id": "instagram:3",
@@ -48,7 +55,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 30,
-      "backup_relative_path": "channels/instagram/instagram-studio/steps/03-reel-packaging.md"
+      "backup_relative_path": "channels/instagram/instagram-studio/reel_packaging.md"
     },
     {
       "id": "instagram:4",
@@ -63,7 +70,7 @@
       "is_required": true,
       "prompt_enabled": true,
       "sort_order": 40,
-      "backup_relative_path": "channels/instagram/instagram-studio/steps/04-platform-publish.md"
+      "backup_relative_path": "channels/instagram/instagram-studio/platform_publish.md"
     },
     {
       "id": "instagram:5",
@@ -78,7 +85,7 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 50,
-      "backup_relative_path": "channels/instagram/instagram-studio/steps/05-performance-review.md"
+      "backup_relative_path": "channels/instagram/instagram-studio/performance_review.md"
     }
   ]
 }
