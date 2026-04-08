@@ -1402,6 +1402,8 @@ export interface PromptFlowStepRead {
   promptEnabled: boolean;
   editable: boolean;
   structureEditable: boolean;
+  backupRelativePath: string | null;
+  backupExists: boolean;
   contentEditable: boolean;
   sortOrder: number;
 }
@@ -1412,6 +1414,7 @@ export interface PromptFlowRead {
   provider: string;
   structureEditable: boolean;
   contentEditable: boolean;
+  backupDirectory: string | null;
   availableStageTypes: string[];
   steps: PromptFlowStepRead[];
 }

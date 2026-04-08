@@ -886,6 +886,7 @@ function mapPromptFlow(payload: any): PromptFlowRead {
     structureEditable: payload.structure_editable ?? true,
     contentEditable: payload.content_editable ?? true,
     availableStageTypes: payload.available_stage_types ?? [],
+    backupDirectory: payload.backup_directory ?? null,
     steps: (payload.steps ?? []).map((item: any) => ({
       id: item.id,
       channelId: item.channel_id,
@@ -906,6 +907,8 @@ function mapPromptFlow(payload: any): PromptFlowRead {
       structureEditable: item.structure_editable ?? true,
       contentEditable: item.content_editable ?? true,
       sortOrder: item.sort_order ?? 0,
+      backupRelativePath: item.backup_relative_path ?? null,
+      backupExists: item.backup_exists ?? false,
     })),
   };
 }

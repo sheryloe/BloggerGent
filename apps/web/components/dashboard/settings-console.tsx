@@ -1510,6 +1510,16 @@ export function SettingsConsole({ settings, config, mode = "all" }: SettingsCons
                     </label>
                   </FieldGroup>
                   <ReadonlyField label="구조 변경 가능" value={selectedStep.structureEditable ? "예" : "아니오"} />
+                  <FieldGroup label="Backup Folder" className="xl:col-span-2">
+                    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 font-mono text-xs leading-6 text-slate-700">
+                      {flow?.backupDirectory ?? "channels"}
+                    </div>
+                  </FieldGroup>
+                  <FieldGroup label="Backup File" className="xl:col-span-2">
+                    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 font-mono text-xs leading-6 text-slate-700">
+                      {selectedStep.backupRelativePath ?? "No prompt backup file for this step."}
+                    </div>
+                  </FieldGroup>
                   {selectedStep.promptEnabled ? (
                     <FieldGroup label="프롬프트 본문" className="xl:col-span-2">
                       <textarea value={draft.promptTemplate} onChange={(event) => void applyFlowUpdate({ promptTemplate: event.target.value })} rows={14} className={textareaClass("min-h-[320px]")} />

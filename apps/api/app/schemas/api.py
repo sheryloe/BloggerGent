@@ -1680,6 +1680,8 @@ class PromptFlowStepRead(BaseModel):
     structure_editable: bool = True
     content_editable: bool = True
     sort_order: int
+    backup_relative_path: str | None = None
+    backup_exists: bool = False
 
 
 class PromptFlowRead(BaseModel):
@@ -1690,6 +1692,7 @@ class PromptFlowRead(BaseModel):
     content_editable: bool = True
     available_stage_types: list[str] = Field(default_factory=list)
     steps: list[PromptFlowStepRead] = Field(default_factory=list)
+    backup_directory: str | None = None
 
 
 class PromptFlowStepUpdate(BaseModel):
