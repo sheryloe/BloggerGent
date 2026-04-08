@@ -26,6 +26,7 @@ from app.services.openai_usage_service import (
     route_openai_free_tier_text_model,
 )
 from app.services.providers.factory import get_article_provider, get_image_provider, get_runtime_config, get_topic_provider
+from app.services.prompt_service import render_prompt_template
 from app.services.publish_trust_gate_service import assess_publish_trust_requirements
 from app.services.settings_service import get_settings_map, upsert_settings
 
@@ -717,6 +718,111 @@ def _category_modules(category_slug: str) -> tuple[str, ...]:
 
 def _category_image_guidance(category_slug: str) -> str:
     return CATEGORY_IMAGE_GUIDANCE.get(category_slug, "글의 첫 약속을 즉시 보여주는 단일 장면 이미지가 맞습니다.")
+
+
+def _cloudflare_editorial_category_key(category_slug: str) -> str:
+    normalized = (category_slug or "").strip()
+    if any(token in normalized for token in ("여행", "축제")):
+        return "travel"
+    if "문화" in normalized:
+        return "culture"
+    if any(token in normalized for token in ("맛", "푸드", "식")):
+        return "food"
+    return "general"
+
+
+def _cloudflare_target_audience(category_slug: str, category_name: str) -> str:
+    normalized = (category_slug or "").strip()
+    if any(token in normalized for token in ("여행", "축제", "문화")):
+        return (
+            "한국에서 실제 방문 결정을 하려는 한국어 독자. 동선, 시간대, 비용, 대기, 혼잡 회피, "
+            "가볼지 말지 판단 포인트를 빠르게 알고 싶어 한다."
+        )
+    if any(token in normalized for token in ("주식", "코인", "블록체인")):
+        return "핵심 변수와 리스크를 빠르게 파악해 다음 판단 포인트를 잡으려는 한국어 투자자."
+    if any(token in normalized for token in ("일", "개발", "기술")):
+        return "실무에 바로 적용할 도구, 워크플로, 비교 기준을 찾는 한국어 개발자와 지식노동자."
+    if any(token in normalized for token in ("생활", "복지", "메모")):
+        return "자격, 절차, 준비물, 자주 하는 실수를 빠르게 확인하려는 한국어 생활정보 독자."
+    if "미스터리" in normalized:
+        return "사실과 해석을 구분해 읽고 싶고 핵심 기록과 주요 가설을 짧게 정리받고 싶은 한국어 독자."
+    return f"{category_name} 주제에서 실제 판단 포인트를 빠르게 확인하려는 한국어 독자."
+
+
+def _cloudflare_content_brief(category_slug: str, category_name: str, category_description: str) -> str:
+    normalized = (category_slug or "").strip()
+    if any(token in normalized for token in ("여행", "축제", "문화")):
+        return (
+            "CTR과 SEO를 함께 잡는 한국어 실전 가이드 글로 작성한다. "
+            "도입부에서 방문 여부 판단 포인트를 빠르게 주고, 본문은 동선, 시간, 예산, 대기, 체류 포인트 중심으로 전개한다."
+        )
+    if any(token in normalized for token in ("주식", "코인", "블록체인")):
+        return (
+            "CTR과 SEO를 함께 잡는 한국어 분석형 글로 작성한다. "
+            "헤드라인은 클릭 훅을 유지하되 본문은 변수, 흐름, 리스크, 다음 체크포인트 중심으로 전개한다."
+        )
+    if any(token in normalized for token in ("일", "개발", "기술")):
+        return (
+            "CTR과 SEO를 함께 잡는 한국어 실무형 글로 작성한다. "
+            "툴 소개에 그치지 말고 누가 언제 왜 써야 하는지, 실무에서 무엇이 달라지는지 중심으로 전개한다."
+        )
+    if any(token in normalized for token in ("생활", "복지", "메모")):
+        return (
+            "CTR과 SEO를 함께 잡는 한국어 생활정보 글로 작성한다. "
+            "자격, 절차, 준비물, 실수 방지, 다시 확인해야 할 포인트를 먼저 정리하고 본문을 전개한다."
+        )
+    if "미스터리" in normalized:
+        return (
+            "CTR과 SEO를 함께 잡는 한국어 다큐멘터리형 글로 작성한다. "
+            "흥미를 끌되 과장하지 말고 기록, 쟁점, 대표 해석, 지금 읽어야 하는 이유를 중심으로 전개한다."
+        )
+    return category_description or f"{category_name} 주제를 CTR과 SEO에 맞는 한국어 실전 글로 재구성한다."
+
+
+def _read_master_prompt_template(file_name: str) -> str:
+    resolved = Path(__file__).resolve()
+    candidates = (
+        resolved.parents[4] / "prompts" / file_name,
+        Path.cwd() / "prompts" / file_name,
+        Path("/app/prompts") / file_name,
+    )
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.read_text(encoding="utf-8")
+    raise FileNotFoundError(f"Prompt template not found: {file_name}")
+
+
+def _build_cloudflare_master_article_prompt(
+    category: dict[str, Any],
+    *,
+    keyword: str,
+    current_date: str,
+    planner_brief: str,
+) -> str:
+    category_name = str(category.get("name") or category.get("slug") or "").strip()
+    category_slug = str(category.get("slug") or "").strip()
+    category_description = str(category.get("description") or "").strip()
+    prompt_template = _read_master_prompt_template("travel_article_generation.md")
+    rendered = render_prompt_template(
+        prompt_template,
+        keyword=keyword,
+        primary_language="ko",
+        target_audience=_cloudflare_target_audience(category_slug, category_name),
+        content_brief=_cloudflare_content_brief(category_slug, category_name, category_description),
+        planner_brief=planner_brief or "No planner brief provided.",
+        current_date=current_date,
+        editorial_category_key=_cloudflare_editorial_category_key(category_slug),
+        editorial_category_label=category_name or "Cloudflare",
+        editorial_category_guidance=_category_topic_guidance(category_slug, category_name, category_description),
+    )
+    return (
+        f"{rendered.rstrip()}\n\n"
+        "[Cloudflare article policy]\n"
+        "- Write like a publish-ready Korean CTR/SEO article, not an audit note or compliance memo.\n"
+        "- Do not use fixed report headings such as timestamp blocks, 핵심 요약, 확인된 사실, 미확인 정보/가정, 출처/확인 경로.\n"
+        "- Keep the body substantial enough for a real 6 to 10 minute read without filler.\n"
+        "- If schedules, prices, eligibility, or 운영 정보 can change, use recheck wording naturally inside the relevant section.\n"
+    )
 
 
 def _render_bullets(items: tuple[str, ...]) -> str:
@@ -3032,17 +3138,13 @@ def generate_cloudflare_posts(
                     planner_lines.append(f"- Extra context: {planner_brief.get('extra_context')}")
                 planner_brief_block = "\n".join(planner_lines)
             try:
-                article_prompt = _render_prompt_template(
-                    article_prompt_template,
-                    current_date=current_date,
+                article_prompt = _build_cloudflare_master_article_prompt(
+                    category=category,
                     keyword=keyword,
-                    topic_count=requested_for_category,
-                ) + category_gate + planner_brief_block + _article_output_contract()
-                article_prompt = _append_cloudflare_seo_trust_guard(
-                    article_prompt,
-                    category_slug=category_slug,
                     current_date=current_date,
+                    planner_brief=planner_brief_block,
                 )
+                article_prompt = f"{article_prompt}{category_gate}"
                 article_prompt = _append_no_inline_image_rule(article_prompt)
                 article_model = article_requested_model
                 if runtime.provider_mode == "live":
@@ -3291,10 +3393,28 @@ def generate_cloudflare_posts(
                             if value
                         )
 
+                tag_names: list[str] = []
+                seen_tag_keys: set[str] = set()
+                for raw_tag in [category_name, *(article_output.labels or [])]:
+                    normalized_tag = str(raw_tag or "").replace("#", " ").strip()
+                    normalized_tag = " ".join(normalized_tag.split())
+                    if not normalized_tag:
+                        continue
+                    tag_key = normalized_tag.casefold()
+                    if tag_key in seen_tag_keys:
+                        continue
+                    seen_tag_keys.add(tag_key)
+                    tag_names.append(normalized_tag)
+                    if len(tag_names) >= 20:
+                        break
+
                 create_payload = {
                     "title": title,
                     "content": _prepare_markdown_body(title, body_markdown),
                     "excerpt": article_output.excerpt,
+                    "seoTitle": title,
+                    "seoDescription": article_output.meta_description,
+                    "tagNames": tag_names,
                     "categorySlug": category_slug or category_id,
                     "status": normalized_status,
                 }

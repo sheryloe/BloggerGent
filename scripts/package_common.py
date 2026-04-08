@@ -278,10 +278,59 @@ class CloudflareIntegrationClient:
     def __init__(self, *, base_url: str, token: str) -> None:
         self.base_url = normalize_space(base_url).rstrip("/")
         self.token = normalize_space(token)
+        self.last_response_headers: dict[str, str] = {}
+        self.last_usage_ratio: str = "used/unknown"
         if not self.base_url:
             raise ValueError("cloudflare_blog_api_base_url is empty.")
         if not self.token:
             raise ValueError("cloudflare_blog_m2m_token is empty.")
+
+    @staticmethod
+    def _safe_int(value: str | None) -> int | None:
+        raw = normalize_space(value)
+        if not raw:
+            return None
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _compute_usage_ratio(cls, headers: dict[str, str]) -> str:
+        if not headers:
+            return "used/unknown"
+
+        def pick(*keys: str) -> int | None:
+            for key in keys:
+                value = cls._safe_int(headers.get(key))
+                if value is not None:
+                    return value
+            return None
+
+        limit = pick(
+            "x-ratelimit-limit",
+            "x-rate-limit-limit",
+            "x-ratelimit-requests-limit",
+        )
+        used = pick(
+            "x-ratelimit-used",
+            "x-rate-limit-used",
+            "x-ratelimit-requests-used",
+        )
+        remaining = pick(
+            "x-ratelimit-remaining",
+            "x-rate-limit-remaining",
+            "x-ratelimit-requests-remaining",
+        )
+
+        if used is None and limit is not None and remaining is not None:
+            used = max(limit - remaining, 0)
+        if used is None or limit is None or limit <= 0:
+            return "used/unknown"
+        return f"{used}/{limit}"
+
+    def get_last_usage_ratio(self) -> str:
+        return self.last_usage_ratio
 
     @classmethod
     def from_db(cls, db: Session) -> "CloudflareIntegrationClient":
@@ -310,6 +359,8 @@ class CloudflareIntegrationClient:
             json=json_payload,
             timeout=timeout,
         )
+        self.last_response_headers = {str(key).lower(): str(value) for key, value in response.headers.items()}
+        self.last_usage_ratio = self._compute_usage_ratio(self.last_response_headers)
         try:
             payload: Any = response.json()
         except ValueError:
