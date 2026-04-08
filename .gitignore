@@ -29,6 +29,9 @@ TEST/
 env/
 plugins/
 
+# generated docs article image exports
+docs/assets/images/
+
 # local storage snapshots
 storage/reports/
 storage/tmp/
