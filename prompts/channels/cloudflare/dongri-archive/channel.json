@@ -3,7 +3,6 @@
   "channel_name": "Dongri Archive",
   "provider": "cloudflare",
   "backup_directory": "channels/cloudflare/dongri-archive",
-  "synced_at": "2026-04-08T08:04:42.052551+00:00",
   "backup_files": [
     "channels/cloudflare/dongri-archive/cugjewa-hyeonjang/article_generation.md",
     "channels/cloudflare/dongri-archive/cugjewa-hyeonjang/html_assembly.md",

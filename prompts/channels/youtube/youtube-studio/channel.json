@@ -3,7 +3,6 @@
   "channel_name": "YouTube Studio",
   "provider": "youtube",
   "backup_directory": "channels/youtube/youtube-studio",
-  "synced_at": "2026-04-08T07:53:32.055014+00:00",
   "backup_files": [
     "channels/youtube/youtube-studio/performance_review.md",
     "channels/youtube/youtube-studio/platform_publish.md",

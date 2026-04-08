@@ -3,9 +3,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
+import stat
 from textwrap import dedent
 
 from slugify import slugify
@@ -178,6 +180,23 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def _make_path_writable(path: Path) -> None:
+    try:
+        os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+    except OSError:
+        return
+
+
+def _handle_remove_readonly(func, path: str, exc_info) -> None:
+    target = Path(path)
+    original_error = exc_info[1]
+    _make_path_writable(target)
+    try:
+        func(path)
+    except OSError as retry_error:
+        raise retry_error from original_error
+
+
 def _safe_remove_tree(path: Path, *, root: Path) -> None:
     if not path.exists():
         return
@@ -185,7 +204,10 @@ def _safe_remove_tree(path: Path, *, root: Path) -> None:
     resolved_root = root.resolve()
     if resolved_root not in resolved_path.parents:
         raise ValueError("Refusing to remove a path outside the prompt backup root")
-    shutil.rmtree(resolved_path)
+    for candidate in sorted(resolved_path.rglob("*"), reverse=True):
+        _make_path_writable(candidate)
+    _make_path_writable(resolved_path)
+    shutil.rmtree(resolved_path, onerror=_handle_remove_readonly)
 
 
 def _cleanup_stale_channel_dirs(flow: PromptFlowRead, *, root: Path, current_channel_dir: Path) -> None:
@@ -638,7 +660,6 @@ def sync_prompt_flow_backup(db: Session, flow: PromptFlowRead) -> PromptFlowRead
         "channel_name": flow.channel_name,
         "provider": flow.provider,
         "backup_directory": flow.backup_directory,
-        "synced_at": _utc_now_iso(),
         "backup_files": sorted(
             [step.backup_relative_path for step in flow.steps if step.backup_relative_path] + list(auxiliary_files.keys())
         ),

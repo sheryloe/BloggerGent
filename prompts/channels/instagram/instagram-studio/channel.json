@@ -3,7 +3,6 @@
   "channel_name": "Instagram Studio",
   "provider": "instagram",
   "backup_directory": "channels/instagram/instagram-studio",
-  "synced_at": "2026-04-08T07:53:32.184796+00:00",
   "backup_files": [
     "channels/instagram/instagram-studio/article_generation.md",
     "channels/instagram/instagram-studio/performance_review.md",

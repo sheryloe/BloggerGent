@@ -3,7 +3,6 @@
   "channel_name": "The Midnight Archives",
   "provider": "blogger",
   "backup_directory": "channels/blogger/the-midnight-archives",
-  "synced_at": "2026-04-08T07:53:31.878547+00:00",
   "backup_files": [
     "channels/blogger/the-midnight-archives/mystery_article_generation.md",
     "channels/blogger/the-midnight-archives/mystery_collage_prompt.md",
