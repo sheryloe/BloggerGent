@@ -13,7 +13,6 @@ from app.services.blog_service import enforce_free_tier_model_policy, get_workfl
 from app.services.cloudflare_channel_service import run_cloudflare_daily_schedule
 from app.services.content_ops_service import sync_live_content_reviews
 from app.services.metric_ingestion_service import run_workspace_metric_sync_schedule
-from app.services.google_indexing_service import run_google_indexing_schedule
 from app.services.planner_service import run_slot_generation
 from app.services.google_sheet_service import sync_google_sheet_snapshot
 from app.services.publishing_service import process_publish_queue_batch
@@ -653,17 +652,7 @@ def run_scheduler_tick() -> dict:
                 context={"current_time": current_time, "timezone": str(tz)},
             )
 
-        try:
-            google_indexing_result = run_google_indexing_schedule(db, now=now.astimezone(timezone.utc))
-        except Exception as exc:  # noqa: BLE001
-            db.rollback()
-            google_indexing_result = {"status": "failed", "detail": str(exc)}
-            send_telegram_error_notification(
-                db,
-                title="Google indexing schedule failed",
-                detail=str(exc),
-                context={"current_time": current_time, "timezone": str(tz)},
-            )
+        google_indexing_result = {"status": "disabled", "reason": "manual_only_mode"}
 
         try:
             workspace_metric_sync_result = run_workspace_metric_sync_schedule(

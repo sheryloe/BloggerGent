@@ -9,6 +9,8 @@ from app.schemas.api import (
     GoogleBlogIndexingRequest,
     GoogleBlogIndexingQuotaRead,
     GoogleBlogIndexingTestRequest,
+    GoogleIndexingStatusRefreshRequest,
+    GooglePlaywrightIndexingRequest,
     GoogleBlogOverviewRead,
     GoogleIntegrationConfigRead,
     SyncedBloggerPostPageRead,
@@ -28,7 +30,10 @@ from app.services.google_reporting_service import (
 )
 from app.services.google_indexing_service import (
     get_google_blog_indexing_quota,
+    load_fact_enrichment_maps,
     refresh_indexing_for_blog,
+    refresh_indexing_status_for_scope,
+    request_playwright_indexing,
     request_indexing_for_blog,
 )
 from app.services.settings_service import get_settings_map
@@ -36,7 +41,7 @@ from app.services.settings_service import get_settings_map
 router = APIRouter()
 
 
-def _serialize_synced_post(post) -> dict:
+def _serialize_synced_post(post, state=None) -> dict:
     return {
         "id": post.remote_post_id,
         "title": post.title,
@@ -51,6 +56,11 @@ def _serialize_synced_post(post) -> dict:
         "thumbnail_url": post.thumbnail_url,
         "excerpt_text": post.excerpt_text,
         "synced_at": post.synced_at.isoformat() if post.synced_at else None,
+        "index_status": state.index_status if state else "unknown",
+        "index_coverage_state": state.index_coverage_state if state else None,
+        "index_last_checked_at": state.last_checked_at.isoformat() if state and state.last_checked_at else None,
+        "next_eligible_at": state.next_eligible_at.isoformat() if state and state.next_eligible_at else None,
+        "last_error": state.last_error if state else None,
     }
 
 
@@ -125,8 +135,20 @@ def get_google_blog_synced_posts(
         raise HTTPException(status_code=404, detail="Blog not found")
 
     payload = list_synced_blogger_posts_page(db, blog, page=page, page_size=page_size)
+    pairs = {
+        (blog.id, post.url.strip())
+        for post in payload["items"]
+        if isinstance(post.url, str) and post.url.strip()
+    }
+    state_map, _ = load_fact_enrichment_maps(db, pairs=pairs)
     return {
-        "items": [_serialize_synced_post(post) for post in payload["items"]],
+        "items": [
+            _serialize_synced_post(
+                post,
+                state_map.get((blog.id, post.url.strip())) if isinstance(post.url, str) and post.url.strip() else None,
+            )
+            for post in payload["items"]
+        ],
         "total": payload["total"],
         "page": payload["page"],
         "page_size": payload["page_size"],
@@ -193,6 +215,38 @@ def request_google_blog_indexing(
         force=payload.force,
         run_test=payload.run_test,
         test_limit=payload.test_limit,
+    )
+
+
+@router.post("/indexing/request-playwright")
+def request_google_indexing_playwright(
+    payload: GooglePlaywrightIndexingRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    return request_playwright_indexing(
+        db,
+        count=payload.count,
+        force=payload.force,
+        run_test=payload.run_test,
+        test_limit=payload.test_limit,
+        urls=payload.urls,
+        target_scope=payload.target_scope,
+        trigger_mode="manual",
+    )
+
+
+@router.post("/indexing/status-refresh")
+def refresh_google_indexing_status(
+    payload: GoogleIndexingStatusRefreshRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    _ = payload.run_test
+    return refresh_indexing_status_for_scope(
+        db,
+        urls=payload.urls,
+        target_scope=payload.target_scope,
+        force=payload.force,
+        trigger_mode="manual",
     )
 
 

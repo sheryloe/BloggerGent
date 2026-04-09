@@ -683,6 +683,10 @@ class IntegratedArchiveItemRead(BaseModel):
     geo_score: float | None = None
     ctr: float | None = None
     index_status: str = "unknown"
+    index_coverage_state: str | None = None
+    index_last_checked_at: str | None = None
+    next_eligible_at: str | None = None
+    last_error: str | None = None
     quality_status: str | None = None
     published_at: str | None = None
     updated_at: str | None = None
@@ -984,6 +988,11 @@ class SyncedBloggerPostRead(BaseModel):
     thumbnail_url: str | None = None
     excerpt_text: str = ""
     synced_at: str | None = None
+    index_status: str = "unknown"
+    index_coverage_state: str | None = None
+    index_last_checked_at: str | None = None
+    next_eligible_at: str | None = None
+    last_error: str | None = None
 
 
 class SyncedBloggerPostPageRead(BaseModel):
@@ -1175,6 +1184,22 @@ class GoogleBlogIndexingRequest(BaseModel):
     test_limit: int = Field(default=100, ge=1, le=1000)
 
 
+class GooglePlaywrightIndexingRequest(BaseModel):
+    count: int = Field(default=12, ge=1, le=12)
+    force: bool = False
+    run_test: bool = True
+    test_limit: int = Field(default=100, ge=1, le=1000)
+    urls: list[str] | None = None
+    target_scope: str = "blogger+cloudflare"
+
+
+class GoogleIndexingStatusRefreshRequest(BaseModel):
+    urls: list[str] = Field(default_factory=list)
+    force: bool = False
+    run_test: bool = False
+    target_scope: str = "blogger+cloudflare"
+
+
 class GoogleBlogIndexingQuotaRead(BaseModel):
     day_key: str
     blog_id: int
@@ -1218,6 +1243,7 @@ class ContentOverviewRowRead(BaseModel):
     most_similar_url: str
     seo_score: float | None = None
     geo_score: float | None = None
+    lighthouse_score: float | None = None
     media_state: str
     quality_status: str
     suggested_action: str
@@ -1228,6 +1254,7 @@ class ContentOverviewRowRead(BaseModel):
     published_at: str = ""
     updated_at: str = ""
     last_audited_at: str
+    lighthouse_last_audited_at: str = ""
 
 
 class ContentOverviewResponse(BaseModel):
@@ -1884,6 +1911,7 @@ class AnalyticsArticleFactRead(BaseModel):
     category: str | None = None
     seo_score: float | None = None
     geo_score: float | None = None
+    lighthouse_score: float | None = None
     similarity_score: float | None = None
     most_similar_url: str | None = None
     status: str | None = None

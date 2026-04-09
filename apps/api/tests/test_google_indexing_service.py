@@ -14,9 +14,11 @@ from app.models.entities import (
     Blog,
     GoogleIndexRequestLog,
     GoogleIndexUrlState,
+    ManagedChannel,
     PublishMode,
     SearchConsolePageMetric,
     SyncedBloggerPost,
+    SyncedCloudflarePost,
 )
 from app.services import analytics_service
 from app.services import google_indexing_service as indexing_service
@@ -86,6 +88,53 @@ def _create_post(db: Session, *, blog_id: int, remote_id: str, url: str) -> Sync
         updated_at_remote=now,
         labels=[],
         content_html="",
+        excerpt_text="",
+    )
+    db.add(post)
+    db.commit()
+    db.refresh(post)
+    return post
+
+
+def _create_managed_channel(
+    db: Session,
+    *,
+    channel_id: str,
+    linked_blog_id: int | None,
+    base_url: str = "https://archive.example.com",
+) -> ManagedChannel:
+    channel = ManagedChannel(
+        provider="cloudflare",
+        channel_id=channel_id,
+        display_name=f"Channel {channel_id}",
+        linked_blog_id=linked_blog_id,
+        status="connected",
+        base_url=base_url,
+        is_enabled=True,
+    )
+    db.add(channel)
+    db.commit()
+    db.refresh(channel)
+    return channel
+
+
+def _create_cloudflare_post(
+    db: Session,
+    *,
+    managed_channel_id: int,
+    remote_id: str,
+    url: str,
+) -> SyncedCloudflarePost:
+    now = datetime.now(timezone.utc)
+    post = SyncedCloudflarePost(
+        managed_channel_id=managed_channel_id,
+        remote_post_id=remote_id,
+        title=f"Cloudflare {remote_id}",
+        url=url,
+        status="published",
+        published_at=now,
+        updated_at_remote=now,
+        labels=[],
         excerpt_text="",
     )
     db.add(post)
@@ -493,3 +542,282 @@ def test_analytics_articles_include_ctr_and_index_fields(db: Session) -> None:
     assert row.index_coverage_state == "Submitted and indexed"
     assert row.last_notify_time is not None
     assert row.index_last_checked_at is not None
+
+
+def test_playwright_indexing_run_test_filters_indexed_and_cooldown(db: Session) -> None:
+    blog = _create_blog(db, blog_id=41, slug="blog-forty-one", site_url="sc-domain:example.com")
+    channel = _create_managed_channel(db, channel_id="cf-main", linked_blog_id=blog.id, base_url="https://archive.example.com")
+
+    _create_post(db, blog_id=blog.id, remote_id="b-1", url="https://example.com/a")
+    _create_post(db, blog_id=blog.id, remote_id="b-2", url="https://example.com/b")
+    _create_cloudflare_post(db, managed_channel_id=channel.id, remote_id="c-1", url="https://archive.example.com/a")
+    _create_cloudflare_post(db, managed_channel_id=channel.id, remote_id="c-2", url="https://archive.example.com/b")
+
+    db.add(
+        GoogleIndexUrlState(
+            blog_id=blog.id,
+            url="https://example.com/a",
+            index_status="indexed",
+        )
+    )
+    db.add(
+        GoogleIndexUrlState(
+            blog_id=blog.id,
+            url="https://archive.example.com/a",
+            index_status="pending",
+            next_eligible_at=datetime.now(timezone.utc) + timedelta(days=2),
+        )
+    )
+    db.commit()
+
+    upsert_settings(
+        db,
+        {
+            "blogger_playwright_enabled": "true",
+            "blogger_playwright_cdp_url": "http://host.docker.internal:9223",
+        },
+    )
+
+    result = indexing_service.request_playwright_indexing(
+        db,
+        count=12,
+        run_test=True,
+        target_scope="blogger+cloudflare",
+    )
+
+    queued = [item for item in result["results"] if item.get("status") == "queued_test"]
+    skipped = [item for item in result["results"] if item.get("status") == "skipped"]
+    queued_urls = {item["url"] for item in queued}
+
+    assert result["planned_count"] == 2
+    assert "https://example.com/b" in queued_urls
+    assert "https://archive.example.com/b" in queued_urls
+    assert {item.get("reason") for item in skipped} == {"already_indexed", "cooldown"}
+
+
+def test_playwright_indexing_round_robin_distribution(db: Session) -> None:
+    blog = _create_blog(db, blog_id=42, slug="blog-forty-two", site_url="sc-domain:example.com")
+    channel = _create_managed_channel(db, channel_id="cf-second", linked_blog_id=blog.id, base_url="https://archive.example.com")
+
+    _create_post(db, blog_id=blog.id, remote_id="b-1", url="https://example.com/one")
+    _create_post(db, blog_id=blog.id, remote_id="b-2", url="https://example.com/two")
+    _create_cloudflare_post(db, managed_channel_id=channel.id, remote_id="c-1", url="https://archive.example.com/one")
+    _create_cloudflare_post(db, managed_channel_id=channel.id, remote_id="c-2", url="https://archive.example.com/two")
+
+    upsert_settings(
+        db,
+        {
+            "blogger_playwright_enabled": "true",
+            "blogger_playwright_cdp_url": "http://host.docker.internal:9223",
+        },
+    )
+
+    result = indexing_service.request_playwright_indexing(
+        db,
+        count=4,
+        run_test=True,
+        target_scope="blogger+cloudflare",
+    )
+    queued = [item for item in result["results"] if item.get("status") == "queued_test"]
+    assert len(queued) == 4
+    assert [item["source"] for item in queued] == ["blogger", "cloudflare", "blogger", "cloudflare"]
+
+
+def test_playwright_indexing_persists_log_and_state(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    blog = _create_blog(db, blog_id=43, slug="blog-forty-three", site_url="sc-domain:example.com")
+    _create_post(db, blog_id=blog.id, remote_id="b-1", url="https://example.com/post")
+
+    upsert_settings(
+        db,
+        {
+            "blogger_playwright_enabled": "true",
+            "blogger_playwright_cdp_url": "http://host.docker.internal:9223",
+        },
+    )
+
+    class _FakeOutcome:
+        def to_dict(self) -> dict:
+            return {
+                "status": "ok",
+                "code": "request_submitted",
+                "message": "accepted",
+                "site_url": "sc-domain:example.com",
+                "url": "https://example.com/post",
+                "inspection_url": "https://search.google.com/search-console/inspect",
+                "cdp_url": "http://host.docker.internal:9223",
+            }
+
+    monkeypatch.setattr(indexing_service, "request_indexing_via_search_console", lambda **_kwargs: _FakeOutcome())
+
+    result = indexing_service.request_playwright_indexing(
+        db,
+        count=1,
+        run_test=False,
+        target_scope="blogger",
+        trigger_mode="manual",
+    )
+
+    assert result["attempted"] == 1
+    assert result["success"] == 1
+
+    log = db.query(GoogleIndexRequestLog).filter(GoogleIndexRequestLog.request_type == "playwright_publish").one()
+    assert log.trigger_mode == "manual"
+    assert log.success is True
+
+    state = db.query(GoogleIndexUrlState).filter(GoogleIndexUrlState.blog_id == blog.id).one()
+    assert state.last_publish_success is True
+    assert state.index_status == "submitted"
+    assert state.next_eligible_at is not None
+
+
+def test_playwright_indexing_explicit_single_url(db: Session) -> None:
+    blog = _create_blog(db, blog_id=44, slug="blog-forty-four", site_url="sc-domain:example.com")
+    channel = _create_managed_channel(db, channel_id="cf-third", linked_blog_id=blog.id, base_url="https://archive.example.com")
+    _create_post(db, blog_id=blog.id, remote_id="b-1", url="https://example.com/one")
+    _create_cloudflare_post(db, managed_channel_id=channel.id, remote_id="c-1", url="https://archive.example.com/one")
+
+    upsert_settings(
+        db,
+        {
+            "blogger_playwright_enabled": "true",
+            "blogger_playwright_cdp_url": "http://host.docker.internal:9223",
+        },
+    )
+
+    result = indexing_service.request_playwright_indexing(
+        db,
+        count=1,
+        run_test=True,
+        urls=["https://archive.example.com/one"],
+        target_scope="cloudflare",
+    )
+    assert result["planned_count"] == 1
+    queued = [item for item in result["results"] if item.get("status") == "queued_test"]
+    assert len(queued) == 1
+    assert queued[0]["source"] == "cloudflare"
+    assert queued[0]["url"] == "https://archive.example.com/one"
+
+
+def test_playwright_indexing_rejects_when_lock_is_busy(db: Session) -> None:
+    blog = _create_blog(db, blog_id=45, slug="blog-forty-five", site_url="sc-domain:example.com")
+    url = "https://example.com/lock-test"
+    _create_post(db, blog_id=blog.id, remote_id="b-1", url=url)
+
+    upsert_settings(
+        db,
+        {
+            "blogger_playwright_enabled": "true",
+            "blogger_playwright_cdp_url": "http://host.docker.internal:9223",
+        },
+    )
+
+    class _BusyLock:
+        def acquire(self, blocking: bool = True):  # noqa: ARG002
+            return False
+
+        def release(self):
+            return None
+
+    original_lock = indexing_service._PLAYWRIGHT_REQUEST_LOCK
+    indexing_service._PLAYWRIGHT_REQUEST_LOCK = _BusyLock()
+    try:
+        result = indexing_service.request_playwright_indexing(
+            db,
+            count=1,
+            run_test=False,
+            urls=[url],
+            target_scope="blogger",
+        )
+    finally:
+        indexing_service._PLAYWRIGHT_REQUEST_LOCK = original_lock
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "playwright_request_in_progress"
+
+
+def test_refresh_indexing_status_for_scope_skip_already_indexed(db: Session) -> None:
+    blog = _create_blog(db, blog_id=46, slug="blog-forty-six", site_url="sc-domain:example.com")
+    url = "https://example.com/indexed"
+    _create_post(db, blog_id=blog.id, remote_id="b-1", url=url)
+    db.add(
+        GoogleIndexUrlState(
+            blog_id=blog.id,
+            url=url,
+            index_status="indexed",
+        )
+    )
+    db.commit()
+
+    result = indexing_service.refresh_indexing_status_for_scope(
+        db,
+        urls=[url],
+        target_scope="blogger",
+        force=False,
+    )
+    assert result["skipped"] == 1
+    assert result["results"][0]["reason"] == "already_indexed"
+    assert result["results"][0]["code"] == "already_indexed"
+
+
+def test_refresh_indexing_status_for_scope_refreshes_url(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    blog = _create_blog(db, blog_id=47, slug="blog-forty-seven", site_url="sc-domain:example.com")
+    url = "https://example.com/refresh-me"
+    _create_post(db, blog_id=blog.id, remote_id="b-1", url=url)
+
+    def _fake_google_request(_db: Session, method: str, request_url: str, **_kwargs):  # noqa: ARG001
+        if request_url == indexing_service.URL_INSPECTION_INSPECT_URL:
+            return FakeResponse(
+                200,
+                {
+                    "inspectionResult": {
+                        "indexStatusResult": {
+                            "coverageState": "Submitted and indexed",
+                            "indexingState": "INDEXING_ALLOWED",
+                            "verdict": "PASS",
+                            "lastCrawlTime": "2026-04-09T00:00:00Z",
+                        }
+                    }
+                },
+            )
+        if request_url.startswith(indexing_service.INDEXING_METADATA_URL):
+            return FakeResponse(
+                200,
+                {
+                    "urlNotificationMetadata": {
+                        "latestUpdate": {
+                            "notifyTime": "2026-04-09T01:00:00Z",
+                        }
+                    }
+                },
+            )
+        return FakeResponse(404, {"error": {"message": "unknown request"}})
+
+    monkeypatch.setattr(indexing_service, "authorized_google_request", _fake_google_request)
+
+    result = indexing_service.refresh_indexing_status_for_scope(
+        db,
+        urls=[url],
+        target_scope="blogger",
+        force=True,
+    )
+    assert result["success"] == 1
+    assert result["results"][0]["status"] == "ok"
+    assert result["results"][0]["index_status"] == "indexed"
+
+
+def test_playwright_schedule_is_disabled_in_manual_only_mode(db: Session) -> None:
+    upsert_settings(
+        db,
+        {
+            "automation_google_indexing_enabled": "true",
+            "blogger_playwright_enabled": "true",
+            "blogger_playwright_cdp_url": "http://host.docker.internal:9223",
+        },
+    )
+
+    first = indexing_service.run_google_playwright_indexing_schedule(
+        db,
+        now=datetime(2026, 4, 9, 1, 0, tzinfo=timezone.utc),
+    )
+    assert first["status"] == "disabled"
+    assert first["reason"] == "manual_only_mode"

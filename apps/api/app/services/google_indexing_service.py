@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from threading import Lock
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select, tuple_
@@ -14,14 +15,20 @@ from app.models.entities import (
     Blog,
     GoogleIndexRequestLog,
     GoogleIndexUrlState,
+    ManagedChannel,
     SearchConsolePageMetric,
     SyncedBloggerPost,
+    SyncedCloudflarePost,
 )
 from app.services.blogger_oauth_service import (
     BloggerOAuthError,
     INDEXING_SCOPE,
     authorized_google_request,
     has_granted_google_scope,
+)
+from app.services.search_console_playwright_service import (
+    SearchConsolePlaywrightError,
+    request_indexing_via_search_console,
 )
 from app.services.settings_service import get_settings_map
 
@@ -37,6 +44,17 @@ DEFAULT_REFRESH_LIMIT = 50
 LA_TIMEZONE = ZoneInfo("America/Los_Angeles")
 URL_INSPECTION_FREE_DAILY_LIMIT = 2000
 URL_INSPECTION_FREE_QPM_LIMIT = 600
+PLAYWRIGHT_PUBLISH_DAILY_LIMIT = 12
+PLAYWRIGHT_CANDIDATE_LIMIT = 500
+_PLAYWRIGHT_REQUEST_LOCK = Lock()
+
+
+@dataclass(slots=True)
+class PlaywrightIndexTarget:
+    source: str
+    blog_id: int
+    url: str
+    site_url: str
 
 
 @dataclass(slots=True)
@@ -66,6 +84,197 @@ def _to_int(value: str | int | None, fallback: int, *, minimum: int = 0) -> int:
 
 def _normalize_url(value: str) -> str:
     return str(value or "").strip()
+
+
+def _is_valid_http_url(value: str) -> bool:
+    parsed = urlparse(_normalize_url(value))
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _resolve_search_console_site_url(*, target_url: str, explicit_site_url: str | None) -> str:
+    explicit = str(explicit_site_url or "").strip()
+    if explicit:
+        return explicit
+    if not _is_valid_http_url(target_url):
+        return ""
+    host = (urlparse(target_url).hostname or "").strip().lower()
+    if not host:
+        return ""
+    return f"sc-domain:{host}"
+
+
+def _parse_target_scope(scope: str | None) -> tuple[bool, bool]:
+    normalized = str(scope or "blogger+cloudflare").strip().lower()
+    include_blogger = "blogger" in normalized
+    include_cloudflare = "cloudflare" in normalized
+    if not include_blogger and not include_cloudflare:
+        return True, True
+    return include_blogger, include_cloudflare
+
+
+def _list_blogger_playwright_targets(db: Session, *, limit: int) -> list[PlaywrightIndexTarget]:
+    rows = db.execute(
+        select(
+            SyncedBloggerPost.blog_id,
+            SyncedBloggerPost.url,
+            Blog.search_console_site_url,
+        )
+        .join(Blog, Blog.id == SyncedBloggerPost.blog_id)
+        .where(
+            Blog.is_active.is_(True),
+            SyncedBloggerPost.url.is_not(None),
+            SyncedBloggerPost.url != "",
+        )
+        .order_by(
+            SyncedBloggerPost.updated_at_remote.desc(),
+            SyncedBloggerPost.published_at.desc(),
+            SyncedBloggerPost.id.desc(),
+        )
+        .limit(limit)
+    ).all()
+
+    targets: list[PlaywrightIndexTarget] = []
+    for blog_id, raw_url, explicit_site_url in rows:
+        url = _normalize_url(raw_url)
+        if not _is_valid_http_url(url):
+            continue
+        site_url = _resolve_search_console_site_url(target_url=url, explicit_site_url=explicit_site_url)
+        if not site_url:
+            continue
+        targets.append(
+            PlaywrightIndexTarget(
+                source="blogger",
+                blog_id=int(blog_id),
+                url=url,
+                site_url=site_url,
+            )
+        )
+    return targets
+
+
+def _list_cloudflare_playwright_targets(db: Session, *, limit: int) -> list[PlaywrightIndexTarget]:
+    rows = db.execute(
+        select(
+            SyncedCloudflarePost.url,
+            ManagedChannel.linked_blog_id,
+            ManagedChannel.base_url,
+            Blog.search_console_site_url,
+        )
+        .join(ManagedChannel, ManagedChannel.id == SyncedCloudflarePost.managed_channel_id)
+        .outerjoin(Blog, Blog.id == ManagedChannel.linked_blog_id)
+        .where(
+            ManagedChannel.is_enabled.is_(True),
+            SyncedCloudflarePost.url.is_not(None),
+            SyncedCloudflarePost.url != "",
+            SyncedCloudflarePost.status.in_(("published", "live")),
+        )
+        .order_by(
+            SyncedCloudflarePost.updated_at_remote.desc(),
+            SyncedCloudflarePost.published_at.desc(),
+            SyncedCloudflarePost.id.desc(),
+        )
+        .limit(limit)
+    ).all()
+
+    targets: list[PlaywrightIndexTarget] = []
+    for raw_url, linked_blog_id, base_url, explicit_site_url in rows:
+        if linked_blog_id is None:
+            continue
+        url = _normalize_url(raw_url)
+        if not _is_valid_http_url(url):
+            continue
+        site_url = _resolve_search_console_site_url(
+            target_url=url,
+            explicit_site_url=explicit_site_url or base_url,
+        )
+        if not site_url:
+            continue
+        targets.append(
+            PlaywrightIndexTarget(
+                source="cloudflare",
+                blog_id=int(linked_blog_id),
+                url=url,
+                site_url=site_url,
+            )
+        )
+    return targets
+
+
+def _load_url_states_for_pairs(db: Session, pairs: set[tuple[int, str]]) -> dict[tuple[int, str], GoogleIndexUrlState]:
+    if not pairs:
+        return {}
+    rows = db.execute(
+        select(GoogleIndexUrlState).where(tuple_(GoogleIndexUrlState.blog_id, GoogleIndexUrlState.url).in_(list(pairs)))
+    ).scalars().all()
+    return {(row.blog_id, row.url): row for row in rows}
+
+
+def _pick_round_robin_targets(
+    *,
+    targets: list[PlaywrightIndexTarget],
+    count: int,
+    force: bool,
+    now: datetime,
+    state_map: dict[tuple[int, str], GoogleIndexUrlState],
+) -> tuple[list[PlaywrightIndexTarget], list[dict[str, Any]]]:
+    queues: dict[str, list[PlaywrightIndexTarget]] = {"blogger": [], "cloudflare": []}
+    skipped: list[dict[str, Any]] = []
+    seen_pairs: set[tuple[int, str]] = set()
+
+    for target in targets:
+        pair = (target.blog_id, target.url)
+        if pair in seen_pairs:
+            continue
+        seen_pairs.add(pair)
+
+        state = state_map.get(pair)
+        if not force and state is not None:
+            if str(state.index_status or "").strip().lower() == "indexed":
+                skipped.append(
+                    {
+                        "status": "skipped",
+                        "reason": "already_indexed",
+                        "source": target.source,
+                        "blog_id": target.blog_id,
+                        "url": target.url,
+                    }
+                )
+                continue
+
+            next_eligible = _ensure_utc(state.next_eligible_at)
+            if next_eligible and next_eligible > now:
+                skipped.append(
+                    {
+                        "status": "skipped",
+                        "reason": "cooldown",
+                        "source": target.source,
+                        "blog_id": target.blog_id,
+                        "url": target.url,
+                        "next_eligible_at": next_eligible.isoformat(),
+                    }
+                )
+                continue
+
+        queues.setdefault(target.source, []).append(target)
+
+    selected: list[PlaywrightIndexTarget] = []
+    source_order = [source for source in ("blogger", "cloudflare") if queues.get(source)]
+    source_order.extend([source for source in queues.keys() if source not in source_order and queues.get(source)])
+
+    while len(selected) < count:
+        progressed = False
+        for source in source_order:
+            queue = queues.get(source) or []
+            if not queue:
+                continue
+            selected.append(queue.pop(0))
+            progressed = True
+            if len(selected) >= count:
+                break
+        if not progressed:
+            break
+
+    return selected, skipped
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
@@ -958,6 +1167,168 @@ def refresh_indexing_for_blog(
     }
 
 
+def _map_refresh_error_code(raw_error: str | None) -> str | None:
+    message = str(raw_error or "").strip().lower()
+    if not message:
+        return None
+    if "captcha" in message or "unusual traffic" in message:
+        return "captcha_detected"
+    if "permission" in message or "access denied" in message or "search_console_not_connected" in message:
+        return "permission_denied"
+    if "login" in message or "reauth" in message or "oauth" in message:
+        return "login_required"
+    return "inspection_failed"
+
+
+def refresh_indexing_status_for_scope(
+    db: Session,
+    *,
+    urls: list[str],
+    target_scope: str = "blogger+cloudflare",
+    force: bool = False,
+    trigger_mode: str = "manual",
+) -> dict[str, Any]:
+    normalized_urls = _normalize_unique_urls(urls)
+    if not normalized_urls:
+        return {
+            "status": "idle",
+            "reason": "no_candidate_urls",
+            "attempted": 0,
+            "success": 0,
+            "failed": 0,
+            "skipped": 0,
+            "results": [],
+        }
+
+    targets, unresolved = _resolve_playwright_targets_for_urls(
+        db,
+        urls=normalized_urls,
+        target_scope=target_scope,
+    )
+    if not targets and not unresolved:
+        return {
+            "status": "idle",
+            "reason": "no_candidate_urls",
+            "attempted": 0,
+            "success": 0,
+            "failed": 0,
+            "skipped": 0,
+            "results": [],
+        }
+
+    now = datetime.now(timezone.utc)
+    blog_ids = {item.blog_id for item in targets}
+    blog_rows = db.execute(select(Blog).where(Blog.id.in_(list(blog_ids)))).scalars().all() if blog_ids else []
+    blog_map = {item.id: item for item in blog_rows}
+    state_map = _load_url_states_for_pairs(db, {(item.blog_id, item.url) for item in targets})
+
+    attempted = 0
+    success = 0
+    failed = 0
+    skipped = 0
+    results: list[dict[str, Any]] = []
+
+    for url in unresolved:
+        skipped += 1
+        results.append(
+            {
+                "status": "skipped",
+                "reason": "url_not_found_for_scope",
+                "source": None,
+                "blog_id": None,
+                "url": url,
+            }
+        )
+
+    for item in targets:
+        state = state_map.get((item.blog_id, item.url))
+        if not force and state is not None:
+            if str(state.index_status or "").strip().lower() == "indexed":
+                skipped += 1
+                payload = _serialize_action_result(state, status="skipped", reason="already_indexed")
+                payload["source"] = item.source
+                payload["site_url"] = item.site_url
+                payload["code"] = "already_indexed"
+                results.append(payload)
+                continue
+            next_eligible = _ensure_utc(state.next_eligible_at)
+            if next_eligible and next_eligible > now:
+                skipped += 1
+                payload = _serialize_action_result(state, status="skipped", reason="cooldown")
+                payload["source"] = item.source
+                payload["site_url"] = item.site_url
+                payload["code"] = "cooldown"
+                results.append(payload)
+                continue
+
+        blog = blog_map.get(item.blog_id)
+        if blog is None:
+            failed += 1
+            results.append(
+                {
+                    "status": "failed",
+                    "reason": "blog_not_found",
+                    "source": item.source,
+                    "blog_id": item.blog_id,
+                    "url": item.url,
+                    "site_url": item.site_url,
+                    "code": "permission_denied",
+                }
+            )
+            continue
+
+        attempted += 1
+        try:
+            refreshed = refresh_single_url_state(
+                db,
+                blog=blog,
+                url=item.url,
+                trigger_mode=trigger_mode,
+            )
+            code = _map_refresh_error_code(refreshed.last_error)
+            if code:
+                failed += 1
+                payload = _serialize_action_result(refreshed, status="failed", reason=code)
+                payload["code"] = code
+            else:
+                success += 1
+                payload = _serialize_action_result(refreshed, status="ok")
+            payload["source"] = item.source
+            payload["site_url"] = item.site_url
+            results.append(payload)
+        except Exception as exc:  # noqa: BLE001
+            failed += 1
+            results.append(
+                {
+                    "status": "failed",
+                    "reason": "inspection_failed",
+                    "source": item.source,
+                    "blog_id": item.blog_id,
+                    "url": item.url,
+                    "site_url": item.site_url,
+                    "code": "inspection_failed",
+                    "last_error": str(exc),
+                }
+            )
+
+    status_value = "ok"
+    if attempted == 0 and failed == 0 and success == 0:
+        status_value = "idle"
+    elif success == 0 and failed > 0:
+        status_value = "failed"
+    elif failed > 0 or skipped > 0:
+        status_value = "partial"
+
+    return {
+        "status": status_value,
+        "attempted": attempted,
+        "success": success,
+        "failed": failed,
+        "skipped": skipped,
+        "results": results,
+    }
+
+
 def _normalize_unique_urls(urls: list[str] | None) -> list[str]:
     seen: set[str] = set()
     items: list[str] = []
@@ -1107,6 +1478,414 @@ def request_indexing_for_blog(
         "run_test": bool(run_test),
         "test": test_result or {"status": "skipped", "reason": "not_requested"},
         "results": results,
+    }
+
+
+def _build_playwright_targets(
+    db: Session,
+    *,
+    target_scope: str,
+    limit: int,
+) -> list[PlaywrightIndexTarget]:
+    include_blogger, include_cloudflare = _parse_target_scope(target_scope)
+    targets: list[PlaywrightIndexTarget] = []
+    if include_blogger:
+        targets.extend(_list_blogger_playwright_targets(db, limit=limit))
+    if include_cloudflare:
+        targets.extend(_list_cloudflare_playwright_targets(db, limit=limit))
+    return targets
+
+
+def _list_blogger_playwright_targets_for_urls(
+    db: Session,
+    *,
+    urls: list[str],
+) -> list[PlaywrightIndexTarget]:
+    if not urls:
+        return []
+    rows = db.execute(
+        select(
+            SyncedBloggerPost.blog_id,
+            SyncedBloggerPost.url,
+            Blog.search_console_site_url,
+        )
+        .join(Blog, Blog.id == SyncedBloggerPost.blog_id)
+        .where(
+            Blog.is_active.is_(True),
+            SyncedBloggerPost.url.in_(urls),
+        )
+        .order_by(
+            SyncedBloggerPost.updated_at_remote.desc(),
+            SyncedBloggerPost.published_at.desc(),
+            SyncedBloggerPost.id.desc(),
+        )
+    ).all()
+
+    items: list[PlaywrightIndexTarget] = []
+    for blog_id, raw_url, explicit_site_url in rows:
+        url = _normalize_url(raw_url)
+        if not _is_valid_http_url(url):
+            continue
+        site_url = _resolve_search_console_site_url(target_url=url, explicit_site_url=explicit_site_url)
+        if not site_url:
+            continue
+        items.append(
+            PlaywrightIndexTarget(
+                source="blogger",
+                blog_id=int(blog_id),
+                url=url,
+                site_url=site_url,
+            )
+        )
+    return items
+
+
+def _list_cloudflare_playwright_targets_for_urls(
+    db: Session,
+    *,
+    urls: list[str],
+) -> list[PlaywrightIndexTarget]:
+    if not urls:
+        return []
+    rows = db.execute(
+        select(
+            SyncedCloudflarePost.url,
+            ManagedChannel.linked_blog_id,
+            ManagedChannel.base_url,
+            Blog.search_console_site_url,
+        )
+        .join(ManagedChannel, ManagedChannel.id == SyncedCloudflarePost.managed_channel_id)
+        .outerjoin(Blog, Blog.id == ManagedChannel.linked_blog_id)
+        .where(
+            ManagedChannel.is_enabled.is_(True),
+            SyncedCloudflarePost.url.in_(urls),
+            SyncedCloudflarePost.status.in_(("published", "live")),
+        )
+        .order_by(
+            SyncedCloudflarePost.updated_at_remote.desc(),
+            SyncedCloudflarePost.published_at.desc(),
+            SyncedCloudflarePost.id.desc(),
+        )
+    ).all()
+
+    items: list[PlaywrightIndexTarget] = []
+    for raw_url, linked_blog_id, base_url, explicit_site_url in rows:
+        if linked_blog_id is None:
+            continue
+        url = _normalize_url(raw_url)
+        if not _is_valid_http_url(url):
+            continue
+        site_url = _resolve_search_console_site_url(
+            target_url=url,
+            explicit_site_url=explicit_site_url or base_url,
+        )
+        if not site_url:
+            continue
+        items.append(
+            PlaywrightIndexTarget(
+                source="cloudflare",
+                blog_id=int(linked_blog_id),
+                url=url,
+                site_url=site_url,
+            )
+        )
+    return items
+
+
+def _resolve_playwright_targets_for_urls(
+    db: Session,
+    *,
+    urls: list[str],
+    target_scope: str,
+) -> tuple[list[PlaywrightIndexTarget], list[str]]:
+    normalized_urls = _normalize_unique_urls(urls)
+    if not normalized_urls:
+        return [], []
+
+    include_blogger, include_cloudflare = _parse_target_scope(target_scope)
+    candidates: list[PlaywrightIndexTarget] = []
+    if include_blogger:
+        candidates.extend(_list_blogger_playwright_targets_for_urls(db, urls=normalized_urls))
+    if include_cloudflare:
+        candidates.extend(_list_cloudflare_playwright_targets_for_urls(db, urls=normalized_urls))
+
+    by_url: dict[str, list[PlaywrightIndexTarget]] = {}
+    for item in candidates:
+        by_url.setdefault(item.url, []).append(item)
+
+    source_order = [source for source in ("blogger", "cloudflare") if (include_blogger if source == "blogger" else include_cloudflare)]
+    selected: list[PlaywrightIndexTarget] = []
+    unresolved: list[str] = []
+    seen_pairs: set[tuple[int, str]] = set()
+
+    for url in normalized_urls:
+        options = by_url.get(url, [])
+        if not options:
+            unresolved.append(url)
+            continue
+        pick: PlaywrightIndexTarget | None = None
+        for source in source_order:
+            for option in options:
+                if option.source == source:
+                    pick = option
+                    break
+            if pick is not None:
+                break
+        if pick is None:
+            unresolved.append(url)
+            continue
+        pair = (pick.blog_id, pick.url)
+        if pair in seen_pairs:
+            continue
+        seen_pairs.add(pair)
+        selected.append(pick)
+
+    return selected, unresolved
+
+
+def request_playwright_indexing(
+    db: Session,
+    *,
+    count: int = PLAYWRIGHT_PUBLISH_DAILY_LIMIT,
+    force: bool = False,
+    run_test: bool = True,
+    test_limit: int = 100,
+    urls: list[str] | None = None,
+    target_scope: str = "blogger+cloudflare",
+    trigger_mode: str = "manual",
+) -> dict[str, Any]:
+    settings_map = get_settings_map(db)
+    if not _to_bool(settings_map.get("blogger_playwright_enabled"), default=False):
+        return {"status": "skipped", "reason": "blogger_playwright_disabled"}
+
+    cdp_url = (settings_map.get("blogger_playwright_cdp_url") or "").strip()
+    if not cdp_url:
+        return {"status": "skipped", "reason": "blogger_playwright_cdp_url_missing"}
+
+    explicit_urls = _normalize_unique_urls(urls)
+    requested_count = max(1, int(count or PLAYWRIGHT_PUBLISH_DAILY_LIMIT))
+    if explicit_urls:
+        requested_count = min(requested_count, len(explicit_urls))
+    capped_count = min(requested_count, PLAYWRIGHT_PUBLISH_DAILY_LIMIT)
+    candidate_limit = max(int(test_limit or 100), capped_count * 8, PLAYWRIGHT_CANDIDATE_LIMIT)
+
+    unresolved: list[str] = []
+    if explicit_urls:
+        candidates, unresolved = _resolve_playwright_targets_for_urls(
+            db,
+            urls=explicit_urls,
+            target_scope=target_scope,
+        )
+    else:
+        candidates = _build_playwright_targets(db, target_scope=target_scope, limit=candidate_limit)
+
+    if not candidates and not unresolved:
+        return {
+            "status": "idle",
+            "reason": "no_candidate_urls",
+            "requested_count": requested_count,
+            "planned_count": 0,
+            "candidate_count": 0,
+            "attempted": 0,
+            "success": 0,
+            "failed": 0,
+            "skipped": 0,
+            "results": [],
+        }
+
+    now = datetime.now(timezone.utc)
+    state_map = _load_url_states_for_pairs(db, {(item.blog_id, item.url) for item in candidates})
+    selected_targets, pre_skipped = _pick_round_robin_targets(
+        targets=candidates,
+        count=capped_count,
+        force=force,
+        now=now,
+        state_map=state_map,
+    )
+
+    if unresolved:
+        pre_skipped.extend(
+            {
+                "status": "skipped",
+                "reason": "url_not_found_for_scope",
+                "source": None,
+                "blog_id": None,
+                "url": url,
+            }
+            for url in unresolved
+        )
+
+    if run_test:
+        queued_results = [
+            {
+                "status": "queued_test",
+                "source": item.source,
+                "blog_id": item.blog_id,
+                "url": item.url,
+                "site_url": item.site_url,
+            }
+            for item in selected_targets
+        ]
+        return {
+            "status": "ok",
+            "requested_count": requested_count,
+            "planned_count": len(selected_targets),
+            "candidate_count": len(candidates),
+            "attempted": 0,
+            "success": 0,
+            "failed": 0,
+            "skipped": len(pre_skipped),
+            "results": queued_results + pre_skipped,
+        }
+
+    if not _PLAYWRIGHT_REQUEST_LOCK.acquire(blocking=False):
+        return {
+            "status": "skipped",
+            "reason": "playwright_request_in_progress",
+            "requested_count": requested_count,
+            "planned_count": len(selected_targets),
+            "candidate_count": len(candidates),
+            "attempted": 0,
+            "success": 0,
+            "failed": 0,
+            "skipped": len(pre_skipped),
+            "results": pre_skipped,
+        }
+
+    config = get_google_indexing_config(db)
+    results: list[dict[str, Any]] = []
+    attempted = 0
+    success = 0
+    failed = 0
+    skipped = len(pre_skipped)
+    stop_batch = False
+
+    results.extend(pre_skipped)
+
+    try:
+        for target in selected_targets:
+            if stop_batch:
+                results.append(
+                    {
+                        "status": "skipped",
+                        "reason": "batch_stopped_after_terminal_failure",
+                        "source": target.source,
+                        "blog_id": target.blog_id,
+                        "url": target.url,
+                        "site_url": target.site_url,
+                    }
+                )
+                skipped += 1
+                continue
+
+            attempted += 1
+            state = _get_or_create_url_state(db, blog_id=target.blog_id, url=target.url)
+            state.last_checked_at = now
+            outcome_payload: dict[str, Any]
+
+            try:
+                outcome = request_indexing_via_search_console(
+                    cdp_url=cdp_url,
+                    site_url=target.site_url,
+                    target_url=target.url,
+                )
+                outcome_payload = outcome.to_dict()
+            except SearchConsolePlaywrightError as exc:
+                outcome_payload = {
+                    "status": "failed",
+                    "code": exc.code,
+                    "message": exc.message,
+                    "cdp_url": cdp_url,
+                    "site_url": target.site_url,
+                    "url": target.url,
+                    "inspection_url": "",
+                }
+
+            request_success = outcome_payload.get("status") == "ok"
+            request_code = str(outcome_payload.get("code") or "")
+            request_message = str(outcome_payload.get("message") or "")
+
+            _record_request_log(
+                db,
+                blog_id=target.blog_id,
+                url=target.url,
+                request_type="playwright_publish",
+                trigger_mode=trigger_mode,
+                is_force=force,
+                success=request_success,
+                http_status=200 if request_success else None,
+                request_payload={
+                    "url": target.url,
+                    "site_url": target.site_url,
+                    "target_scope": target_scope,
+                    "cdp_url": cdp_url,
+                },
+                response_payload=outcome_payload,
+                error_message=None if request_success else request_message,
+            )
+
+            state.last_publish_at = now
+            state.last_publish_success = bool(request_success)
+            state.last_publish_http_status = 200 if request_success else None
+            state.publish_payload = outcome_payload
+            if request_success:
+                state.index_status = "submitted"
+                state.next_eligible_at = now + timedelta(days=max(config.cooldown_days, 1))
+                state.last_error = None
+                success += 1
+                result_status = "ok"
+                result_reason = None
+            else:
+                state.last_error = request_message or request_code or "playwright_publish_failed"
+                state.next_eligible_at = now + timedelta(days=1)
+                failed += 1
+                result_status = "failed"
+                result_reason = request_code or "playwright_publish_failed"
+                if request_code in {"captcha_detected", "login_required", "permission_denied"}:
+                    stop_batch = True
+
+            db.add(state)
+            db.commit()
+            db.refresh(state)
+
+            result_payload = _serialize_action_result(state, status=result_status, reason=result_reason)
+            result_payload["source"] = target.source
+            result_payload["site_url"] = target.site_url
+            result_payload["code"] = request_code
+            results.append(result_payload)
+    finally:
+        _PLAYWRIGHT_REQUEST_LOCK.release()
+
+    status_value = "ok"
+    if attempted == 0 and failed == 0 and success == 0:
+        status_value = "idle"
+    elif success == 0 and failed > 0:
+        status_value = "failed"
+    elif failed > 0 or skipped > 0:
+        status_value = "partial"
+
+    return {
+        "status": status_value,
+        "requested_count": requested_count,
+        "planned_count": len(selected_targets),
+        "candidate_count": len(candidates),
+        "attempted": attempted,
+        "success": success,
+        "failed": failed,
+        "skipped": skipped,
+        "results": results,
+    }
+
+
+def run_google_playwright_indexing_schedule(
+    db: Session,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    _ = now
+    return {
+        "status": "disabled",
+        "reason": "manual_only_mode",
     }
 
 

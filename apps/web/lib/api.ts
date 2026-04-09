@@ -15,6 +15,8 @@ import {
   GoogleBlogIndexingQuotaRead,
   GoogleBlogIndexingRefreshRead,
   GoogleBlogIndexingTestRead,
+  GoogleIndexStatusRefreshRead,
+  GooglePlaywrightIndexingRequestRead,
   GoogleIntegrationConfig,
   GoogleIndexingActionResult,
   IntegratedArchiveItem,
@@ -388,6 +390,9 @@ function mapGoogleIndexingActionResult(item: any): GoogleIndexingActionResult {
     reason: item.reason ?? null,
     blogId: item.blog_id,
     url: item.url ?? "",
+    source: item.source ?? null,
+    siteUrl: item.site_url ?? null,
+    code: item.code ?? null,
     indexStatus: item.index_status ?? "unknown",
     indexCoverageState: item.index_coverage_state ?? null,
     lastCrawlTime: item.last_crawl_time ?? null,
@@ -461,6 +466,65 @@ export async function requestGoogleBlogIndexing(payload: {
     test: response.test ?? {},
     results: (response.results ?? []).map(mapGoogleIndexingActionResult),
   } satisfies GoogleBlogIndexingRequestRead;
+}
+
+export async function requestGooglePlaywrightIndexing(payload: {
+  count?: number;
+  force?: boolean;
+  runTest?: boolean;
+  testLimit?: number;
+  urls?: string[];
+  targetScope?: "blogger+cloudflare" | "blogger" | "cloudflare";
+}) {
+  const response = await apiFetch<any>(`/google/indexing/request-playwright`, {
+    method: "POST",
+    body: JSON.stringify({
+      count: payload.count ?? 12,
+      force: payload.force ?? false,
+      run_test: payload.runTest ?? false,
+      test_limit: payload.testLimit ?? 100,
+      urls: payload.urls ?? null,
+      target_scope: payload.targetScope ?? "blogger+cloudflare",
+    }),
+  });
+  return {
+    status: response.status ?? "unknown",
+    reason: response.reason ?? null,
+    requestedCount: response.requested_count ?? payload.count ?? 12,
+    plannedCount: response.planned_count ?? 0,
+    candidateCount: response.candidate_count ?? 0,
+    attempted: response.attempted ?? 0,
+    success: response.success ?? 0,
+    failed: response.failed ?? 0,
+    skipped: response.skipped ?? 0,
+    results: (response.results ?? []).map(mapGoogleIndexingActionResult),
+  } satisfies GooglePlaywrightIndexingRequestRead;
+}
+
+export async function requestGoogleIndexStatusRefresh(payload: {
+  urls: string[];
+  force?: boolean;
+  runTest?: boolean;
+  targetScope?: "blogger+cloudflare" | "blogger" | "cloudflare";
+}) {
+  const response = await apiFetch<any>(`/google/indexing/status-refresh`, {
+    method: "POST",
+    body: JSON.stringify({
+      urls: payload.urls,
+      force: payload.force ?? true,
+      run_test: payload.runTest ?? false,
+      target_scope: payload.targetScope ?? "blogger+cloudflare",
+    }),
+  });
+  return {
+    status: response.status ?? "unknown",
+    reason: response.reason ?? null,
+    attempted: response.attempted ?? 0,
+    success: response.success ?? 0,
+    failed: response.failed ?? 0,
+    skipped: response.skipped ?? 0,
+    results: (response.results ?? []).map(mapGoogleIndexingActionResult),
+  } satisfies GoogleIndexStatusRefreshRead;
 }
 
 export async function getBlogSeoMeta(blogId: number) {
@@ -968,6 +1032,7 @@ function mapAnalyticsArticleFact(item: any) {
     category: item.category ?? null,
     seoScore: item.seo_score ?? null,
     geoScore: item.geo_score ?? null,
+    lighthouseScore: item.lighthouse_score ?? null,
     similarityScore: item.similarity_score ?? null,
     mostSimilarUrl: item.most_similar_url ?? null,
     status: item.status ?? null,
@@ -1280,7 +1345,7 @@ export async function getBlogMonthlyArticles(
     themeKey?: string | null;
     category?: string | null;
     status?: string | null;
-    sort?: "published_at" | "seo" | "geo" | "similarity" | "title";
+    sort?: "published_at" | "seo" | "geo" | "lighthouse" | "similarity" | "title";
     dir?: "asc" | "desc";
     page?: number;
     pageSize?: number;

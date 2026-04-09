@@ -20,7 +20,7 @@ from slugify import slugify
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.entities import Blog, SyncedBloggerPost
+from app.models.entities import Blog, GoogleIndexUrlState, SyncedBloggerPost
 from app.services.audit_service import add_log
 from app.services.openai_usage_service import (
     FREE_TIER_DEFAULT_LARGE_TEXT_MODEL,
@@ -1121,6 +1121,35 @@ def list_cloudflare_posts(db: Session) -> list[dict]:
 
     values = get_settings_map(db)
     posts = _list_remote_posts(values)
+    remote_urls: set[str] = set()
+    for post in posts:
+        for raw_url in (
+            post.get("publicUrl"),
+            post.get("public_url"),
+            post.get("url"),
+        ):
+            url = str(raw_url or "").strip()
+            if url:
+                remote_urls.add(url)
+
+    state_by_url: dict[str, GoogleIndexUrlState] = {}
+    if remote_urls:
+        rows = db.execute(
+            select(GoogleIndexUrlState).where(GoogleIndexUrlState.url.in_(list(remote_urls)))
+        ).scalars().all()
+        for row in rows:
+            existing = state_by_url.get(row.url)
+            row_ts = row.last_checked_at or row.updated_at or row.created_at
+            existing_ts = (
+                (existing.last_checked_at or existing.updated_at or existing.created_at)
+                if existing is not None
+                else None
+            )
+            if existing is None or (
+                row_ts is not None and (existing_ts is None or row_ts > existing_ts)
+            ):
+                state_by_url[row.url] = row
+
     public_site_base = _public_site_base_url(values)
     provider_status = "connected" if _normalize_base_url(values.get("cloudflare_blog_api_base_url")) else "disconnected"
     site_settings = _fetch_remote_site_settings(values)
@@ -1135,6 +1164,7 @@ def list_cloudflare_posts(db: Session) -> list[dict]:
         index_payload = post.get("index") if isinstance(post.get("index"), dict) else {}
         remote_public_url = str(post.get("publicUrl") or post.get("public_url") or post.get("url") or "").strip()
         published_url = remote_public_url or (f"{public_site_base}/ko/post/{quote(slug)}" if public_site_base and slug else None)
+        state = state_by_url.get(str(published_url or "").strip()) or state_by_url.get(remote_public_url)
         tags = post.get("tags") if isinstance(post.get("tags"), list) else []
         status_value = str(post.get("status") or "published").strip() or "published"
         created_at = str(post.get("createdAt") or post.get("created_at") or "").strip()
@@ -1172,6 +1202,8 @@ def list_cloudflare_posts(db: Session) -> list[dict]:
             or index_payload.get("status")
             or _resolve_index_status(post)
         ).strip() or "unknown"
+        if state and str(state.index_status or "").strip():
+            index_status = str(state.index_status).strip()
         items.append(
             {
                 "provider": "cloudflare",
@@ -1194,6 +1226,10 @@ def list_cloudflare_posts(db: Session) -> list[dict]:
                 "geo_score": geo_score,
                 "ctr": ctr,
                 "index_status": index_status,
+                "index_coverage_state": state.index_coverage_state if state else None,
+                "index_last_checked_at": state.last_checked_at.isoformat() if state and state.last_checked_at else None,
+                "next_eligible_at": state.next_eligible_at.isoformat() if state and state.next_eligible_at else None,
+                "last_error": state.last_error if state else None,
                 "quality_status": quality_status,
                 "published_at": published_at,
                 "created_at": created_at,

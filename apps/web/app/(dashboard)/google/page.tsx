@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { GoogleIndexingControls } from "@/components/dashboard/google-indexing-controls";
+import { GoogleIndexingRowActions } from "@/components/dashboard/google-indexing-row-actions";
 import { GooglePostSyncButton } from "@/components/dashboard/google-post-sync-button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -78,7 +78,7 @@ export default async function GoogleDataPage({
   if (isStaticPreview) {
     return (
       <div className="rounded-[28px] border border-slate-200 bg-white p-6 text-sm leading-6 text-slate-500 shadow-sm">
-        GitHub Pages 프리뷰에서는 SEO / 색인 데이터를 실시간으로 불러오지 않습니다.
+        GitHub Pages 프리뷰에서는 SEO/색인 실데이터를 호출하지 않습니다.
       </div>
     );
   }
@@ -90,7 +90,7 @@ export default async function GoogleDataPage({
       <Card>
         <CardHeader>
           <CardTitle>SEO / 색인</CardTitle>
-          <CardDescription>연동된 블로그가 아직 없습니다.</CardDescription>
+          <CardDescription>연동된 블로그가 없습니다.</CardDescription>
         </CardHeader>
       </Card>
     );
@@ -123,9 +123,9 @@ export default async function GoogleDataPage({
       <Card>
         <CardHeader>
           <CardDescription>SEO / 색인</CardDescription>
-          <CardTitle>연동 블로그별 색인 관리</CardTitle>
+          <CardTitle>연동 블로그 색인 관리</CardTitle>
           <p className="text-sm leading-7 text-slate-600">
-            실제로 연결된 Blogger 블로그와 Cloudflare 블로그만 목록에 보여주고, 선택한 대상 단위로 색인과 분석 상태를 관리합니다.
+            실제 연결된 Blogger/Cloudflare 대상만 표시하며, 게시글 단위로 색인 상태 확인 및 색인 실행을 처리합니다.
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -149,8 +149,8 @@ export default async function GoogleDataPage({
           <div className="grid gap-3 md:grid-cols-4">
             <Metric label="연동 대상 수" value={formatNumber(targets.length)} />
             <Metric label="정상 연결" value={formatNumber(targets.filter((item) => item.isConnected).length)} />
-            <Metric label="Search Console 연결" value={formatNumber(targets.filter((item) => Boolean(item.searchConsoleSiteUrl)).length)} />
-            <Metric label="GA4 연결" value={formatNumber(targets.filter((item) => Boolean(item.ga4PropertyId)).length)} />
+            <Metric label="Search Console" value={formatNumber(targets.filter((item) => Boolean(item.searchConsoleSiteUrl)).length)} />
+            <Metric label="GA4" value={formatNumber(targets.filter((item) => Boolean(item.ga4PropertyId)).length)} />
           </div>
         </CardContent>
       </Card>
@@ -162,7 +162,7 @@ export default async function GoogleDataPage({
               <CardDescription>선택 대상</CardDescription>
               <CardTitle>{selectedTarget.label}</CardTitle>
               <p className="mt-1 text-sm text-slate-600">
-                공급자: {providerLabel(selectedTarget.provider)} · OAuth 상태: {selectedTarget.oauthState}
+                공급자: {providerLabel(selectedTarget.provider)} / OAuth 상태: {selectedTarget.oauthState}
               </p>
             </div>
             {selectedTarget.provider === "blogger" && selectedTarget.linkedBlogId ? (
@@ -171,7 +171,7 @@ export default async function GoogleDataPage({
           </div>
           <div className="flex flex-wrap gap-2">
             <Badge>{providerLabel(selectedTarget.provider)}</Badge>
-            {selectedTarget.baseUrl ? <Badge className="bg-transparent">기준 URL 연결</Badge> : null}
+            {selectedTarget.baseUrl ? <Badge className="bg-transparent">기본 URL 연결</Badge> : null}
             {selectedTarget.searchConsoleSiteUrl ? <Badge className="bg-transparent">Search Console 연결</Badge> : null}
             {selectedTarget.ga4PropertyId ? <Badge className="bg-transparent">GA4 연결</Badge> : null}
           </div>
@@ -185,7 +185,7 @@ export default async function GoogleDataPage({
                 <Metric label="SC CTR" value={formatPercent(searchTotals.ctr)} />
                 <Metric label="SC 평균 순위" value={String(searchTotals.position ?? 0)} />
                 <Metric label="GA4 페이지뷰" value={formatNumber(analyticsTotals.screenPageViews)} />
-                <Metric label="동기화 글" value={formatNumber(syncedPosts?.total ?? 0)} />
+                <Metric label="동기 게시글" value={formatNumber(syncedPosts?.total ?? 0)} />
               </div>
 
               <div className="space-y-3">
@@ -207,12 +207,20 @@ export default async function GoogleDataPage({
                           게시글 열기
                         </a>
                       ) : null}
+                      {post.url ? (
+                        <GoogleIndexingRowActions
+                          url={post.url}
+                          targetScope="blogger"
+                          indexStatus={post.index_status}
+                          indexLastCheckedAt={post.index_last_checked_at}
+                          nextEligibleAt={post.next_eligible_at}
+                          lastError={post.last_error}
+                        />
+                      ) : null}
                     </div>
                   ))
                 )}
               </div>
-
-              {selectedTarget.linkedBlogId ? <GoogleIndexingControls blogId={selectedTarget.linkedBlogId} /> : null}
             </>
           ) : (
             <>
@@ -220,7 +228,7 @@ export default async function GoogleDataPage({
                 <Metric label="게시글 수" value={formatNumber(cloudflareOverview?.posts_count)} />
                 <Metric label="카테고리 수" value={formatNumber(cloudflareOverview?.categories_count)} />
                 <Metric label="프롬프트 수" value={formatNumber(cloudflareOverview?.prompts_count)} />
-                <Metric label="기준 URL" value={cloudflareOverview?.base_url || "-"} />
+                <Metric label="기본 URL" value={cloudflareOverview?.base_url || "-"} />
               </div>
 
               <div className="space-y-3">
@@ -237,12 +245,22 @@ export default async function GoogleDataPage({
                         <Badge className="bg-transparent">{post.provider_status}</Badge>
                       </div>
                       <p className="mt-1 text-xs text-slate-500">
-                        카테고리: {post.category_slug || "-"} · 수정 시각: {formatDateTime(post.updated_at)}
+                        카테고리: {post.category_slug || "-"} / 수정 시각: {formatDateTime(post.updated_at)}
                       </p>
                       {post.published_url ? (
                         <a href={post.published_url} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-sm text-sky-700 hover:underline">
                           게시글 열기
                         </a>
+                      ) : null}
+                      {post.published_url ? (
+                        <GoogleIndexingRowActions
+                          url={post.published_url}
+                          targetScope="cloudflare"
+                          indexStatus={post.index_status}
+                          indexLastCheckedAt={post.index_last_checked_at}
+                          nextEligibleAt={post.next_eligible_at}
+                          lastError={post.last_error}
+                        />
                       ) : null}
                     </div>
                   ))

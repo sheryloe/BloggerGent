@@ -76,6 +76,11 @@ export interface SyncedBloggerPost {
   thumbnail_url?: string | null;
   excerpt_text: string;
   synced_at?: string | null;
+  index_status: string;
+  index_coverage_state?: string | null;
+  index_last_checked_at?: string | null;
+  next_eligible_at?: string | null;
+  last_error?: string | null;
 }
 
 export interface SyncedBloggerPostPage {
@@ -791,6 +796,10 @@ export interface IntegratedArchiveItem {
   geo_score?: number | null;
   ctr?: number | null;
   index_status?: string;
+  index_coverage_state?: string | null;
+  index_last_checked_at?: string | null;
+  next_eligible_at?: string | null;
+  last_error?: string | null;
   quality_status?: string | null;
   published_at?: string | null;
   updated_at?: string | null;
@@ -956,6 +965,9 @@ export interface GoogleIndexingActionResult {
   reason?: string | null;
   blogId: number;
   url: string;
+  source?: string | null;
+  siteUrl?: string | null;
+  code?: string | null;
   indexStatus: string;
   indexCoverageState?: string | null;
   lastCrawlTime?: string | null;
@@ -1010,6 +1022,29 @@ export interface GoogleBlogIndexingQuotaRead {
   inspectionLimit: number;
   inspectionRemaining: number;
   inspectionQpmLimit: number;
+}
+
+export interface GooglePlaywrightIndexingRequestRead {
+  status: string;
+  reason?: string | null;
+  requestedCount: number;
+  plannedCount: number;
+  candidateCount: number;
+  attempted: number;
+  success: number;
+  failed: number;
+  skipped: number;
+  results: GoogleIndexingActionResult[];
+}
+
+export interface GoogleIndexStatusRefreshRead {
+  status: string;
+  reason?: string | null;
+  attempted: number;
+  success: number;
+  failed: number;
+  skipped: number;
+  results: GoogleIndexingActionResult[];
 }
 
 export interface BloggerConfig {
@@ -1495,6 +1530,7 @@ export interface AnalyticsArticleFactRead {
   category: string | null;
   seoScore: number | null;
   geoScore: number | null;
+  lighthouseScore: number | null;
   similarityScore: number | null;
   mostSimilarUrl: string | null;
   status: string | null;
