@@ -1,22 +1,34 @@
 from __future__ import annotations
 
 import calendar
+import html
+import re
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from statistics import mean
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from sqlalchemy import and_, delete, func, select
+from sqlalchemy import and_, delete, func, select, tuple_
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.entities import (
+    AIUsageEvent,
+    AuditLog,
     AnalyticsArticleFact,
     AnalyticsBlogMonthlyReport,
     AnalyticsThemeMonthlyStat,
     Article,
     Blog,
     BlogTheme,
+    BloggerPost,
     ContentPlanDay,
     ContentPlanSlot,
+    GoogleIndexUrlState,
+    Image,
+    Job,
+    PublishQueueItem,
+    SearchConsolePageMetric,
     SyncedBloggerPost,
 )
 from app.schemas.api import (
@@ -34,9 +46,6 @@ from app.schemas.api import (
     AnalyticsThemeMonthlyStatRead,
     AnalyticsThemeWeightApplyResponse,
 )
-from app.services.planner_service import create_month_plan
-from app.services.settings_service import get_settings_map
-from app.services.google_indexing_service import load_fact_enrichment_maps
 
 
 def _month_bounds(month: str) -> tuple[date, date]:
@@ -80,6 +89,22 @@ def _theme_name_from_synced(post: SyncedBloggerPost) -> str:
     return labels[0] if labels else "Uncategorized"
 
 
+@dataclass(slots=True)
+class MergedAnalyticsFactRow:
+    fact: AnalyticsArticleFact
+    source_facts: list[AnalyticsArticleFact]
+    canonical_url: str | None
+
+
+@dataclass(slots=True)
+class MergedAnalyticsFactContext:
+    article_map: dict[int, Article]
+    synced_post_map: dict[int, SyncedBloggerPost]
+    live_urls_by_blog: dict[int, set[str]]
+    index_state_map: dict[tuple[int, str], object]
+    ctr_map: dict[tuple[int, str], object]
+
+
 def _find_single_fact(db: Session, *, article_id: int | None = None, synced_post_id: int | None = None) -> AnalyticsArticleFact | None:
     query = select(AnalyticsArticleFact)
     if article_id is not None:
@@ -93,13 +118,6 @@ def _find_single_fact(db: Session, *, article_id: int | None = None, synced_post
     for extra in items[1:]:
         db.delete(extra)
     return primary
-
-
-def _fact_url_key(*, blog_id: int, url: str | None) -> tuple[int, str] | None:
-    normalized = str(url or "").strip()
-    if not normalized:
-        return None
-    return (blog_id, normalized)
 
 
 def _normalize_fact_status(value: str | None) -> str | None:
@@ -120,31 +138,274 @@ def _status_filter_values(status: str | None) -> list[str]:
     return [normalized]
 
 
-def _normalize_fact_url_for_dedupe(url: str | None) -> str | None:
+_TRACKING_QUERY_KEYS = {"amp", "fbclid", "gclid", "m"}
+_TRACKING_QUERY_PREFIXES = ("utm_",)
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def _plain_text_for_ctr(html_body: str | None) -> str:
+    if not html_body:
+        return ""
+    without_tags = re.sub(r"<[^>]+>", " ", html.unescape(html_body))
+    return _WHITESPACE_RE.sub(" ", without_tags).strip()
+
+
+def _tokenize_ctr_words(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9가-힣]+", str(text or "").lower())
+
+
+def _fallback_ctr_score(*, title: str, excerpt: str | None = None, html_body: str | None = None) -> dict[str, float]:
+    title_text = str(title or "").strip()
+    excerpt_text = str(excerpt or "").strip()
+    body_text = _plain_text_for_ctr(html_body)
+    title_words = _tokenize_ctr_words(title_text)
+    combined_text = f"{title_text} {excerpt_text} {body_text[:600]}".lower()
+
+    title_length = len(title_text)
+    if 28 <= title_length <= 88 and 4 <= len(title_words) <= 14:
+        headline_fit = 30
+    elif 20 <= title_length <= 110 and len(title_words) >= 3:
+        headline_fit = 24
+    else:
+        headline_fit = 16
+
+    specificity_tokens = ("2026", "2025", "guide", "checklist", "timeline", "route", "map", "cost", "budget", "schedule", "best", "near", "seoul", "busan", "korea", "travel")
+    specificity_hits = sum(1 for token in specificity_tokens if token in combined_text)
+    specificity_score = 25 if specificity_hits >= 5 else 20 if specificity_hits >= 3 else 15 if specificity_hits >= 1 else 10
+
+    intent_tokens = ("how", "why", "what", "where", "when", "best", "top", "guide", "tips", "checklist", "timeline", "review")
+    intent_hits = sum(1 for token in intent_tokens if token in combined_text)
+    click_intent_score = 20 if intent_hits >= 4 else 16 if intent_hits >= 2 else 12 if intent_hits >= 1 else 8
+
+    if 70 <= len(excerpt_text) <= 180:
+        excerpt_support_score = 15
+    elif len(excerpt_text) >= 35:
+        excerpt_support_score = 11
+    else:
+        excerpt_support_score = 7
+
+    freshness_hits = len(re.findall(r"\b(?:18|19|20)\d{2}\b", combined_text))
+    freshness_score = 10 if freshness_hits >= 2 else 7 if freshness_hits == 1 else 4
+    ctr_score = max(0, min(100, headline_fit + specificity_score + click_intent_score + excerpt_support_score + freshness_score))
+    return {"ctr_score": float(ctr_score)}
+
+
+def _compute_ctr_score_payload(*, title: str, excerpt: str | None = None, html_body: str | None = None) -> dict[str, float]:
+    try:
+        from app.services.content_ops_service import compute_ctr_score as compute_ctr_score_impl
+    except Exception:
+        return _fallback_ctr_score(title=title, excerpt=excerpt, html_body=html_body)
+    return compute_ctr_score_impl(title=title, excerpt=excerpt, html_body=html_body)
+
+
+def _load_fact_enrichment_maps(
+    db: Session,
+    *,
+    pairs: set[tuple[int, str]],
+) -> tuple[dict[tuple[int, str], GoogleIndexUrlState], dict[tuple[int, str], SearchConsolePageMetric]]:
+    if not pairs:
+        return {}, {}
+
+    normalized_pairs = {(blog_id, str(url or "").strip()) for blog_id, url in pairs if str(url or "").strip()}
+    if not normalized_pairs:
+        return {}, {}
+
+    states = db.execute(
+        select(GoogleIndexUrlState).where(tuple_(GoogleIndexUrlState.blog_id, GoogleIndexUrlState.url).in_(list(normalized_pairs)))
+    ).scalars().all()
+    ctr_rows = db.execute(
+        select(SearchConsolePageMetric).where(tuple_(SearchConsolePageMetric.blog_id, SearchConsolePageMetric.url).in_(list(normalized_pairs)))
+    ).scalars().all()
+
+    state_map = {(item.blog_id, item.url): item for item in states}
+    ctr_map = {(item.blog_id, item.url): item for item in ctr_rows}
+    return state_map, ctr_map
+
+
+def _canonicalize_fact_url(url: str | None) -> str | None:
     normalized = str(url or "").strip()
     if not normalized:
         return None
-    trimmed = normalized[:-1] if normalized.endswith("/") else normalized
-    return trimmed or normalized
+    try:
+        parsed = urlsplit(normalized)
+    except ValueError:
+        trimmed = normalized[:-1] if normalized.endswith("/") else normalized
+        return trimmed or normalized
+
+    if not parsed.scheme or not parsed.netloc:
+        trimmed = normalized[:-1] if normalized.endswith("/") else normalized
+        return trimmed or normalized
+
+    filtered_query = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key and key.lower() not in _TRACKING_QUERY_KEYS and not key.lower().startswith(_TRACKING_QUERY_PREFIXES)
+    ]
+    path = (parsed.path or "").rstrip("/")
+    canonical = urlunsplit(
+        (
+            parsed.scheme.lower(),
+            parsed.netloc.lower(),
+            path,
+            urlencode(filtered_query, doseq=True),
+            "",
+        )
+    )
+    return canonical or normalized
 
 
-def _fact_dedupe_key(fact: AnalyticsArticleFact) -> tuple[int, str]:
-    normalized_url = _normalize_fact_url_for_dedupe(fact.actual_url)
-    if normalized_url:
-        return (fact.blog_id, f"url:{normalized_url}")
-    return (fact.blog_id, f"id:{fact.id}")
+def _normalize_title_for_merge(title: str | None) -> str | None:
+    normalized = _WHITESPACE_RE.sub(" ", str(title or "").strip())
+    return normalized.casefold() if normalized else None
 
 
-def _dedupe_fact_rows(facts: list[AnalyticsArticleFact]) -> list[AnalyticsArticleFact]:
-    seen: set[tuple[int, str]] = set()
-    deduped: list[AnalyticsArticleFact] = []
+def _fact_match_signature(fact: AnalyticsArticleFact) -> tuple[int, str, str] | None:
+    normalized_title = _normalize_title_for_merge(fact.title)
+    published_at = _ensure_utc(fact.published_at)
+    if not normalized_title or published_at is None:
+        return None
+    return (fact.blog_id, normalized_title, published_at.date().isoformat())
+
+
+def _fact_has_merge_value(value) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    return True
+
+
+def _prefer_generated_facts(facts: list[AnalyticsArticleFact]) -> list[AnalyticsArticleFact]:
+    generated = [fact for fact in facts if str(fact.source_type or "").strip().lower() == "generated"]
+    others = [fact for fact in facts if str(fact.source_type or "").strip().lower() != "generated"]
+    return [*generated, *others]
+
+
+def _pick_fact_value(
+    facts: list[AnalyticsArticleFact],
+    field_name: str,
+    *,
+    prefer_generated: bool = True,
+):
+    ordered = _prefer_generated_facts(facts) if prefer_generated else list(facts)
+    for fact in ordered:
+        value = getattr(fact, field_name)
+        if _fact_has_merge_value(value):
+            return value
+    return None
+
+
+def _group_fact_rows(facts: list[AnalyticsArticleFact]) -> list[list[AnalyticsArticleFact]]:
+    url_groups: dict[tuple[int, str], list[AnalyticsArticleFact]] = {}
+    fallback_to_url_groups: dict[tuple[int, str, str], set[tuple[int, str]]] = defaultdict(set)
+
     for fact in facts:
-        key = _fact_dedupe_key(fact)
-        if key in seen:
+        canonical_url = _canonicalize_fact_url(fact.actual_url)
+        if canonical_url is None:
             continue
-        seen.add(key)
-        deduped.append(fact)
-    return deduped
+        group_key = (fact.blog_id, canonical_url)
+        url_groups.setdefault(group_key, []).append(fact)
+
+    for group_key, grouped_facts in url_groups.items():
+        signatures = {
+            signature
+            for signature in (_fact_match_signature(fact) for fact in grouped_facts)
+            if signature is not None
+        }
+        for signature in signatures:
+            fallback_to_url_groups[signature].add(group_key)
+
+    fallback_groups: dict[tuple[int, str], list[AnalyticsArticleFact]] = {}
+    for fact in facts:
+        canonical_url = _canonicalize_fact_url(fact.actual_url)
+        if canonical_url is not None:
+            continue
+        signature = _fact_match_signature(fact)
+        if signature is not None:
+            candidate_groups = fallback_to_url_groups.get(signature) or set()
+            if len(candidate_groups) == 1:
+                only_group = next(iter(candidate_groups))
+                url_groups.setdefault(only_group, []).append(fact)
+                continue
+            fallback_key = (fact.blog_id, f"fallback:{signature[1]}:{signature[2]}")
+            fallback_groups.setdefault(fallback_key, []).append(fact)
+            continue
+        fallback_groups.setdefault((fact.blog_id, f"id:{fact.id}"), []).append(fact)
+
+    ordered_groups: list[list[AnalyticsArticleFact]] = []
+    seen_group_keys: set[tuple[int, str]] = set()
+    seen_fallback_keys: set[tuple[int, str]] = set()
+
+    for fact in facts:
+        canonical_url = _canonicalize_fact_url(fact.actual_url)
+        if canonical_url is not None:
+            group_key = (fact.blog_id, canonical_url)
+            if group_key in seen_group_keys:
+                continue
+            seen_group_keys.add(group_key)
+            ordered_groups.append(url_groups[group_key])
+            continue
+
+        signature = _fact_match_signature(fact)
+        if signature is not None:
+            candidate_groups = fallback_to_url_groups.get(signature) or set()
+            if len(candidate_groups) == 1:
+                only_group = next(iter(candidate_groups))
+                if only_group in seen_group_keys:
+                    continue
+                seen_group_keys.add(only_group)
+                ordered_groups.append(url_groups[only_group])
+                continue
+            fallback_key = (fact.blog_id, f"fallback:{signature[1]}:{signature[2]}")
+        else:
+            fallback_key = (fact.blog_id, f"id:{fact.id}")
+        if fallback_key in seen_fallback_keys:
+            continue
+        seen_fallback_keys.add(fallback_key)
+        ordered_groups.append(fallback_groups[fallback_key])
+
+    return ordered_groups
+
+
+def _preferred_canonical_url(facts: list[AnalyticsArticleFact]) -> str | None:
+    ordered = _prefer_generated_facts(facts)
+    for fact in ordered:
+        canonical_url = _canonicalize_fact_url(fact.actual_url)
+        if canonical_url:
+            return canonical_url
+    return None
+
+
+def _merge_fact_group(facts: list[AnalyticsArticleFact]) -> MergedAnalyticsFactRow:
+    primary = _prefer_generated_facts(facts)[0]
+    merged = AnalyticsArticleFact()
+    merged.id = primary.id
+    merged.blog_id = primary.blog_id
+    merged.month = primary.month
+    merged.article_id = _pick_fact_value(facts, "article_id", prefer_generated=True)
+    merged.synced_post_id = _pick_fact_value(facts, "synced_post_id", prefer_generated=False)
+    merged.published_at = _pick_fact_value(facts, "published_at", prefer_generated=True) or primary.published_at
+    merged.title = _pick_fact_value(facts, "title", prefer_generated=True) or primary.title
+    merged.theme_key = _pick_fact_value(facts, "theme_key", prefer_generated=True)
+    merged.theme_name = _pick_fact_value(facts, "theme_name", prefer_generated=True)
+    merged.category = _pick_fact_value(facts, "category", prefer_generated=True)
+    merged.seo_score = _pick_fact_value(facts, "seo_score", prefer_generated=True)
+    merged.geo_score = _pick_fact_value(facts, "geo_score", prefer_generated=True)
+    merged.lighthouse_score = _pick_fact_value(facts, "lighthouse_score", prefer_generated=True)
+    merged.similarity_score = _pick_fact_value(facts, "similarity_score", prefer_generated=True)
+    merged.most_similar_url = _pick_fact_value(facts, "most_similar_url", prefer_generated=True)
+    merged.status = _pick_fact_value(facts, "status", prefer_generated=True)
+    merged.actual_url = _pick_fact_value(facts, "actual_url", prefer_generated=True) or primary.actual_url
+    merged.source_type = "generated" if any(str(fact.source_type or "").strip().lower() == "generated" for fact in facts) else "synced"
+    return MergedAnalyticsFactRow(
+        fact=merged,
+        source_facts=list(facts),
+        canonical_url=_preferred_canonical_url(facts),
+    )
+
+
+def _merge_fact_rows(facts: list[AnalyticsArticleFact]) -> list[MergedAnalyticsFactRow]:
+    return [_merge_fact_group(group) for group in _group_fact_rows(facts)]
 
 
 def _ensure_utc(value: datetime | None) -> datetime | None:
@@ -155,12 +416,149 @@ def _ensure_utc(value: datetime | None) -> datetime | None:
     return value.astimezone(timezone.utc)
 
 
-def _serialize_fact(
-    fact: AnalyticsArticleFact,
+def _fact_sort_value(fact: AnalyticsArticleFact, sort_field: str):
+    if sort_field == "seo":
+        return fact.seo_score
+    if sort_field == "geo":
+        return fact.geo_score
+    if sort_field == "lighthouse":
+        return fact.lighthouse_score
+    if sort_field == "similarity":
+        return fact.similarity_score
+    if sort_field == "title":
+        title = str(fact.title or "").strip()
+        return title.casefold() if title else None
+    return _ensure_utc(fact.published_at)
+
+
+def _sort_fact_rows(
+    rows: list[MergedAnalyticsFactRow],
     *,
-    ctr_value: float | None = None,
-    index_state=None,
+    sort: str = "published_at",
+    dir: str = "desc",
+) -> list[MergedAnalyticsFactRow]:
+    sort_field = (sort or "published_at").strip().lower()
+    dir_name = "asc" if (dir or "").strip().lower() == "asc" else "desc"
+    prepared = [(row, _fact_sort_value(row.fact, sort_field)) for row in rows]
+    present = [item for item in prepared if item[1] is not None]
+    missing = [item for item in prepared if item[1] is None]
+    reverse = dir_name == "desc"
+    present.sort(key=lambda item: (item[1], item[0].fact.id or 0), reverse=reverse)
+    missing.sort(key=lambda item: item[0].fact.id or 0, reverse=reverse)
+    return [row for row, _ in present] + [row for row, _ in missing]
+
+
+def _fact_lookup_keys(*, blog_id: int, url: str | None, canonical_url: str | None = None) -> list[tuple[int, str]]:
+    keys: list[tuple[int, str]] = []
+    normalized = str(url or "").strip()
+    if normalized:
+        keys.append((blog_id, normalized))
+    preferred_canonical = canonical_url or _canonicalize_fact_url(url)
+    if preferred_canonical and (blog_id, preferred_canonical) not in keys:
+        keys.append((blog_id, preferred_canonical))
+    return keys
+
+
+def _build_merged_fact_context(db: Session, rows: list[MergedAnalyticsFactRow]) -> MergedAnalyticsFactContext:
+    article_ids = {
+        fact.article_id
+        for row in rows
+        for fact in row.source_facts
+        if fact.article_id is not None
+    }
+    blog_ids = {row.fact.blog_id for row in rows}
+    article_map = {
+        article.id: article
+        for article in db.execute(select(Article).where(Article.id.in_(article_ids))).scalars().all()
+    } if article_ids else {}
+
+    synced_posts = db.execute(select(SyncedBloggerPost).where(SyncedBloggerPost.blog_id.in_(blog_ids))).scalars().all() if blog_ids else []
+    synced_post_map = {post.id: post for post in synced_posts}
+    live_urls_by_blog: dict[int, set[str]] = defaultdict(set)
+    for post in synced_posts:
+        canonical_url = _canonicalize_fact_url(post.url)
+        if canonical_url:
+            live_urls_by_blog[post.blog_id].add(canonical_url)
+
+    pairs = {
+        key
+        for row in rows
+        for key in _fact_lookup_keys(blog_id=row.fact.blog_id, url=row.fact.actual_url, canonical_url=row.canonical_url)
+    }
+    index_state_map, ctr_map = _load_fact_enrichment_maps(db, pairs=pairs)
+
+    return MergedAnalyticsFactContext(
+        article_map=article_map,
+        synced_post_map=synced_post_map,
+        live_urls_by_blog=dict(live_urls_by_blog),
+        index_state_map=index_state_map,
+        ctr_map=ctr_map,
+    )
+
+
+def _resolve_row_ctr_score(row: MergedAnalyticsFactRow, context: MergedAnalyticsFactContext) -> float | None:
+    for fact in _prefer_generated_facts(row.source_facts):
+        if fact.article_id is not None:
+            article = context.article_map.get(fact.article_id)
+            if article is not None:
+                score_payload = _compute_ctr_score_payload(
+                    title=article.title,
+                    excerpt=article.excerpt,
+                    html_body=article.assembled_html or article.html_article,
+                )
+                return _coerce_score(score_payload.get("ctr_score"))
+        if fact.synced_post_id is not None:
+            post = context.synced_post_map.get(fact.synced_post_id)
+            if post is not None:
+                score_payload = _compute_ctr_score_payload(
+                    title=post.title,
+                    excerpt=post.excerpt_text,
+                    html_body=post.content_html,
+                )
+                return _coerce_score(score_payload.get("ctr_score"))
+    return None
+
+
+def _resolve_row_status_variant(row: MergedAnalyticsFactRow, context: MergedAnalyticsFactContext) -> str:
+    if any(str(fact.source_type or "").strip().lower() == "synced" for fact in row.source_facts):
+        return "live"
+    live_urls = context.live_urls_by_blog.get(row.fact.blog_id, set())
+    if row.canonical_url and row.canonical_url in live_urls:
+        return "live"
+    if not live_urls:
+        return "unknown"
+
+    has_generated_published = any(
+        str(fact.source_type or "").strip().lower() == "generated" and _normalize_fact_status(fact.status) == "published"
+        for fact in row.source_facts
+    )
+    if has_generated_published and row.canonical_url:
+        return "error_deleted"
+    return "unknown"
+
+
+def _lookup_row_enrichment(
+    row: MergedAnalyticsFactRow,
+    context: MergedAnalyticsFactContext,
+) -> tuple[object | None, object | None]:
+    for key in _fact_lookup_keys(blog_id=row.fact.blog_id, url=row.fact.actual_url, canonical_url=row.canonical_url):
+        index_state = context.index_state_map.get(key)
+        ctr_row = context.ctr_map.get(key)
+        if index_state is not None or ctr_row is not None:
+            return index_state, ctr_row
+    return None, None
+
+
+def _serialize_fact(
+    row: MergedAnalyticsFactRow,
+    *,
+    context: MergedAnalyticsFactContext,
 ) -> AnalyticsArticleFactRead:
+    fact = row.fact
+    index_state, ctr_row = _lookup_row_enrichment(row, context)
+    ctr_value = getattr(ctr_row, "ctr", None)
+    ctr_score = _resolve_row_ctr_score(row, context)
+    status_variant = _resolve_row_status_variant(row, context)
     return AnalyticsArticleFactRead(
         id=fact.id,
         blog_id=fact.blog_id,
@@ -180,12 +578,15 @@ def _serialize_fact(
         actual_url=fact.actual_url,
         source_type=fact.source_type,
         ctr=ctr_value,
+        ctr_score=ctr_score,
         index_status=index_state.index_status if index_state else "unknown",
         index_coverage_state=index_state.index_coverage_state if index_state else None,
         last_crawl_time=index_state.last_crawl_time.isoformat() if index_state and index_state.last_crawl_time else None,
         last_notify_time=index_state.last_notify_time.isoformat() if index_state and index_state.last_notify_time else None,
         next_eligible_at=index_state.next_eligible_at.isoformat() if index_state and index_state.next_eligible_at else None,
         index_last_checked_at=index_state.last_checked_at.isoformat() if index_state and index_state.last_checked_at else None,
+        status_variant=status_variant,
+        can_manual_delete=status_variant == "error_deleted",
     )
 
 
@@ -220,24 +621,9 @@ def _serialize_report(db: Session, blog: Blog, month: str, report: AnalyticsBlog
         .where(AnalyticsArticleFact.blog_id == blog.id, AnalyticsArticleFact.month == month)
         .order_by(AnalyticsArticleFact.published_at.desc(), AnalyticsArticleFact.id.desc())
     ).scalars().all()
-    facts = _dedupe_fact_rows(facts)
-    pairs = {
-        key
-        for key in (_fact_url_key(blog_id=fact.blog_id, url=fact.actual_url) for fact in facts)
-        if key is not None
-    }
-    index_state_map, ctr_map = load_fact_enrichment_maps(db, pairs=pairs)
-    serialized_facts: list[AnalyticsArticleFactRead] = []
-    for fact in facts:
-        key = _fact_url_key(blog_id=fact.blog_id, url=fact.actual_url)
-        ctr_row = ctr_map.get(key) if key else None
-        serialized_facts.append(
-            _serialize_fact(
-                fact,
-                ctr_value=ctr_row.ctr if ctr_row else None,
-                index_state=index_state_map.get(key) if key else None,
-            )
-        )
+    merged_rows = _sort_fact_rows(_merge_fact_rows(facts), sort="published_at", dir="desc")
+    context = _build_merged_fact_context(db, merged_rows)
+    serialized_facts = [_serialize_fact(row, context=context) for row in merged_rows]
 
     return AnalyticsBlogMonthlyReportRead(
         blog_id=blog.id,
@@ -326,7 +712,8 @@ def rebuild_blog_month_rollup(db: Session, blog_id: int, month: str, *, commit: 
         .where(AnalyticsArticleFact.blog_id == blog_id, AnalyticsArticleFact.month == month)
         .order_by(AnalyticsArticleFact.published_at.desc(), AnalyticsArticleFact.id.desc())
     ).scalars().all()
-    facts = _dedupe_fact_rows(facts)
+    merged_rows = _sort_fact_rows(_merge_fact_rows(facts), sort="published_at", dir="desc")
+    merged_facts = [row.fact for row in merged_rows]
     themes = db.execute(select(BlogTheme).where(BlogTheme.blog_id == blog_id).order_by(BlogTheme.sort_order.asc())).scalars().all()
     theme_names = {theme.key: theme.name for theme in themes}
     base_weights = {theme.key: theme.weight for theme in themes}
@@ -352,14 +739,14 @@ def rebuild_blog_month_rollup(db: Session, blog_id: int, month: str, *, commit: 
         planned_by_theme[key] += 1
         theme_names.setdefault(key, theme.name if theme else "Unassigned")
 
-    actual_by_theme = Counter((fact.theme_key or "unassigned") for fact in facts)
+    actual_by_theme = Counter((fact.theme_key or "unassigned") for fact in merged_facts)
     facts_by_theme: dict[str, list[AnalyticsArticleFact]] = defaultdict(list)
-    for fact in facts:
+    for fact in merged_facts:
         facts_by_theme[fact.theme_key or "unassigned"].append(fact)
         theme_names.setdefault(fact.theme_key or "unassigned", fact.theme_name or "Unassigned")
 
     planned_total = sum(planned_by_theme.values())
-    actual_total = len(facts)
+    actual_total = len(merged_facts)
     theme_keys = sorted(set(theme_names) | set(planned_by_theme) | set(actual_by_theme))
 
     stats: list[AnalyticsThemeMonthlyStat] = []
@@ -394,9 +781,9 @@ def rebuild_blog_month_rollup(db: Session, blog_id: int, month: str, *, commit: 
     most_underused = max(stats, key=lambda item: item.coverage_gap_score, default=None)
     most_overused = min(stats, key=lambda item: item.coverage_gap_score, default=None)
     existing_report.total_posts = actual_total
-    existing_report.avg_seo_score = _safe_mean([fact.seo_score for fact in facts])
-    existing_report.avg_geo_score = _safe_mean([fact.geo_score for fact in facts])
-    existing_report.avg_similarity_score = _safe_mean([fact.similarity_score for fact in facts])
+    existing_report.avg_seo_score = _safe_mean([fact.seo_score for fact in merged_facts])
+    existing_report.avg_geo_score = _safe_mean([fact.geo_score for fact in merged_facts])
+    existing_report.avg_similarity_score = _safe_mean([fact.similarity_score for fact in merged_facts])
     existing_report.most_underused_theme_key = most_underused.theme_key if most_underused else None
     existing_report.most_underused_theme_name = most_underused.theme_name if most_underused else None
     existing_report.most_overused_theme_key = most_overused.theme_key if most_overused else None
@@ -406,10 +793,12 @@ def rebuild_blog_month_rollup(db: Session, blog_id: int, month: str, *, commit: 
         if most_underused and most_overused and most_underused.theme_key != most_overused.theme_key
         else "Keep balance and improve low-performing themes."
     )
-    existing_report.report_summary = _report_summary(existing_report, stats, facts)
+    existing_report.report_summary = _report_summary(existing_report, stats, merged_facts)
     db.add(existing_report)
     if commit:
         db.commit()
+    else:
+        db.flush()
 
 
 def upsert_article_fact(db: Session, article_id: int, *, commit: bool = True) -> list[str]:
@@ -545,6 +934,8 @@ def backfill_analytics(db: Session) -> AnalyticsBackfillRead:
 
 def get_monthly_blog_summaries(db: Session, month: str) -> AnalyticsBlogMonthlyListResponse:
     blogs = db.execute(select(Blog).order_by(Blog.name.asc())).scalars().all()
+    for blog in blogs:
+        rebuild_blog_month_rollup(db, blog.id, month, commit=False)
     reports = {
         report.blog_id: report
         for report in db.execute(select(AnalyticsBlogMonthlyReport).where(AnalyticsBlogMonthlyReport.month == month)).scalars().all()
@@ -569,6 +960,7 @@ def get_monthly_blog_summaries(db: Session, month: str) -> AnalyticsBlogMonthlyL
 
 def get_blog_monthly_report(db: Session, blog_id: int, month: str) -> AnalyticsBlogMonthlyReportRead:
     blog = db.execute(select(Blog).where(Blog.id == blog_id)).scalar_one()
+    rebuild_blog_month_rollup(db, blog_id, month, commit=False)
     report = db.execute(
         select(AnalyticsBlogMonthlyReport).where(AnalyticsBlogMonthlyReport.blog_id == blog_id, AnalyticsBlogMonthlyReport.month == month)
     ).scalar_one_or_none()
@@ -627,31 +1019,13 @@ def get_blog_monthly_articles(
         category=category,
         status=status,
     )
-    ordered_field, dir_name = _build_fact_order(sort, dir)
     offset = max(page - 1, 0) * max(page_size, 1)
-    ordered_items = db.execute(
-        base_query.order_by(ordered_field, AnalyticsArticleFact.id.asc() if dir_name == "asc" else AnalyticsArticleFact.id.desc())
-    ).scalars().all()
-    deduped_items = _dedupe_fact_rows(ordered_items)
-    total = len(deduped_items)
-    items = deduped_items[offset : offset + page_size]
-    pairs = {
-        key
-        for key in (_fact_url_key(blog_id=item.blog_id, url=item.actual_url) for item in items)
-        if key is not None
-    }
-    index_state_map, ctr_map = load_fact_enrichment_maps(db, pairs=pairs)
-    serialized = []
-    for item in items:
-        key = _fact_url_key(blog_id=item.blog_id, url=item.actual_url)
-        ctr_row = ctr_map.get(key) if key else None
-        serialized.append(
-            _serialize_fact(
-                item,
-                ctr_value=ctr_row.ctr if ctr_row else None,
-                index_state=index_state_map.get(key) if key else None,
-            )
-        )
+    facts = db.execute(base_query).scalars().all()
+    merged_items = _sort_fact_rows(_merge_fact_rows(facts), sort=sort, dir=dir)
+    total = len(merged_items)
+    items = merged_items[offset : offset + page_size]
+    context = _build_merged_fact_context(db, items)
+    serialized = [_serialize_fact(item, context=context) for item in items]
     return AnalyticsArticleFactListResponse(
         blog_id=blog_id,
         month=month,
@@ -660,6 +1034,95 @@ def get_blog_monthly_articles(
         page_size=page_size,
         items=serialized,
     )
+
+
+def _find_merged_row_by_fact_id(rows: list[MergedAnalyticsFactRow], fact_id: int) -> MergedAnalyticsFactRow | None:
+    for row in rows:
+        if row.fact.id == fact_id:
+            return row
+        if any(source_fact.id == fact_id for source_fact in row.source_facts):
+            return row
+    return None
+
+
+def _delete_generated_fact_sources(db: Session, row: MergedAnalyticsFactRow) -> None:
+    article_ids = {
+        fact.article_id
+        for fact in row.source_facts
+        if str(fact.source_type or "").strip().lower() == "generated" and fact.article_id is not None
+    }
+    source_fact_ids = [fact.id for fact in row.source_facts]
+    job_ids: set[int] = set()
+
+    if article_ids:
+        article_rows = db.execute(select(Article.id, Article.job_id).where(Article.id.in_(article_ids))).all()
+        job_ids = {int(job_id) for _article_id, job_id in article_rows if job_id is not None}
+        db.execute(delete(PublishQueueItem).where(PublishQueueItem.article_id.in_(list(article_ids))))
+        db.execute(delete(AIUsageEvent).where(AIUsageEvent.article_id.in_(list(article_ids))))
+        db.execute(delete(AnalyticsArticleFact).where(AnalyticsArticleFact.article_id.in_(list(article_ids))))
+
+    if source_fact_ids:
+        db.execute(delete(AnalyticsArticleFact).where(AnalyticsArticleFact.id.in_(source_fact_ids)))
+
+    if job_ids:
+        db.execute(delete(AuditLog).where(AuditLog.job_id.in_(list(job_ids))))
+        db.execute(delete(AIUsageEvent).where(AIUsageEvent.job_id.in_(list(job_ids))))
+        db.execute(delete(BloggerPost).where(BloggerPost.job_id.in_(list(job_ids))))
+        db.execute(delete(Image).where(Image.job_id.in_(list(job_ids))))
+
+    if article_ids:
+        db.execute(delete(Article).where(Article.id.in_(list(article_ids))))
+    if job_ids:
+        db.execute(delete(Job).where(Job.id.in_(list(job_ids))))
+
+
+def _delete_synced_fact_sources(db: Session, row: MergedAnalyticsFactRow) -> None:
+    synced_post_ids = {
+        fact.synced_post_id
+        for fact in row.source_facts
+        if str(fact.source_type or "").strip().lower() == "synced" and fact.synced_post_id is not None
+    }
+    source_fact_ids = [fact.id for fact in row.source_facts]
+
+    if synced_post_ids:
+        db.execute(delete(AnalyticsArticleFact).where(AnalyticsArticleFact.synced_post_id.in_(list(synced_post_ids))))
+        db.execute(delete(SyncedBloggerPost).where(SyncedBloggerPost.id.in_(list(synced_post_ids))))
+
+    if source_fact_ids:
+        db.execute(delete(AnalyticsArticleFact).where(AnalyticsArticleFact.id.in_(source_fact_ids)))
+
+
+def delete_blog_article_fact(db: Session, *, blog_id: int, fact_id: int) -> None:
+    target_fact = db.execute(
+        select(AnalyticsArticleFact).where(AnalyticsArticleFact.id == fact_id, AnalyticsArticleFact.blog_id == blog_id)
+    ).scalar_one_or_none()
+    if target_fact is None:
+        raise LookupError("Analytics article fact not found")
+
+    facts = db.execute(
+        select(AnalyticsArticleFact)
+        .where(AnalyticsArticleFact.blog_id == blog_id, AnalyticsArticleFact.month == target_fact.month)
+        .order_by(AnalyticsArticleFact.published_at.desc(), AnalyticsArticleFact.id.desc())
+    ).scalars().all()
+    merged_rows = _sort_fact_rows(_merge_fact_rows(facts), sort="published_at", dir="desc")
+    target_row = _find_merged_row_by_fact_id(merged_rows, fact_id)
+    if target_row is None:
+        raise LookupError("Merged analytics article fact not found")
+
+    context = _build_merged_fact_context(db, [target_row])
+    status_variant = _resolve_row_status_variant(target_row, context)
+    if status_variant != "error_deleted":
+        raise PermissionError("Only deleted live posts can be removed manually")
+
+    touched_months = sorted({fact.month for fact in target_row.source_facts if fact.month})
+    if any(str(fact.source_type or "").strip().lower() == "generated" for fact in target_row.source_facts):
+        _delete_generated_fact_sources(db, target_row)
+    else:
+        _delete_synced_fact_sources(db, target_row)
+
+    for month_key in touched_months:
+        rebuild_blog_month_rollup(db, blog_id, month_key, commit=False)
+    db.commit()
 
 
 def get_blog_daily_summary(
@@ -684,10 +1147,11 @@ def get_blog_daily_summary(
             status=status,
         ).order_by(AnalyticsArticleFact.published_at.desc(), AnalyticsArticleFact.id.desc())
     ).scalars().all()
-    facts = _dedupe_fact_rows(facts)
+    merged_rows = _sort_fact_rows(_merge_fact_rows(facts), sort="published_at", dir="desc")
 
     daily_map: dict[str, dict[str, object]] = {}
-    for fact in facts:
+    for row in merged_rows:
+        fact = row.fact
         published_at = _ensure_utc(fact.published_at)
         if published_at is None:
             continue
@@ -736,6 +1200,9 @@ def get_blog_daily_summary(
 
 
 def apply_next_month_weights(db: Session, blog_id: int, month: str) -> AnalyticsThemeWeightApplyResponse:
+    from app.services.planner_service import create_month_plan
+    from app.services.settings_service import get_settings_map
+
     stats = db.execute(
         select(AnalyticsThemeMonthlyStat).where(AnalyticsThemeMonthlyStat.blog_id == blog_id, AnalyticsThemeMonthlyStat.month == month)
     ).scalars().all()
@@ -828,10 +1295,11 @@ def get_integrated_dashboard(
             status=status,
         ).order_by(AnalyticsArticleFact.published_at.desc(), AnalyticsArticleFact.id.desc())
     ).scalars().all()
-    facts = _dedupe_fact_rows(facts)
+    merged_rows = _sort_fact_rows(_merge_fact_rows(facts), sort="published_at", dir="desc")
+    merged_facts = [row.fact for row in merged_rows]
     recent_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
     recent_upload_count = 0
-    for fact in facts:
+    for fact in merged_facts:
         published_at = _ensure_utc(fact.published_at)
         if published_at is not None and published_at >= recent_cutoff:
             recent_upload_count += 1
@@ -847,23 +1315,23 @@ def get_integrated_dashboard(
     underused = max(stats, key=lambda item: item.coverage_gap_score, default=None)
     overused = min(stats, key=lambda item: item.coverage_gap_score, default=None)
     kpis = AnalyticsIntegratedKpiRead(
-        total_posts=len(facts),
-        avg_seo_score=_safe_mean([fact.seo_score for fact in facts]),
-        avg_geo_score=_safe_mean([fact.geo_score for fact in facts]),
-        avg_similarity_score=_safe_mean([fact.similarity_score for fact in facts]),
+        total_posts=len(merged_facts),
+        avg_seo_score=_safe_mean([fact.seo_score for fact in merged_facts]),
+        avg_geo_score=_safe_mean([fact.geo_score for fact in merged_facts]),
+        avg_similarity_score=_safe_mean([fact.similarity_score for fact in merged_facts]),
         most_underused_theme_name=underused.theme_name if underused else None,
         most_overused_theme_name=overused.theme_name if overused else None,
         recent_upload_count=recent_upload_count,
     )
     available_theme_map: dict[str, str] = {}
-    for fact in facts:
+    for fact in merged_facts:
         if not fact.theme_key:
             continue
         key = str(fact.theme_key)
         available_theme_map.setdefault(key, str(fact.theme_name or fact.theme_key))
     if theme_key and theme_key not in available_theme_map:
         available_theme_map[theme_key] = theme_key
-    available_categories = sorted({str(fact.category) for fact in facts if fact.category})
+    available_categories = sorted({str(fact.category) for fact in merged_facts if fact.category})
     if category and category not in available_categories:
         available_categories.append(category)
         available_categories.sort()

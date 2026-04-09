@@ -24,6 +24,11 @@ from app.services.secret_service import decrypt_secret_value, encrypt_secret_val
 from app.services.settings_service import get_settings_map
 
 _MOJIBAKE_HINTS: tuple[str, ...] = ("�",)
+_TRAVEL_PURPOSE_BY_LANGUAGE: dict[str, str] = {
+    "ja": "일본인 여행자를 위해 한국 지역 여행지, 축제, 맛집, 문화, K-컬처 정보를 실용적으로 안내하는 블로그",
+    "es": "스페인어권 여행자를 위해 한국 지역 여행지, 축제, 맛집, 문화, K-컬처 정보를 실용적으로 안내하는 블로그",
+    "en": "해외 여행자를 위해 한국 지역 여행지, 축제, 맛집, 문화, K-컬처 정보를 실용적으로 안내하는 블로그",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,7 +51,7 @@ DEFAULT_CHANNELS: tuple[dict[str, object], ...] = (
         "capabilities": ["video_upload", "thumbnail", "analytics", "seo_feedback"],
         "oauth_state": "not_configured",
         "primary_category": "video",
-        "purpose": "YouTube long-form and Shorts operations",
+        "purpose": "유튜브 장문 영상과 쇼츠 운영 채널",
     },
     {
         "provider": "instagram",
@@ -56,7 +61,7 @@ DEFAULT_CHANNELS: tuple[dict[str, object], ...] = (
         "capabilities": ["image_post", "reel_queue", "insights", "playback_preview"],
         "oauth_state": "not_configured",
         "primary_category": "social",
-        "purpose": "Instagram image and reel publishing",
+        "purpose": "인스타그램 이미지와 릴스 발행 채널",
     },
 )
 
@@ -90,8 +95,8 @@ PLATFORM_PROMPT_STEPS: dict[str, tuple[PlatformPromptStepDefinition, ...]] = {
         PlatformPromptStepDefinition(
             stage_type="video_metadata_generation",
             stage_label="영상 메타데이터",
-            name="YouTube Metadata Agent",
-            role_name="YouTube Metadata Agent",
+            name="유튜브 메타데이터 에이전트",
+            role_name="유튜브 메타데이터 에이전트",
             objective="제목, 설명, 태그, 챕터 초안을 생성합니다.",
             provider_hint="claude_cli",
             provider_model="claude-sonnet",
@@ -99,8 +104,8 @@ PLATFORM_PROMPT_STEPS: dict[str, tuple[PlatformPromptStepDefinition, ...]] = {
         PlatformPromptStepDefinition(
             stage_type="thumbnail_generation",
             stage_label="썸네일 전략",
-            name="Thumbnail Strategy Agent",
-            role_name="Thumbnail Strategy Agent",
+            name="썸네일 전략 에이전트",
+            role_name="썸네일 전략 에이전트",
             objective="썸네일 카피와 레이아웃 지시를 만듭니다.",
             provider_hint="gemini_cli",
             provider_model="gemini-2.5-flash",
@@ -108,8 +113,8 @@ PLATFORM_PROMPT_STEPS: dict[str, tuple[PlatformPromptStepDefinition, ...]] = {
         PlatformPromptStepDefinition(
             stage_type="platform_publish",
             stage_label="플랫폼 게시",
-            name="YouTube Publish Agent",
-            role_name="YouTube Publish Agent",
+            name="유튜브 발행 에이전트",
+            role_name="유튜브 발행 에이전트",
             objective="업로드와 게시 상태 전환을 담당합니다.",
             provider_hint="codex_cli",
             provider_model="gpt-5",
@@ -117,8 +122,8 @@ PLATFORM_PROMPT_STEPS: dict[str, tuple[PlatformPromptStepDefinition, ...]] = {
         PlatformPromptStepDefinition(
             stage_type="performance_review",
             stage_label="성과 분석",
-            name="YouTube Analyst Agent",
-            role_name="YouTube Analyst Agent",
+            name="유튜브 분석 에이전트",
+            role_name="유튜브 분석 에이전트",
             objective="조회수, CTR, retention 기반 피드백을 제공합니다.",
             provider_hint="claude_cli",
             provider_model="claude-sonnet",
@@ -128,8 +133,8 @@ PLATFORM_PROMPT_STEPS: dict[str, tuple[PlatformPromptStepDefinition, ...]] = {
         PlatformPromptStepDefinition(
             stage_type="article_generation",
             stage_label="캡션 초안",
-            name="Instagram Caption Agent",
-            role_name="Instagram Caption Agent",
+            name="인스타그램 캡션 에이전트",
+            role_name="인스타그램 캡션 에이전트",
             objective="게시 캡션과 해시태그 초안을 생성합니다.",
             provider_hint="claude_cli",
             provider_model="claude-sonnet",
@@ -137,8 +142,8 @@ PLATFORM_PROMPT_STEPS: dict[str, tuple[PlatformPromptStepDefinition, ...]] = {
         PlatformPromptStepDefinition(
             stage_type="thumbnail_generation",
             stage_label="이미지/커버 전략",
-            name="Instagram Cover Agent",
-            role_name="Instagram Cover Agent",
+            name="인스타그램 커버 에이전트",
+            role_name="인스타그램 커버 에이전트",
             objective="피드 대표 이미지와 릴스 커버 지시를 생성합니다.",
             provider_hint="gemini_cli",
             provider_model="gemini-2.5-flash",
@@ -146,8 +151,8 @@ PLATFORM_PROMPT_STEPS: dict[str, tuple[PlatformPromptStepDefinition, ...]] = {
         PlatformPromptStepDefinition(
             stage_type="reel_packaging",
             stage_label="릴스 패키징",
-            name="Reels Packaging Agent",
-            role_name="Reels Packaging Agent",
+            name="릴스 패키징 에이전트",
+            role_name="릴스 패키징 에이전트",
             objective="릴스 자막/설명/미디어 패키징을 준비합니다.",
             provider_hint="codex_cli",
             provider_model="gpt-5",
@@ -155,8 +160,8 @@ PLATFORM_PROMPT_STEPS: dict[str, tuple[PlatformPromptStepDefinition, ...]] = {
         PlatformPromptStepDefinition(
             stage_type="platform_publish",
             stage_label="플랫폼 게시",
-            name="Instagram Publish Agent",
-            role_name="Instagram Publish Agent",
+            name="인스타그램 발행 에이전트",
+            role_name="인스타그램 발행 에이전트",
             objective="이미지/릴스 게시 큐를 관리합니다.",
             provider_hint="codex_cli",
             provider_model="gpt-5",
@@ -164,8 +169,8 @@ PLATFORM_PROMPT_STEPS: dict[str, tuple[PlatformPromptStepDefinition, ...]] = {
         PlatformPromptStepDefinition(
             stage_type="performance_review",
             stage_label="성과 분석",
-            name="Instagram Analyst Agent",
-            role_name="Instagram Analyst Agent",
+            name="인스타그램 분석 에이전트",
+            role_name="인스타그램 분석 에이전트",
             objective="도달/참여/탭별 인사이트를 분석합니다.",
             provider_hint="claude_cli",
             provider_model="claude-sonnet",
@@ -183,11 +188,15 @@ def _looks_corrupted_text(value: str | None) -> bool:
     return any(token in raw for token in _MOJIBAKE_HINTS)
 
 
-def _safe_display_name(value: str | None, *, fallback: str) -> str:
+def _safe_text(value: str | None, *, fallback: str) -> str:
     raw = str(value or "").strip()
     if _looks_corrupted_text(raw):
-        return str(fallback).strip() or "Channel"
+        return str(fallback).strip() or ""
     return raw
+
+
+def _safe_display_name(value: str | None, *, fallback: str) -> str:
+    return _safe_text(value, fallback=fallback or "Channel") or "Channel"
 
 
 def _humanize_channel_label(value: str | None) -> str:
@@ -220,6 +229,52 @@ def _blogger_fallback_display_name(blog: Blog) -> str:
 
 def resolve_blogger_channel_display_name(blog: Blog) -> str:
     return _safe_display_name(blog.name, fallback=_blogger_fallback_display_name(blog))
+
+
+def _blog_audience_label_ko(blog: Blog) -> str:
+    language = str(blog.primary_language or "").strip().lower()
+    if language.startswith("ja"):
+        return "일본인"
+    if language.startswith("es"):
+        return "스페인어권 독자"
+    if language.startswith("en"):
+        return "해외 독자"
+    return "독자"
+
+
+def _blogger_purpose_fallback(blog: Blog) -> str:
+    profile_key = str(blog.profile_key or "").strip().lower()
+    category = str(blog.content_category or "").strip().lower()
+
+    if profile_key == "korea_travel" or "travel" in category:
+        language = str(blog.primary_language or "").strip().lower()
+        if language.startswith("ja"):
+            return _TRAVEL_PURPOSE_BY_LANGUAGE["ja"]
+        if language.startswith("es"):
+            return _TRAVEL_PURPOSE_BY_LANGUAGE["es"]
+        return _TRAVEL_PURPOSE_BY_LANGUAGE["en"]
+
+    if profile_key == "world_mystery" or "mystery" in category:
+        return f"{_blog_audience_label_ko(blog)}를 위해 세계 미스터리, 다큐, 전설, 사건 아카이브를 정리해 소개하는 블로그"
+
+    category_label = str(blog.content_category or "운영").strip() or "운영"
+    return f"{_blog_audience_label_ko(blog)}를 위해 {category_label} 정보를 이해하기 쉽게 정리해 제공하는 블로그"
+
+
+def _resolve_blogger_channel_purpose(blog: Blog) -> str:
+    return _safe_text(blog.content_brief, fallback=_blogger_purpose_fallback(blog))
+
+
+def _channel_purpose_fallback(channel: ManagedChannel) -> str:
+    if channel.provider == "blogger":
+        return "운영 목적 정보가 아직 정리되지 않아 기본 안내 문구를 표시합니다."
+    if channel.provider == "youtube":
+        return "유튜브 장문 영상과 쇼츠 운영 채널"
+    if channel.provider == "instagram":
+        return "인스타그램 이미지와 릴스 운영 채널"
+    if channel.provider == "cloudflare":
+        return "Cloudflare 아카이브 게시 및 보관 채널"
+    return "운영 목적 정보가 아직 정리되지 않았습니다."
 
 
 def _channel_query():
@@ -315,7 +370,7 @@ def ensure_managed_channels(db: Session) -> list[ManagedChannel]:
             "status": status,
             "base_url": blog.blogger_url,
             "primary_category": blog.content_category,
-            "purpose": blog.content_brief or blog.target_audience,
+            "purpose": _resolve_blogger_channel_purpose(blog),
             "capabilities": ["article_publish", "seo_feedback", "search_console", "ga4"],
             "oauth_state": oauth_state,
             "quota_state": {},
@@ -333,6 +388,12 @@ def ensure_managed_channels(db: Session) -> list[ManagedChannel]:
                 if getattr(channel, key) != value:
                     setattr(channel, key, value)
                     changed = True
+
+        normalized_brief = _resolve_blogger_channel_purpose(blog)
+        if str(blog.content_brief or "").strip() != normalized_brief:
+            blog.content_brief = normalized_brief
+            db.add(blog)
+            changed = True
 
     stale_blogger_channels = [
         channel
@@ -370,7 +431,7 @@ def ensure_managed_channels(db: Session) -> list[ManagedChannel]:
             "status": "connected" if cloudflare_is_connected else "attention",
             "base_url": cloudflare_base_url,
             "primary_category": "archive",
-            "purpose": "Cloudflare blog publish and archive operations",
+            "purpose": "Cloudflare 아카이브 게시 및 보관 채널",
             "capabilities": ["archive_publish", "analytics", "seo_feedback", "indexing"],
             "oauth_state": "connected" if cloudflare_is_connected else "not_configured",
             "quota_state": {},
@@ -1006,7 +1067,7 @@ def serialize_channel(channel: ManagedChannel) -> dict:
         "status": channel.status,
         "base_url": channel.base_url,
         "primary_category": channel.primary_category,
-        "purpose": channel.purpose,
+        "purpose": _safe_text(channel.purpose, fallback=_channel_purpose_fallback(channel)),
         "posts_count": len(channel.publication_records),
         "categories_count": len(set(role_counter.keys())) or 1,
         "prompts_count": len(DEFAULT_AGENT_PACKS.get(channel.provider, ())),

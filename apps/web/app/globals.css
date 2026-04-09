@@ -4,27 +4,23 @@
 
 :root {
   color-scheme: light;
-  --background: #f4efe5;
-  --background-elevated: rgba(255, 252, 247, 0.96);
-  --foreground: #0f172a;
-  --foreground-muted: #475569;
-  --border: rgba(148, 163, 184, 0.22);
-  --shadow-soft: 0 24px 60px rgba(15, 23, 42, 0.08);
+  --app-bg: #f4efe5;
+  --app-bg-elevated: rgba(255, 252, 247, 0.96);
+  --app-fg: #0f172a;
+  --app-fg-muted: #475569;
+  --app-border: rgba(148, 163, 184, 0.22);
+  --app-shadow-soft: 0 24px 60px rgba(15, 23, 42, 0.08);
+  --app-accent-primary: #ea580c;
+  --app-accent-secondary: #2563eb;
+  --app-accent-success: #10b981;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #09090b;
-    --background-elevated: rgba(24, 24, 27, 0.78);
-    --foreground: #f8fafc;
-    --foreground-muted: #a1a1aa;
-    --border: rgba(255, 255, 255, 0.1);
-    --shadow-soft: 0 24px 60px rgba(0, 0, 0, 0.42);
-  }
+.dark {
+  color-scheme: dark;
 }
 
 * {
-  border-color: var(--border);
+  border-color: var(--app-border);
 }
 
 html {
@@ -39,8 +35,8 @@ body {
     radial-gradient(circle at top right, rgba(59, 130, 246, 0.12), transparent 26%),
     radial-gradient(circle at bottom right, rgba(34, 197, 94, 0.08), transparent 22%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent 40%),
-    var(--background);
-  color: var(--foreground);
+    var(--app-bg);
+  color: var(--app-fg);
   font-family: "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif;
   text-rendering: optimizeLegibility;
 }
@@ -51,7 +47,7 @@ body {
 }
 
 .panel-surface {
-  background: var(--background-elevated);
+  background: var(--app-bg-elevated);
   backdrop-filter: blur(12px);
 }
 
@@ -89,7 +85,7 @@ body {
   border: 1px solid rgba(203, 213, 225, 0.72);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(248, 250, 252, 0.97)),
-    var(--background-elevated);
+    var(--app-bg-elevated);
   box-shadow:
     0 24px 56px rgba(15, 23, 42, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.72);
@@ -99,7 +95,7 @@ body {
 .office-panel-strong {
   background:
     linear-gradient(180deg, rgba(255, 251, 245, 0.995), rgba(248, 250, 252, 0.98)),
-    var(--background-elevated);
+    var(--app-bg-elevated);
 }
 
 .office-panel-dark {
@@ -184,10 +180,75 @@ body {
   box-shadow: 0 24px 65px rgba(15, 23, 42, 0.12);
 }
 
-@media (prefers-color-scheme: dark) {
-  .hover-lift:hover {
-    box-shadow: 0 24px 65px rgba(0, 0, 0, 0.4);
+.dark .hover-lift:hover {
+  box-shadow: 0 24px 65px rgba(0, 0, 0, 0.4);
+}
+
+@layer utilities {
+  .bg-app-base {
+    background-color: var(--app-bg);
   }
+
+  .bg-app-elevated {
+    background-color: var(--app-bg-elevated);
+  }
+
+  .text-app-base {
+    color: var(--app-fg);
+  }
+
+  .text-app-muted {
+    color: var(--app-fg-muted);
+  }
+
+  .border-app {
+    border-color: var(--app-border);
+  }
+
+  .shadow-app-soft {
+    box-shadow: var(--app-shadow-soft);
+  }
+}
+
+.dark .dashboard-shell .bg-white,
+.dark .dashboard-shell .bg-white\/95,
+.dark .dashboard-shell .bg-white\/90,
+.dark .dashboard-shell .bg-white\/85,
+.dark .dashboard-shell .bg-white\/80,
+.dark .dashboard-shell .bg-slate-50,
+.dark .dashboard-shell .bg-slate-50\/80,
+.dark .dashboard-shell .bg-slate-100 {
+  background-color: rgba(15, 23, 42, 0.88) !important;
+}
+
+.dark .dashboard-shell .border-slate-200,
+.dark .dashboard-shell .border-slate-200\/70,
+.dark .dashboard-shell .border-slate-200\/80,
+.dark .dashboard-shell .border-slate-300 {
+  border-color: rgba(148, 163, 184, 0.3) !important;
+}
+
+.dark .dashboard-shell .text-slate-950,
+.dark .dashboard-shell .text-slate-900,
+.dark .dashboard-shell .text-slate-800,
+.dark .dashboard-shell .text-slate-700 {
+  color: #e2e8f0 !important;
+}
+
+.dark .dashboard-shell .text-slate-600,
+.dark .dashboard-shell .text-slate-500,
+.dark .dashboard-shell .text-slate-400 {
+  color: #94a3b8 !important;
+}
+
+.dark .dashboard-shell .hover\:bg-slate-50:hover,
+.dark .dashboard-shell .hover\:bg-slate-100:hover,
+.dark .dashboard-shell .hover\:bg-white:hover {
+  background-color: rgba(30, 41, 59, 0.9) !important;
+}
+
+.dark .dashboard-shell .shadow-sm {
+  box-shadow: 0 16px 44px rgba(2, 6, 23, 0.45) !important;
 }
 
 .article-prose h2 {

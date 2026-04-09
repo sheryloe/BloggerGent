@@ -49,6 +49,7 @@ import {
   PlatformIntegrationRead,
   PlannerCalendarRead,
   PlannerCategoryRead,
+  PlannerCategoryRuleUpdateRequest,
   PlannerDayBriefApplyRequest,
   PlannerDayBriefApplyResponse,
   PlannerDayBriefAnalysisRequest,
@@ -78,7 +79,7 @@ import {
 } from "@/lib/types";
 
 function resolveBaseUrl() {
-  return process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
+  return process.env.API_INTERNAL_URL || process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api/v1";
 }
 
 type ApiFetchOptions = RequestInit & {
@@ -540,6 +541,9 @@ function mapPlannerCategory(item: any): PlannerCategoryRead {
     color: item.color ?? null,
     sortOrder: item.sort_order,
     isActive: item.is_active,
+    planningMode: item.planning_mode ?? "auto",
+    weeklyTarget: item.weekly_target ?? null,
+    weekdays: (item.weekdays ?? []).map((value: any) => Number(value)).filter((value: number) => Number.isInteger(value)),
   };
 }
 
@@ -1039,12 +1043,15 @@ function mapAnalyticsArticleFact(item: any) {
     actualUrl: item.actual_url ?? null,
     sourceType: item.source_type,
     ctr: item.ctr ?? null,
+    ctrScore: item.ctr_score ?? null,
     indexStatus: item.index_status ?? "unknown",
     indexCoverageState: item.index_coverage_state ?? null,
     lastCrawlTime: item.last_crawl_time ?? null,
     lastNotifyTime: item.last_notify_time ?? null,
     nextEligibleAt: item.next_eligible_at ?? null,
     indexLastCheckedAt: item.index_last_checked_at ?? null,
+    statusVariant: item.status_variant ?? "unknown",
+    canManualDelete: item.can_manual_delete ?? false,
   };
 }
 
@@ -1193,6 +1200,22 @@ export async function buildPlannerMonthPlan(payload: PlannerMonthPlanRequest) {
     }),
   });
   return mapPlannerCalendar(response);
+}
+
+export async function updatePlannerCategoryRules(channelId: string, rules: PlannerCategoryRuleUpdateRequest[]) {
+  const response = await apiFetch<any[]>("/planner/category-rules", {
+    method: "PUT",
+    body: JSON.stringify({
+      channel_id: channelId,
+      rules: rules.map((rule) => ({
+        category_key: rule.categoryKey,
+        planning_mode: rule.planningMode,
+        weekly_target: rule.weeklyTarget ?? null,
+        weekdays: rule.weekdays ?? [],
+      })),
+    }),
+  });
+  return response.map(mapPlannerCategory);
 }
 
 export async function createPlannerSlot(payload: PlannerSlotCreateRequest) {
@@ -1383,6 +1406,12 @@ export async function getBlogMonthlyArticles(
     pageSize: payload.page_size ?? params.pageSize ?? 50,
     items: (payload.items ?? []).map(mapAnalyticsArticleFact),
   } satisfies AnalyticsArticleFactListResponse;
+}
+
+export async function deleteBlogMonthlyArticleFact(blogId: number, factId: number) {
+  await apiFetch(`/analytics/blogs/${blogId}/article-facts/${factId}`, {
+    method: "DELETE",
+  });
 }
 
 export async function applyNextMonthWeights(blogId: number, month: string) {

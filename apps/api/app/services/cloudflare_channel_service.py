@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
@@ -67,25 +67,36 @@ CLOUDFLARE_PROMPT_FILE_MAP: dict[str, tuple[str, ...]] = {
     "01_travel_festival_v3.md": ("여행과-기록", "축제와-현장"),
     "02_culture_exhibition_popup_v3.md": ("문화와-공간",),
     "03_mystery_history_v3.md": ("미스테리아-스토리",),
-    "04_company_analysis_v3.md": (),
+    "04_company_analysis_v3.md": ("동그리의-생각",),
     "05_stock_weekly_v3.md": ("주식의-흐름",),
     "06_crypto_v3.md": ("크립토의-흐름",),
     "07_welfare_life_v3.md": ("삶을-유용하게", "삶의-기름칠", "일상과-메모"),
-    "08_it_ai_tools_v3.md": ("개발과-프로그래밍", "기술의-기록"),
+    "08_it_ai_tools_v3.md": ("개발과-프로그래밍",),
 }
 
 README_V3_LEAF_WEIGHTS: dict[str, int] = {
+    "여행과기록": 10,
     "여행과-기록": 10,
+    "축제와현장": 10,
     "축제와-현장": 10,
+    "문화와공간": 12,
     "문화와-공간": 12,
+    "미스터리-스토리": 10,
     "미스테리아-스토리": 10,
+    "주식-흐름": 8,
     "주식의-흐름": 8,
+    "크립토-흐름": 10,
     "크립토의-흐름": 10,
+    "생활-실용": 6,
     "삶을-유용하게": 6,
+    "생활-기록": 6,
     "삶의-기름칠": 6,
+    "일상과메모": 6,
     "일상과-메모": 6,
+    "개발과도구": 6,
     "개발과-프로그래밍": 6,
-    "기술의-기록": 6,
+    "동그리의-생각": 5,
+    "기술의기록": 6,
 }
 
 BLOSSOM_KEYWORDS = (
@@ -94,9 +105,9 @@ BLOSSOM_KEYWORDS = (
     "blossom",
     "sakura",
     "벚꽃",
-    "왕벚꽃",
-    "겹벚꽃",
     "봄꽃",
+    "벚꽃축제",
+    "꽃놀이",
 )
 
 FALLBACK_CATEGORIES: tuple[dict[str, str | None], ...] = (
@@ -104,190 +115,84 @@ FALLBACK_CATEGORIES: tuple[dict[str, str | None], ...] = (
         "id": "cat-donggri-dev",
         "slug": "개발과-프로그래밍",
         "name": "개발과 프로그래밍",
-        "description": "개발 워크플로와 프로그래밍 실무를 다루는 글",
+        "description": "개발, AI, 자동화, 실무 도구를 다루는 카테고리",
         "parentId": "cat-donggri",
     },
     {
         "id": "cat-donggri-travel",
         "slug": "여행과-기록",
         "name": "여행과 기록",
-        "description": "한국 여행의 장면과 기록을 다루는 글",
+        "description": "여행 동선, 장소 기록, 현장 팁을 다루는 카테고리",
         "parentId": "cat-donggri",
     },
     {
         "id": "cat-donggri-daily",
         "slug": "일상과-메모",
         "name": "일상과 메모",
-        "description": "메모와 루틴, 생활 기록을 다루는 글",
+        "description": "생활 메모와 실용 정보를 정리하는 카테고리",
         "parentId": "cat-donggri",
     },
     {
-        "id": "cat-tech-useful-life",
-        "slug": "삶을-유용하게",
-        "name": "삶을 유용하게",
-        "description": "유용한 기술과 정보를 합쳐 바로 쓰는 실용 기록",
-        "parentId": "cat-market-tech",
-    },
-    {
-        "id": "cat-tech-life-oil",
+        "id": "cat-donggri-life",
         "slug": "삶의-기름칠",
         "name": "삶의 기름칠",
-        "description": "일상과 여행을 가볍게 정리",
-        "parentId": "cat-market-tech",
+        "description": "루틴, 정리, 생활 감각을 다루는 카테고리",
+        "parentId": "cat-donggri",
     },
     {
-        "id": "cat-market-stock",
+        "id": "cat-donggri-utility",
+        "slug": "삶을-유용하게",
+        "name": "삶을 유용하게",
+        "description": "실용 팁과 체크리스트를 다루는 카테고리",
+        "parentId": "cat-donggri",
+    },
+    {
+        "id": "cat-donggri-finance-stock",
         "slug": "주식의-흐름",
         "name": "주식의 흐름",
-        "description": "현재 주목 종목을 분석하는 글",
-        "parentId": "cat-market",
+        "description": "시장 흐름과 종목 관찰 포인트를 다루는 카테고리",
+        "parentId": "cat-donggri",
     },
     {
-        "id": "cat-market-crypto",
+        "id": "cat-donggri-finance-crypto",
         "slug": "크립토의-흐름",
         "name": "크립토의 흐름",
-        "description": "암호화폐와 체인 트렌드를 분석하는 글",
-        "parentId": "cat-market",
+        "description": "코인과 블록체인 흐름을 다루는 카테고리",
+        "parentId": "cat-donggri",
     },
     {
-        "id": "cat-world-donggri-thought",
-        "slug": "동그리의-생각",
-        "name": "동그리의 생각",
-        "description": "이슈를 동그리 관점으로 정리하는 해설 기록",
-        "parentId": "cat-world",
+        "id": "cat-donggri-culture",
+        "slug": "문화와-공간",
+        "name": "문화와 공간",
+        "description": "전시, 공간, 문화 경험을 다루는 카테고리",
+        "parentId": "cat-donggri",
+    },
+    {
+        "id": "cat-donggri-festival",
+        "slug": "축제와-현장",
+        "name": "축제와 현장",
+        "description": "축제 현장 정보와 시즌 이슈를 다루는 카테고리",
+        "parentId": "cat-donggri",
     },
     {
         "id": "cat-world-mysteria-story",
         "slug": "미스테리아-스토리",
         "name": "미스테리아 스토리",
-        "description": "미스터리와 역사 문화를 엮어 맥락을 정리하는 기록",
-        "parentId": "cat-world",
+        "description": "사건, 전설, 역사 미스터리를 다루는 카테고리",
+        "parentId": "cat-donggri",
     },
     {
-        "id": "cat-info-culture",
-        "slug": "문화와-공간",
-        "name": "문화와 공간",
-        "description": "전시와 문화 공간을 다루는 글",
-        "parentId": "cat-info",
-    },
-    {
-        "id": "cat-info-festival-field",
-        "slug": "축제와-현장",
-        "name": "축제와 현장",
-        "description": "축제 정보와 현장 운영 가이드를 합쳐 정리하는 기록",
-        "parentId": "cat-info",
+        "id": "cat-world-donggri-thought",
+        "slug": "동그리의-생각",
+        "name": "동그리의 생각",
+        "description": "현상, 서비스, 브랜드, 문화 흐름에 대한 해석과 생각을 다루는 카테고리",
+        "parentId": "cat-donggri",
     },
 )
 
-CATEGORY_TOPIC_GUIDANCE: dict[str, str] = {
-    "개발과-프로그래밍": "개발 워크플로, SDK, 자동화, 프로그래밍 실무 개선과 같은 실행형 주제를 다룹니다.",
-    "여행과-기록": "한국 여행 동선, 계절 장면, 지역 산책, 로컬 장소 경험을 다룹니다.",
-    "일상과-메모": "메모 습관, 루틴, 기록법, 생활 정리와 같은 개인 실행형 주제를 다룹니다.",
-    "삶을-유용하게": "바로 써먹는 기술, 도구, 서비스, 생활 생산성 정보를 다룹니다.",
-    "삶의-기름칠": "일상 회복, 가벼운 정리, 생활 감각, 루틴 개선을 다룹니다.",
-    "주식의-흐름": "종목, 실적, 시장 반응, 투자 포인트를 다룹니다.",
-    "크립토의-흐름": "체인, 토큰, 프로젝트, 일정, 리스크를 다룹니다.",
-    "동그리의-생각": "이슈 해설, 구조 분석, 관점 정리를 다룹니다.",
-    "미스테리아-스토리": "미스터리 사건, 전설, 역사 논쟁, 기록 재해석을 다룹니다.",
-    "문화와-공간": "전시, 박물관, 미술관, 영화·드라마·아이돌 관련 장소, 유적과 공간 경험을 다룹니다.",
-    "축제와-현장": "축제 일정, 현장 운영, 교통, 숙박, 체크리스트 같은 실전 정보를 다룹니다.",
-}
-
-CATEGORY_MODULE_GUIDANCE: dict[str, tuple[str, ...]] = {
-    "개발과-프로그래밍": (
-        "문제가 발생하는 실제 장면",
-        "핵심 개념 요약",
-        "적용 순서",
-        "실무에서 흔한 실패 포인트",
-        "바로 써먹는 체크리스트",
-    ),
-    "여행과-기록": (
-        "처음 가는 사람이 바로 이해할 포인트",
-        "걷는 흐름과 동선",
-        "현장 분위기",
-        "근처에서 함께 묶기 좋은 요소",
-        "시간대별 판단 기준",
-    ),
-    "일상과-메모": (
-        "문제를 느끼는 생활 장면",
-        "바로 적용 가능한 기록법",
-        "오래 가는 이유",
-        "실패를 줄이는 최소 규칙",
-        "기록을 유지하는 트리거",
-    ),
-    "삶을-유용하게": (
-        "실제 사용 장면",
-        "무엇이 해결되는지",
-        "설정 순서",
-        "주의할 점",
-        "추천 대상",
-    ),
-    "삶의-기름칠": (
-        "지친 순간을 바꾸는 포인트",
-        "가볍게 시작하는 방법",
-        "지속 가능한 루틴",
-        "생활에 붙이는 요령",
-        "무리하지 않는 마무리",
-    ),
-    "주식의-흐름": (
-        "지금 시장에서 보는 포인트",
-        "숫자로 보는 변화",
-        "기업 또는 업종 맥락",
-        "다음 확인 포인트",
-        "리스크 요약",
-    ),
-    "크립토의-흐름": (
-        "가격보다 먼저 볼 구조",
-        "체인/프로젝트 맥락",
-        "일정과 촉매",
-        "리스크 관리",
-        "지금 체크할 데이터",
-    ),
-    "동그리의-생각": (
-        "왜 이 이슈가 중요한지",
-        "표면 현상과 구조 구분",
-        "오해를 줄이는 정리",
-        "현실적 영향",
-        "관점의 결론",
-    ),
-    "미스테리아-스토리": (
-        "사건 개요",
-        "확인된 사실과 가설 구분",
-        "기록 또는 장소 맥락",
-        "주요 해석 비교",
-        "왜 지금도 읽히는지",
-    ),
-    "문화와-공간": (
-        "공간의 첫인상",
-        "왜 지금 가볼 만한지",
-        "체류 동선",
-        "주변과 함께 보는 방법",
-        "공간이 남기는 감각",
-    ),
-    "축제와-현장": (
-        "일정과 운영 핵심",
-        "도착 시간과 이동법",
-        "구역별 동선",
-        "먹거리·숙박·체크포인트",
-        "출발 전 체크리스트",
-    ),
-}
-
-CATEGORY_IMAGE_GUIDANCE: dict[str, str] = {
-    "개발과-프로그래밍": "코드, 화면, 워크플로 장면처럼 주제가 바로 읽히는 실무 이미지가 맞습니다.",
-    "여행과-기록": "장소의 공기, 걷는 흐름, 계절감, 동네 맥락이 한 장면 안에서 읽혀야 합니다.",
-    "일상과-메모": "메모 습관과 기록 장면이 주인공이어야 하며, 사건 이미지가 주인공이면 안 됩니다.",
-    "삶을-유용하게": "도구를 실제로 쓰는 장면이나 문제 해결 전후가 보이는 이미지가 맞습니다.",
-    "삶의-기름칠": "정리, 회복, 일상 감각이 자연스럽게 보이는 생활 장면이 맞습니다.",
-    "주식의-흐름": "기업, 거래 화면, 업종 현장처럼 분석 대상을 시각적으로 붙잡아야 합니다.",
-    "크립토의-흐름": "체인, 프로젝트, 네트워크 맥락이 읽히는 이미지가 맞고 추상 배경 남발은 피합니다.",
-    "동그리의-생각": "이슈의 구조나 사회적 맥락이 드러나는 이미지가 맞습니다.",
-    "미스테리아-스토리": "사건 장소, 문서, 기록물, 조사 분위기처럼 다큐멘터리 톤이 맞습니다.",
-    "문화와-공간": "전시 공간, 유적, 박물관, 촬영지, 아이돌 관련 장소처럼 실제 공간성이 읽혀야 합니다.",
-    "축제와-현장": "행사 입구, 군중 흐름, 운영 동선, 현장 분위기처럼 실전 정보가 느껴지는 장면이 맞습니다.",
-}
-
-
+CATEGORY_TOPIC_GUIDANCE: dict[str, str] = {}
+CATEGORY_MODULE_GUIDANCE: dict[str, tuple[str, ...]] = {}
+CATEGORY_IMAGE_GUIDANCE: dict[str, str] = {}
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -364,7 +269,7 @@ def _parse_cloudflare_datetime(value: Any) -> datetime | None:
 
 def _infer_topic_cluster_angle(keyword: str) -> tuple[str, str]:
     text = str(keyword or "").strip()
-    for delimiter in ("|", ":", " - ", " — "):
+    for delimiter in ("|", ":", " - ", " ??"):
         if delimiter in text:
             left, right = text.split(delimiter, 1)
             return left.strip(), right.strip()
@@ -701,84 +606,113 @@ def _fetch_remote_site_settings(values: dict[str, str]) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _cloudflare_category_search_text(*values: str | None) -> str:
+    return " ".join(str(value or "").strip() for value in values if str(value or "").strip()).casefold()
+
+
+def _cloudflare_prompt_profile(category_slug: str, category_name: str, category_description: str, category_id: str = "") -> str:
+    text = _cloudflare_category_search_text(category_id, category_slug, category_name, category_description)
+    if any(token in text for token in ("mystery", "mysteria", "case", "archive", "legend", "lore", "미스터리", "미스테리", "전설", "괴담", "기록")):
+        return "mystery"
+    if any(token in text for token in ("travel", "festival", "culture", "food", "trip", "tour", "popup", "museum", "여행", "축제", "문화", "맛집", "전시", "카페")):
+        return "travel"
+    if any(token in text for token in ("stock", "crypto", "coin", "blockchain", "주식", "코인", "가상자산")):
+        return "finance"
+    if any(token in text for token in ("dev", "tool", "ai", "tech", "program", "개발", "도구", "기술")):
+        return "tech"
+    if any(token in text for token in ("daily", "life", "memo", "welfare", "생활", "메모", "복지")):
+        return "daily"
+    return "general"
+
+
 def _category_topic_guidance(category_slug: str, category_name: str, category_description: str) -> str:
-    return CATEGORY_TOPIC_GUIDANCE.get(category_slug, category_description or f"{category_name}에 맞는 주제를 다룹니다.")
+    profile = _cloudflare_prompt_profile(category_slug, category_name, category_description)
+    if profile == "mystery":
+        return "문서화된 사실, 기록, 해석 차이를 분리해서 읽을 수 있는 다큐형 미스터리 주제를 다룹니다."
+    if profile == "travel":
+        return "실제 방문 결정에 도움이 되는 동선, 장소 선택, 체류 포인트, 시즌성을 중심으로 다룹니다."
+    if profile == "finance":
+        return "가격 방향을 단정하기보다 흐름, 변수, 리스크, 체크 포인트를 빠르게 이해하게 돕습니다."
+    if profile == "tech":
+        return "실무 적용성, 비교 포인트, 선택 기준이 바로 잡히는 도구·기술형 글을 우선합니다."
+    if profile == "daily":
+        return "바로 써먹을 수 있는 생활 판단 기준과 준비 포인트를 짧고 명확하게 정리합니다."
+    return category_description or f"{category_name} 카테고리에 맞는 실전형 블로그 주제를 다룹니다."
 
 
 def _category_modules(category_slug: str) -> tuple[str, ...]:
-    return CATEGORY_MODULE_GUIDANCE.get(
-        category_slug,
-        (
-            "핵심 맥락",
-            "실전 정보",
-            "현장 또는 공간 감각",
-            "주의할 점",
-            "독자가 바로 쓸 포인트",
-        ),
-    )
+    normalized = _cloudflare_category_search_text(category_slug)
+    if any(token in normalized for token in ("travel", "festival", "culture", "food", "여행", "축제", "문화", "맛집")):
+        return ("검색 의도", "방문 결정 포인트", "현장 감각", "주의사항", "실행 팁")
+    if any(token in normalized for token in ("mystery", "mysteria", "case", "archive", "legend", "미스터리", "전설", "괴담")):
+        return ("핵심 사건", "기록과 증거", "주요 해석", "논쟁 지점", "지금도 읽히는 이유")
+    if any(token in normalized for token in ("stock", "crypto", "coin", "주식", "코인")):
+        return ("현재 흐름", "리스크 포인트", "체크 지표", "시나리오", "실행 판단")
+    if any(token in normalized for token in ("dev", "tool", "ai", "tech", "개발", "도구", "기술")):
+        return ("문제 정의", "도구 비교", "실무 적용", "주의점", "추천 상황")
+    if any(token in normalized for token in ("daily", "life", "memo", "welfare", "생활", "메모", "복지")):
+        return ("핵심 요약", "준비물", "실수 방지", "체크리스트", "실행 순서")
+    return ("핵심 요약", "실전 정보", "결정 포인트", "주의사항", "바로 할 일")
 
 
 def _category_image_guidance(category_slug: str) -> str:
-    return CATEGORY_IMAGE_GUIDANCE.get(category_slug, "글의 첫 약속을 즉시 보여주는 단일 장면 이미지가 맞습니다.")
+    normalized = _cloudflare_category_search_text(category_slug)
+    if any(token in normalized for token in ("mystery", "mysteria", "case", "archive", "legend", "미스터리", "괴담", "전설")):
+        return "문서, 장소, 흔적, 조사 분위기가 바로 읽히는 다큐멘터리형 장면이 맞습니다."
+    if any(token in normalized for token in ("travel", "festival", "culture", "food", "여행", "축제", "문화", "맛집")):
+        return "독자가 가고 싶어지는 실제 장소성과 현장 밀도를 먼저 보여주는 장면이 맞습니다."
+    if any(token in normalized for token in ("stock", "crypto", "coin", "주식", "코인")):
+        return "추상 아이콘보다 화면, 차트 맥락, 의사결정 분위기가 느껴지는 현실적인 장면이 맞습니다."
+    if any(token in normalized for token in ("dev", "tool", "ai", "tech", "개발", "도구", "기술")):
+        return "실무 도구를 다루는 손, 화면, 작업 환경처럼 사용 맥락이 보이는 장면이 맞습니다."
+    return "글의 핵심 약속이 한눈에 읽히는 현실적인 대표 장면이 맞습니다."
 
 
 def _cloudflare_editorial_category_key(category_slug: str) -> str:
-    normalized = (category_slug or "").strip()
-    if any(token in normalized for token in ("여행", "축제")):
-        return "travel"
-    if "문화" in normalized:
-        return "culture"
-    if any(token in normalized for token in ("맛", "푸드", "식")):
+    normalized = _cloudflare_category_search_text(category_slug)
+    if any(token in normalized for token in ("food", "restaurant", "cafe", "market", "맛집", "카페", "먹거리")):
         return "food"
+    if any(token in normalized for token in ("festival", "culture", "popup", "museum", "exhibition", "heritage", "축제", "문화", "전시", "뮤지엄")):
+        return "culture"
+    if any(token in normalized for token in ("legend", "lore", "folklore", "scp", "괴담", "전설", "민속")):
+        return "legends-lore"
+    if any(token in normalized for token in ("archive", "history", "historical", "기록", "역사", "아카이브")):
+        return "mystery-archives"
+    if any(token in normalized for token in ("mystery", "mysteria", "case", "unsolved", "미스터리", "사건")):
+        return "case-files"
+    if any(token in normalized for token in ("travel", "trip", "tour", "visit", "여행", "동선", "코스")):
+        return "travel"
     return "general"
 
 
 def _cloudflare_target_audience(category_slug: str, category_name: str) -> str:
-    normalized = (category_slug or "").strip()
-    if any(token in normalized for token in ("여행", "축제", "문화")):
-        return (
-            "한국에서 실제 방문 결정을 하려는 한국어 독자. 동선, 시간대, 비용, 대기, 혼잡 회피, "
-            "가볼지 말지 판단 포인트를 빠르게 알고 싶어 한다."
-        )
-    if any(token in normalized for token in ("주식", "코인", "블록체인")):
-        return "핵심 변수와 리스크를 빠르게 파악해 다음 판단 포인트를 잡으려는 한국어 투자자."
-    if any(token in normalized for token in ("일", "개발", "기술")):
-        return "실무에 바로 적용할 도구, 워크플로, 비교 기준을 찾는 한국어 개발자와 지식노동자."
-    if any(token in normalized for token in ("생활", "복지", "메모")):
-        return "자격, 절차, 준비물, 자주 하는 실수를 빠르게 확인하려는 한국어 생활정보 독자."
-    if "미스터리" in normalized:
-        return "사실과 해석을 구분해 읽고 싶고 핵심 기록과 주요 가설을 짧게 정리받고 싶은 한국어 독자."
-    return f"{category_name} 주제에서 실제 판단 포인트를 빠르게 확인하려는 한국어 독자."
+    profile = _cloudflare_prompt_profile(category_slug, category_name, "")
+    if profile == "mystery":
+        return "사실과 해석을 구분해서 읽고 싶고, 기록과 출처를 따라가며 보는 독자"
+    if profile == "travel":
+        return "실제 방문 전 결정을 하려는 독자. 동선, 시간, 비용, 대기, 체류 포인트를 빠르게 파악하고 싶어 한다."
+    if profile == "finance":
+        return "가격 예측보다 흐름과 리스크를 빠르게 정리해 의사결정에 참고하려는 독자"
+    if profile == "tech":
+        return "업무에 바로 적용할 도구와 방법을 비교하고 선택 기준을 알고 싶은 실무 독자"
+    if profile == "daily":
+        return "복잡한 설명보다 바로 실행 가능한 생활 정보와 체크 포인트를 원하는 독자"
+    return f"{category_name} 주제에서 핵심 판단 포인트를 빠르게 알고 싶은 블로그 독자"
 
 
 def _cloudflare_content_brief(category_slug: str, category_name: str, category_description: str) -> str:
-    normalized = (category_slug or "").strip()
-    if any(token in normalized for token in ("여행", "축제", "문화")):
-        return (
-            "CTR과 SEO를 함께 잡는 한국어 실전 가이드 글로 작성한다. "
-            "도입부에서 방문 여부 판단 포인트를 빠르게 주고, 본문은 동선, 시간, 예산, 대기, 체류 포인트 중심으로 전개한다."
-        )
-    if any(token in normalized for token in ("주식", "코인", "블록체인")):
-        return (
-            "CTR과 SEO를 함께 잡는 한국어 분석형 글로 작성한다. "
-            "헤드라인은 클릭 훅을 유지하되 본문은 변수, 흐름, 리스크, 다음 체크포인트 중심으로 전개한다."
-        )
-    if any(token in normalized for token in ("일", "개발", "기술")):
-        return (
-            "CTR과 SEO를 함께 잡는 한국어 실무형 글로 작성한다. "
-            "툴 소개에 그치지 말고 누가 언제 왜 써야 하는지, 실무에서 무엇이 달라지는지 중심으로 전개한다."
-        )
-    if any(token in normalized for token in ("생활", "복지", "메모")):
-        return (
-            "CTR과 SEO를 함께 잡는 한국어 생활정보 글로 작성한다. "
-            "자격, 절차, 준비물, 실수 방지, 다시 확인해야 할 포인트를 먼저 정리하고 본문을 전개한다."
-        )
-    if "미스터리" in normalized:
-        return (
-            "CTR과 SEO를 함께 잡는 한국어 다큐멘터리형 글로 작성한다. "
-            "흥미를 끌되 과장하지 말고 기록, 쟁점, 대표 해석, 지금 읽어야 하는 이유를 중심으로 전개한다."
-        )
-    return category_description or f"{category_name} 주제를 CTR과 SEO에 맞는 한국어 실전 글로 재구성한다."
+    profile = _cloudflare_prompt_profile(category_slug, category_name, category_description)
+    if profile == "mystery":
+        return "다큐멘터리형 미스터리 블로그처럼 기록, 정황, 해석 차이를 분리하고 과장 없이 긴장감을 유지하는 글을 만듭니다."
+    if profile == "travel":
+        return "클릭을 부르되 과장하지 않고, 실제 방문에 도움이 되는 장소 선택·동선·현장 정보 중심의 여행형 글을 만듭니다."
+    if profile == "finance":
+        return "점수 리포트처럼 쓰지 말고, 흐름·변수·리스크를 실전 판단 기준으로 정리하는 금융형 글을 만듭니다."
+    if profile == "tech":
+        return "툴 나열보다 왜 써야 하는지, 언제 맞는지, 무엇이 달라지는지를 바로 이해시키는 실무형 글을 만듭니다."
+    if profile == "daily":
+        return "체크리스트와 실행 순서가 바로 보이는 생활형 블로그 글을 짧고 명확하게 만듭니다."
+    return category_description or f"{category_name} 주제를 블로그 독자가 바로 읽고 활용할 수 있는 실전형 글로 만듭니다."
 
 
 def _read_master_prompt_template(file_name: str) -> str:
@@ -794,37 +728,85 @@ def _read_master_prompt_template(file_name: str) -> str:
     raise FileNotFoundError(f"Prompt template not found: {file_name}")
 
 
+def _cloudflare_master_prompt_file(category: dict[str, Any], stage: str) -> str:
+    category_id = str(category.get("id") or "").strip()
+    category_slug = str(category.get("slug") or "").strip()
+    category_name = str(category.get("name") or "").strip()
+    category_description = str(category.get("description") or "").strip()
+    profile = _cloudflare_prompt_profile(category_slug, category_name, category_description, category_id)
+    if stage == "topic_discovery":
+        return {
+            "travel": "travel_topic_discovery.md",
+            "mystery": "mystery_topic_discovery.md",
+        }.get(profile, "topic_discovery.md")
+    if stage == "article_generation":
+        return {
+            "travel": "travel_article_generation.md",
+            "mystery": "mystery_article_generation.md",
+        }.get(profile, "article_generation.md")
+    return "collage_prompt.md"
+
+
+def _cloudflare_stage_display_label(stage: str) -> str:
+    normalized = str(stage or "").strip().lower()
+    if normalized == "topic_discovery":
+        return "주제 발굴"
+    if normalized == "article_generation":
+        return "본문 작성"
+    if normalized == "image_prompt_generation":
+        return "대표 이미지 프롬프트"
+    return normalized or "프롬프트"
+
+
+def _cloudflare_stage_default_objective(stage: str, *, category_name: str) -> str:
+    normalized = str(stage or "").strip().lower()
+    if normalized == "topic_discovery":
+        return f"{category_name} 카테고리에 맞는 클릭 유도형 주제를 블로그 톤으로 발굴합니다."
+    if normalized == "article_generation":
+        return f"{category_name} 카테고리 글을 자연스러운 블로그 문체로 작성합니다."
+    if normalized == "image_prompt_generation":
+        return f"{category_name} 글의 첫 인상을 살리는 대표 이미지 프롬프트를 만듭니다."
+    return f"{category_name} 카테고리 전용 프롬프트"
+
+
 def _build_cloudflare_master_article_prompt(
     category: dict[str, Any],
     *,
     keyword: str,
     current_date: str,
     planner_brief: str,
+    prompt_template: str | None = None,
 ) -> str:
     category_name = str(category.get("name") or category.get("slug") or "").strip()
     category_slug = str(category.get("slug") or "").strip()
     category_description = str(category.get("description") or "").strip()
-    prompt_template = _read_master_prompt_template("travel_article_generation.md")
+    base_prompt_template = str(prompt_template or "").strip() or _build_default_article_prompt(category)
     rendered = render_prompt_template(
-        prompt_template,
+        base_prompt_template,
+        blog_name=f"Dongri Archive | {category_name or 'Cloudflare'}",
         keyword=keyword,
         primary_language="ko",
         target_audience=_cloudflare_target_audience(category_slug, category_name),
         content_brief=_cloudflare_content_brief(category_slug, category_name, category_description),
-        planner_brief=planner_brief or "No planner brief provided.",
+        planner_brief=planner_brief or "플래너 브리프 없음",
         current_date=current_date,
         editorial_category_key=_cloudflare_editorial_category_key(category_slug),
         editorial_category_label=category_name or "Cloudflare",
         editorial_category_guidance=_category_topic_guidance(category_slug, category_name, category_description),
+        article_title="{article_title}",
+        article_excerpt="{article_excerpt}",
+        article_context="{article_context}",
     )
-    return (
-        f"{rendered.rstrip()}\n\n"
+    policy_block = (
         "[Cloudflare article policy]\n"
-        "- Write like a publish-ready Korean CTR/SEO article, not an audit note or compliance memo.\n"
-        "- Do not use fixed report headings such as timestamp blocks, 핵심 요약, 확인된 사실, 미확인 정보/가정, 출처/확인 경로.\n"
+        "- Write like a publish-ready Korean blog article for real readers, not an audit note or compliance memo.\n"
+        "- Use natural topic-first headings. Do not use headings like '점수 높이기 위하여 해야 할 것', '점수 개선 체크리스트', or '품질 진단 결과' unless the topic itself is a diagnosis.\n"
         "- Keep the body substantial enough for a real 6 to 10 minute read without filler.\n"
-        "- If schedules, prices, eligibility, or 운영 정보 can change, use recheck wording naturally inside the relevant section.\n"
+        "- If schedules, prices, eligibility, or operating details can change, use recheck wording naturally inside the relevant section.\n"
     )
+    if "[Cloudflare article policy]" in rendered:
+        return rendered
+    return f"{rendered.rstrip()}\n\n{policy_block}"
 
 
 def _render_bullets(items: tuple[str, ...]) -> str:
@@ -852,12 +834,12 @@ def _build_mysteria_blogger_source_block(
         return ""
 
     intro_lines = [
-        "[미스테리아 스토리 소스 운영 컨셉]",
-        "- 이 카테고리는 Blogger 원본 소스를 한국어 문화권 맥락에 맞게 재가공하는 방식으로 작성합니다.",
-        "- DB 소스 큐는 오래된 글부터(ascending) 순서대로 읽고, 한 회차에 2개씩(source pair) 묶어 사용합니다.",
-        "- 단순 직역 금지: 사실 관계/출처는 유지하고 한국 독자 기준의 맥락, 용어, 설명 순서로 재구성합니다.",
-        "- source pair에서 겹치는 사실은 교차 검증 포인트로 정리하고, 상충 내용은 분리 표기합니다.",
-        "- 본문에서 원문 표현을 길게 복사하지 말고, 검증 가능한 사실 중심의 한국어 다큐멘터리 톤으로 씁니다.",
+        "[誘몄뒪?뚮━???ㅽ넗由??뚯뒪 ?댁쁺 而⑥뀎]",
+        "- ??移댄뀒怨좊━??Blogger ?먮낯 ?뚯뒪瑜??쒓뎅??臾명솕沅?留λ씫??留욊쾶 ?ш?怨듯븯??諛⑹떇?쇰줈 ?묒꽦?⑸땲??",
+        "- DB ?뚯뒪 ?먮뒗 ?ㅻ옒??湲遺??ascending) ?쒖꽌?濡??쎄퀬, ???뚯감??2媛쒖뵫(source pair) 臾띠뼱 ?ъ슜?⑸땲??",
+        "- ?⑥닚 吏곸뿭 湲덉?: ?ъ떎 愿怨?異쒖쿂???좎??섍퀬 ?쒓뎅 ?낆옄 湲곗???留λ씫, ?⑹뼱, ?ㅻ챸 ?쒖꽌濡??ш뎄?깊빀?덈떎.",
+        "- source pair?먯꽌 寃뱀튂???ъ떎? 援먯감 寃利??ъ씤?몃줈 ?뺣━?섍퀬, ?곸땐 ?댁슜? 遺꾨━ ?쒓린?⑸땲??",
+        "- 蹂몃Ц?먯꽌 ?먮Ц ?쒗쁽??湲멸쾶 蹂듭궗?섏? 留먭퀬, 寃利?媛?ν븳 ?ъ떎 以묒떖???쒓뎅???ㅽ걧硫섑꽣由??ㅼ쑝濡??곷땲??",
     ]
 
     try:
@@ -889,7 +871,7 @@ def _build_mysteria_blogger_source_block(
             if not title:
                 continue
             intro_lines.append(f"  - source_{index}: {title} ({url})")
-        intro_lines.append("- 글 생성 시 source_1 + source_2를 우선 pair로 사용하고, 다음 회차는 source_3 + source_4로 진행합니다.")
+        intro_lines.append("- 글 생성은 source_1 + source_2를 우선 pair로 사용하고, 다음 회차는 source_3 + source_4로 진행합니다.")
     except Exception:  # noqa: BLE001
         return "\n".join(intro_lines) + "\n"
 
@@ -898,152 +880,116 @@ def _build_mysteria_blogger_source_block(
 
 def _shared_structure_rules() -> str:
     return """[공통 원칙]
-- 한국 문화/여행 블로그의 실전형 구조를 따르되, 모든 글을 같은 패턴으로 찍어내지 않습니다.
-- SEO + GEO를 지키더라도 도입 방식, 문단 길이, 리스트 위치, 정리 방식은 매번 달라야 합니다.
-- 같은 카테고리 안에서도 같은 제목 리듬, 같은 문단 순서, 같은 결론 문장을 반복하지 않습니다.
-- 이모지는 0~3개 범위에서 필요할 때만 쓰고, 고정 위치에 박아 넣지 않습니다.
+- 모든 글을 같은 템플릿처럼 찍어내지 않습니다.
+- SEO와 GEO를 고려하되, 문단 길이·리듬·리스트 배치·도입 방식은 주제마다 달라져야 합니다.
+- 같은 카테고리 안에서도 제목 패턴, 소제목 순서, 결론 문장을 반복하지 않습니다.
+- 이모지는 0~3개 범위에서 필요한 경우에만 쓰고, 고정 위치에 박아 넣지 않습니다.
 - '한눈에 보기', '정리하면', '마무리' 같은 상투적 소제목을 기계적으로 반복하지 않습니다.
 """
 
 
 def _shared_fit_rules(category_name: str) -> str:
     return f"""[카테고리 적합성]
-- 제목, 리드, 본문, 카테고리, 이미지가 모두 같은 중심 약속을 가리켜야 합니다.
-- 카테고리가 {category_name}이면 본문 중심도 반드시 그 카테고리 관점이어야 합니다.
-- 다른 카테고리의 예시를 들 수는 있지만, 그 예시가 제목과 대표 이미지를 먹어버리면 실패입니다.
-- 메모 글이면 메모와 루틴이 먼저 보여야 하고, 사건/장소는 보조 재료여야 합니다.
-- 사건·공간·축제 글이면 메모 도구, 노트북, 책상 같은 generic 이미지가 주인공이면 안 됩니다.
+- 제목, 리드, 본문, 카테고리, 이미지가 모두 같은 중심 주제를 가리켜야 합니다.
+- 카테고리가 {category_name}라면 본문의 핵심 판단 포인트도 반드시 그 카테고리 독자에게 맞아야 합니다.
+- 다른 카테고리 사례를 참고할 수는 있지만, 그 예시가 제목과 대표 이미지를 먹어버리면 실패입니다.
+- 메모형 글이면 메모와 루틴이 먼저 보여야 하고, 사건/장소는 보조 재료여야 합니다.
+- 사건·공간·축제 글인데 generic 책상 사진이나 추상 이미지가 주인공이면 실패입니다.
 """
 
 
 def _seasonal_cherry_blossom_rules() -> str:
-    return """[봄 시즌 우선순위]
-- 현재 날짜가 3월 말~4월이어도 벚꽃은 강제 주제가 아닙니다.
-- 벚꽃 주제는 일간 채널 상한을 넘지 않는 범위에서만 선택합니다.
-- 벚꽃을 쓰더라도 전국 총정리 대신 장소·시간대·동선·현장 운영처럼 실전 각도로 제한합니다.
-- 벚꽃 대안으로 축제 운영, 전시/공간, 로컬 산책, 시장/먹거리, 문화 일정 같은 비벚꽃 주제를 적극 섞습니다.
+    return """[봄 시즌 운영 원칙]
+- 날짜가 3월~4월이라고 해서 벚꽃 주제를 무조건 밀어 넣지 않습니다.
+- 벚꽃 주제는 채널 상한을 넘지 않는 범위에서만 선택합니다.
+- 벚꽃을 다루더라도 장소·시간대·동선·현장 운영처럼 실전 정보 중심으로 제한합니다.
+- 벚꽃 외에도 축제 운영, 전시/공간, 로컬 골목, 시장/먹거리 문화 일정 같은 비벚꽃 시즌 주제를 함께 섞습니다.
 """
 
 
 def _build_default_topic_prompt(category: dict) -> str:
-    category_name = str(category["name"])
-    category_slug = str(category["slug"])
-    category_description = str(category.get("description") or "")
-    modules = _render_bullets(_category_modules(category_slug))
-    return f"""당신은 Dongri Archive의 카테고리 기획 에디터입니다.
-
-Current date: {{current_date}}
-
-[카테고리]
-- 이름: {category_name}
-- 슬러그: {category_slug}
-- 설명: {category_description}
-- 주제 기준: {_category_topic_guidance(category_slug, category_name, category_description)}
-
-[목표]
-- 이 카테고리에 정확히 맞는 주제만 제안합니다.
-- 검색 수요가 있어도 카테고리와 맞지 않으면 제외합니다.
-- 제목만 바꾼 복제 제안을 하지 않습니다.
-
-{_shared_structure_rules()}
-{_shared_fit_rules(category_name)}
-{_seasonal_cherry_blossom_rules()}
-
-[선호 모듈]
-{modules}
-
-[추가 규칙]
-- 문화와-공간은 전시, 박물관, 유적, 촬영지, 아이돌 관련 장소처럼 실제 공간 경험이 있어야 합니다.
-- 축제와-현장은 일정, 운영, 교통, 숙박, 대기 흐름 같은 현장 판단 정보가 살아 있어야 합니다.
-- 여행과-기록은 장소를 나열하지 말고, 걷는 흐름과 지역 감각이 살아 있어야 합니다.
-- 미스테리아-스토리는 사건 개요, 기록, 해석 차이처럼 미스터리 자체가 중심이어야 합니다.
-
-[금지]
-- 카테고리와 맞지 않는 주제
-- 제목만 바꾼 중복 제안
-- 한 글 안에 여러 카테고리 관점을 동시에 주인공으로 세우는 제안
-"""
+    category_id = str(category.get("id") or "").strip()
+    category_name = str(category.get("name") or category.get("slug") or "Cloudflare").strip()
+    category_slug = str(category.get("slug") or "").strip()
+    category_description = str(category.get("description") or "").strip()
+    prompt_template = _read_master_prompt_template(_cloudflare_master_prompt_file(category, "topic_discovery"))
+    rendered = render_prompt_template(
+        prompt_template,
+        blog_name=f"Dongri Archive | {category_name}",
+        keyword="{keyword}",
+        primary_language="ko",
+        target_audience=_cloudflare_target_audience(category_slug, category_name),
+        content_brief=_cloudflare_content_brief(category_slug, category_name, category_description),
+        planner_brief="{planner_brief}",
+        current_date="{current_date}",
+        topic_count="{topic_count}",
+        editorial_category_key=_cloudflare_editorial_category_key(category_slug),
+        editorial_category_label=category_name,
+        editorial_category_guidance=_category_topic_guidance(category_slug, category_name, category_description),
+        article_title="{article_title}",
+        article_excerpt="{article_excerpt}",
+        article_context="{article_context}",
+    )
+    return (
+        f"{rendered.rstrip()}\n\n"
+        "[Cloudflare topic language override]\n"
+        f"- Category id: {category_id or 'unknown'}\n"
+        "- Return Korean keyword candidates for this category.\n"
+        "- Make the topic line feel like a natural Korean blog post subject, not a score report or audit memo.\n"
+        "- Avoid headings or ideas framed as '점수 높이기 위하여 해야 할 것', '품질 진단 결과', or similar ops/report wording.\n"
+    )
 
 
 def _build_default_article_prompt(category: dict) -> str:
-    category_name = str(category["name"])
-    category_slug = str(category["slug"])
-    category_description = str(category.get("description") or "")
-    modules = _render_bullets(_category_modules(category_slug))
-    return f"""당신은 Dongri Archive 글을 쓰는 에디터입니다.
-
-Current date: {{current_date}}
-Topic: {{keyword}}
-
-[카테고리]
-- 이름: {category_name}
-- 설명: {category_description}
-- 주제 기준: {_category_topic_guidance(category_slug, category_name, category_description)}
-
-{_shared_structure_rules()}
-{_shared_fit_rules(category_name)}
-{_seasonal_cherry_blossom_rules()}
-
-[글쓰기 규칙]
-- 첫 문단 안에서 독자의 검색 의도를 바로 잡아줍니다.
-- 도입 방식은 매번 다르게 시작합니다: 장면, 질문, 경고, 요약, 현장감 중 하나를 골라 자연스럽게 엽니다.
-- 본문은 4~6개 단락 블록으로 운영하되, 늘 같은 순서로 쓰지 않습니다.
-- 리스트는 필요할 때만 쓰고, 같은 위치에 반복 배치하지 않습니다.
-- 제목, 리드, 본문, 이미지가 모두 같은 약속을 향해야 합니다.
-- 본문 안에는 이미지 마크다운, HTML 이미지 태그, 콜라주 안내 문구를 넣지 않습니다.
-
-[우선 고려 모듈]
-{modules}
-
-[카테고리별 보정]
-- 문화와-공간: 공간 경험, 체류 동선, 왜 지금 가볼 만한지, 주변과 함께 묶는 방식을 우선합니다.
-- 축제와-현장: 일정, 도착 시간, 이동법, 현장 운영, 체크리스트를 우선합니다.
-- 여행과-기록: 장소 열거보다 동선과 감각, 시간대 판단을 우선합니다.
-- 일상과-메모: 루틴과 기록법이 주인공이어야 합니다.
-- 미스테리아-스토리: 사실, 기록, 해석 차이를 분명히 나눕니다.
-
-[금지]
-- 모든 글을 같은 5단 구조로 고정하기
-- 다른 카테고리 예시가 제목과 이미지를 먹어버리게 쓰기
-- generic 결론 문장을 복붙하기
-"""
+    category_name = str(category.get("name") or category.get("slug") or "Cloudflare").strip()
+    category_slug = str(category.get("slug") or "").strip()
+    category_description = str(category.get("description") or "").strip()
+    prompt_template = _read_master_prompt_template(_cloudflare_master_prompt_file(category, "article_generation"))
+    rendered = render_prompt_template(
+        prompt_template,
+        blog_name=f"Dongri Archive | {category_name}",
+        keyword="{keyword}",
+        primary_language="ko",
+        target_audience=_cloudflare_target_audience(category_slug, category_name),
+        content_brief=_cloudflare_content_brief(category_slug, category_name, category_description),
+        planner_brief="{planner_brief}",
+        current_date="{current_date}",
+        editorial_category_key=_cloudflare_editorial_category_key(category_slug),
+        editorial_category_label=category_name,
+        editorial_category_guidance=_category_topic_guidance(category_slug, category_name, category_description),
+        article_title="{article_title}",
+        article_excerpt="{article_excerpt}",
+        article_context="{article_context}",
+    )
+    return (
+        f"{rendered.rstrip()}\n\n"
+        "[Cloudflare article policy]\n"
+        "- Write like a publish-ready Korean blog article for real readers.\n"
+        "- Use natural topic-first section titles.\n"
+        "- Do not turn the article into an audit note, compliance memo, score report, or checklist dump.\n"
+        "- Do not use headings such as '점수 높이기 위하여 해야 할 것', '점수 개선 체크리스트', or '품질 진단 결과' unless the topic itself is a diagnosis.\n"
+    )
 
 
 def _build_default_image_prompt(category: dict) -> str:
-    category_name = str(category["name"])
-    category_slug = str(category["slug"])
-    category_description = str(category.get("description") or "")
-    return f"""당신은 Dongri Archive 대표 이미지 디렉터입니다.
+    category_name = str(category.get("name") or category.get("slug") or "Cloudflare").strip()
+    category_slug = str(category.get("slug") or "").strip()
+    category_description = str(category.get("description") or "").strip()
+    return f"""You are preparing one final English hero-image prompt for the Cloudflare blog category \"{category_name}\".
 
 Current date: {{current_date}}
 Topic: {{keyword}}
+Category guidance: {_category_topic_guidance(category_slug, category_name, category_description)}
+Image guidance: {_category_image_guidance(category_slug)}
 
-[카테고리]
-- 이름: {category_name}
-- 설명: {category_description}
-- 주제 기준: {_category_topic_guidance(category_slug, category_name, category_description)}
-
-[공통 규칙]
-- 대표 이미지는 글의 첫 약속을 즉시 보여주는 hero 이미지여야 합니다.
-- 대표 이미지는 정확히 9개의 패널로 분리된 3x3 콜라주여야 합니다.
-- 패널 사이에는 흰 여백이 보여야 하고, 가운데 패널이 가장 크게 강조되어야 합니다.
-- 제목과 리드가 약속한 장소·사건·공간·현장감을 바로 읽을 수 있어야 합니다.
-- 노트북, 메모장, 책상 같은 generic 도구 이미지는 메모 글이 아닐 때 금지합니다.
-- 본문용 보조 이미지, 인포그래픽, 차트 이미지는 자동 발행 기본값에서 금지합니다.
-
-[카테고리 우선 규칙]
-- {_category_image_guidance(category_slug)}
-- 문화와-공간은 실제 공간성이 먼저 보여야 합니다.
-- 축제와-현장은 입구, 군중 흐름, 운영 동선, 현장 분위기가 드러나야 합니다.
-- 여행과-기록은 지역의 결, 걷는 흐름, 계절감이 같이 읽혀야 합니다.
-- 미스테리아-스토리는 다큐멘터리 톤의 사건 장소, 문서, 기록물, 조사 분위기가 맞습니다.
-
-[봄 시즌 보정]
-- 3월 말~4월이면 벚꽃 주제에서 장소성이 없는 generic 분홍 배경을 금지합니다.
-- 동네 벚꽃길, 하천 산책, 구 단위 축제, 저녁 조명처럼 제목 속 장소와 현장성이 읽혀야 합니다.
+Rules:
+- Return plain text only.
+- Write one final prompt for a single 3x3 hero collage with exactly 9 distinct panels.
+- Use visible white gutters and one dominant center panel.
+- No text overlays, no logos, no infographic styling, no generic checklist visuals.
+- Keep the image realistic, editorial, and immediately aligned with the article promise.
+- Match the category tone of \"{category_name}\" rather than a generic stock-photo mood.
 """
-
-
 def _prompt_storage_keys(category_id: str, stage: str) -> dict[str, str]:
     prefix = f"cloudflare_prompt__{category_id}__{stage}"
     return {
@@ -1271,8 +1217,11 @@ def get_cloudflare_prompt_bundle(db: Session) -> dict:
         for stage in DEFAULT_PROMPT_STAGES:
             keys = _prompt_storage_keys(str(category["id"]), stage)
             content = values.get(keys["content"]) or _default_prompt_for_stage(category, stage)
-            display_name = (values.get(keys["name"]) or "").strip() or f"{category['name']} · {stage}"
-            objective = (values.get(keys["objective"]) or "").strip() or f"{category['name']} 카테고리용 프롬프트"
+            display_name = (values.get(keys["name"]) or "").strip() or f"{category['name']} | {_cloudflare_stage_display_label(stage)}"
+            objective = (values.get(keys["objective"]) or "").strip() or _cloudflare_stage_default_objective(
+                stage,
+                category_name=str(category["name"]),
+            )
             is_enabled = str(values.get(keys["is_enabled"]) or "true").strip().lower() not in {"false", "0", "off", "no"}
             provider_model = (values.get(keys["provider_model"]) or "").strip() or None
             version = int(str(values.get(keys["version"]) or "1").strip() or "1")
@@ -1354,8 +1303,11 @@ def save_cloudflare_prompt(
         "categorySlug": category["slug"],
         "categoryName": category["name"],
         "stage": normalized_stage,
-        "name": (name or "").strip() or f"{category['name']} · {normalized_stage}",
-        "objective": (objective or "").strip() or f"{category['name']} 카테고리용 프롬프트",
+        "name": (name or "").strip() or f"{category['name']} | {_cloudflare_stage_display_label(normalized_stage)}",
+        "objective": (objective or "").strip() or _cloudflare_stage_default_objective(
+            normalized_stage,
+            category_name=str(category["name"]),
+        ),
         "isEnabled": is_enabled is not False,
         "currentVersion": current_version + 1,
         "content": content,
@@ -1934,24 +1886,24 @@ def _append_no_inline_image_rule(prompt: str) -> str:
 def _append_cloudflare_seo_trust_guard(prompt: str, *, category_slug: str, current_date: str) -> str:
     guard_lines = [
         "[SEO trust + source integrity guard]",
-        f"- Include one explicit timestamp line near the top: 기준 시각: {current_date} (Asia/Seoul).",
-        "- Include one section that clearly separates 확인된 사실 and 미확인 정보.",
+        f"- Include one explicit timestamp line near the top: 湲곗? ?쒓컖: {current_date} (Asia/Seoul).",
+        "- Include one section that clearly separates ?뺤씤???ъ떎 and 誘명솗???뺣낫.",
         "- Include one source/verification section with 2-5 concrete references or official channels.",
-        "- If no verifiable URL exists, explicitly write: 확인 가능한 공식 URL 없음(작성 시점 기준).",
+        "- If no verifiable URL exists, explicitly write: ?뺤씤 媛?ν븳 怨듭떇 URL ?놁쓬(?묒꽦 ?쒖젏 湲곗?).",
         "- Do not present rumors or repost claims as confirmed facts.",
         "- Avoid exaggerated or absolute claims unless verifiable evidence is provided.",
         "- Follow a fixed SEO/GEO/CTR-friendly section order.",
-        "- Required section order: 핵심 요약 -> 확인된 사실 -> 미확인 정보/가정 -> 전개 시나리오 -> 행동 체크리스트 -> 출처/확인 경로 -> FAQ.",
+        "- Required section order: ?듭떖 ?붿빟 -> ?뺤씤???ъ떎 -> 誘명솗???뺣낫/媛??-> ?꾧컻 ?쒕굹由ъ삤 -> ?됰룞 泥댄겕由ъ뒪??-> 異쒖쿂/?뺤씤 寃쎈줈 -> FAQ.",
         "- Keep at least 4 top-level sections and at least 2 sub-sections.",
         "- In the first 220 characters, state target reader and what they can decide after reading.",
         "- Avoid vague prose. Prefer concrete entities, dates, and actionable checkpoints.",
     ]
 
-    if category_slug in {"주식의-흐름", "크립토의-흐름", "동그리의-생각"}:
+    if category_slug in {"주식-흐름", "크립토-흐름", "동그리의-생각"}:
         guard_lines.append("- For forward-looking analysis, label scenarios as possibilities, not certainties.")
-    if category_slug in {"문화와-공간", "축제와-현장", "여행과-기록"}:
+    if category_slug in {"문화와공간", "축제와현장", "여행과기록"}:
         guard_lines.append("- For schedule/price/entry details, use recheck wording when uncertain.")
-    if category_slug == "미스테리아-스토리":
+    if category_slug == "미스터리-스토리":
         guard_lines.append("- Separate documented records, claims, and retellings in different blocks.")
 
     if _is_mysteria_story_category(category_id="", category_slug=category_slug):
@@ -1982,9 +1934,9 @@ def _category_hard_gate(category_slug: str, category_name: str) -> str:
         f"- Every output must fit category '{category_name}' ({category_slug}).",
         "- If the output does not clearly fit this category, regenerate internally before returning.",
     ]
-    if category_slug != "미스테리아-스토리":
+    if category_slug != "미스터리-스토리":
         lines.append("- Do not use mystery, murder, unsolved-case, haunting, or conspiracy angles.")
-    if category_slug != "축제와-현장":
+    if category_slug != "축제와현장":
         lines.append("- Do not force festival operation logistics unless the category is festival-focused.")
     return "\n".join(lines) + "\n"
 
@@ -2150,7 +2102,7 @@ def _ensure_unique_title(title: str, existing_titles: list[str]) -> str:
 def _prepare_markdown_body(title: str, body: str) -> str:
     cleaned = (body or "").strip()
     if not cleaned:
-        return f"# {title}\n\n본문을 생성하지 못했습니다."
+        return f"# {title}\n\n蹂몃Ц???앹꽦?섏? 紐삵뻽?듬땲??"
     if cleaned.startswith("# "):
         return cleaned
     return f"# {title}\n\n{cleaned}"
@@ -2202,140 +2154,32 @@ def _insert_markdown_inline_image(body_markdown: str, image_markdown: str) -> st
 MYSTERY_BLOCK_TERMS = (
     "mystery",
     "unsolved",
-    "murder",
     "haunting",
-    "dyatlov",
-    "roanoke",
-    "hinterkaifeck",
-    "black dahlia",
-    "hope diamond",
+    "conspiracy",
+    "murder",
+    "괴담",
     "미스터리",
-    "살인",
-    "실종",
-    "사건",
+    "음모론",
 )
 
 CATEGORY_REQUIRED_TERMS: dict[str, tuple[str, ...]] = {
-    "축제와-현장": ("축제", "행사", "일정", "운영", "동선", "벚꽃", "festival"),
-    "문화와-공간": ("전시", "박물관", "미술관", "촬영지", "문화", "유적", "공간", "exhibition", "museum"),
-    "여행과-기록": ("여행", "산책", "코스", "동선", "지역", "벚꽃", "trip", "walk"),
-    "일상과-메모": ("메모", "루틴", "기록", "노트", "습관", "memo", "routine"),
-    "개발과-프로그래밍": ("개발", "코드", "프로그래밍", "sdk", "api", "automation"),
-    "삶을-유용하게": ("도구", "생산성", "실전", "정리", "유용", "tool", "productivity"),
-    "삶의-기름칠": ("일상", "회복", "루틴", "정리", "생활", "wellbeing"),
-    "주식의-흐름": ("주식", "종목", "실적", "시장", "stock", "earnings"),
-    "크립토의-흐름": ("크립토", "코인", "체인", "토큰", "crypto", "bitcoin", "ethereum"),
-    "동그리의-생각": ("관점", "해설", "분석", "이슈", "opinion", "analysis"),
-    "미스테리아-스토리": ("mystery", "unsolved", "사건", "미스터리", "전설", "legend"),
-    "기술의-기록": ("기술", "테크", "툴", "도구", "tech", "workflow"),
-    "동그리의-기록": ("기록", "동네", "생활", "산책", "로컬", "log"),
-    "세상의-기록": ("세계", "이슈", "국제", "트렌드", "global", "world"),
-    "시장의-기록": ("시장", "산업", "경제", "소비", "market", "business"),
-    "정보의-기록": ("가이드", "정보", "체크리스트", "안내", "guide", "info"),
+    "여행과기록": ("여행", "코스", "동선", "trip", "walk"),
+    "축제와현장": ("축제", "행사", "festival", "event"),
+    "문화와공간": ("전시", "공간", "museum", "popup", "culture"),
+    "생활-실용": ("체크리스트", "실용", "정리", "guide", "check"),
+    "생활-기록": ("루틴", "기록", "생활", "wellbeing", "memo"),
+    "일상과메모": ("메모", "일상", "tip", "daily", "note"),
+    "주식-흐름": ("stock", "market", "주식", "실적", "지표"),
+    "크립토-흐름": ("crypto", "bitcoin", "ethereum", "코인", "토큰"),
+    "개발과도구": ("tool", "ai", "workflow", "개발", "도구"),
+    "기술의기록": ("tech", "workflow", "automation", "기술", "자동화"),
+    "미스터리-스토리": ("mystery", "unsolved", "legend", "archive", "미스터리", "사건"),
 }
-
-RELAXED_GEO_CATEGORY_SLUGS = {
-    "개발과-프로그래밍",
-    "삶을-유용하게",
-    "삶의-기름칠",
-    "일상과-메모",
-    "주식의-흐름",
-    "크립토의-흐름",
-    "동그리의-생각",
-    "미스테리아-스토리",
-    "기술의-기록",
-    "세상의-기록",
-    "시장의-기록",
-    "정보의-기록",
-}
-
-CATEGORY_FALLBACK_TOPICS: dict[str, tuple[str, ...]] = {
-    "축제와-현장": (
-        "서울 동네 축제 현장 운영 체크리스트",
-        "부산 구단위 봄축제 이동 동선과 대기 시간 줄이는 방법",
-        "주말 야간행사 입장 동선과 교통 전략",
-    ),
-    "문화와-공간": (
-        "봄 시즌 서울 전시 공간 하루 코스 구성법",
-        "드라마 촬영지 기반 문화공간 산책 루트",
-        "아이돌 관련 전시·공간 방문 동선 가이드",
-    ),
-    "여행과-기록": (
-        "동네 아침 산책 코스 기록법",
-        "하천 산책 루트와 시간대별 풍경 비교",
-        "도심 로컬 스팟 1일 도보 동선 구성",
-    ),
-    "일상과-메모": (
-        "봄 시즌 한 달 기록 루틴 설계",
-        "출퇴근 산책 메모를 남기는 10분 습관",
-        "사진·메모·지출을 한 번에 정리하는 생활 로그",
-    ),
-    "개발과-프로그래밍": (
-        "콘텐츠 자동화 파이프라인 실패 복구 체크리스트",
-        "OpenAI 이미지·텍스트 호출 비용 모니터링 구조",
-        "스케줄러 중복 주제 차단 로직 설계 패턴",
-    ),
-    "삶을-유용하게": (
-        "봄철 외출 준비를 줄이는 체크리스트 자동화",
-        "동네 행사 일정과 이동 메모를 한 번에 관리하는 법",
-        "일상 반복 업무를 줄이는 실전 도구 조합",
-    ),
-    "삶의-기름칠": (
-        "봄철 생활 리듬 회복 루틴 구성",
-        "하루 15분 정리 습관으로 피로 줄이기",
-        "주간 리셋 루틴: 산책·기록·정리 결합법",
-    ),
-    "주식의-흐름": (
-        "이번 주 실적 발표 종목 점검 프레임",
-        "변동성 장세에서 손실 제한 체크리스트",
-        "섹터 순환 국면에서 확인할 핵심 지표",
-    ),
-    "크립토의-흐름": (
-        "이번 주 크립토 일정 캘린더 핵심 요약",
-        "알트코인 변동성 구간 리스크 관리법",
-        "체인 지표로 보는 시장 모멘텀 점검",
-    ),
-    "동그리의-생각": (
-        "로컬 행사 소비 패턴 변화와 도시 운영 관점",
-        "콘텐츠 자동화 시대의 품질 기준 재정의",
-        "지역 문화 기록이 도시 브랜드에 미치는 영향",
-    ),
-    "기술의-기록": (
-        "생성형 AI 글쓰기 파이프라인 운영 안정화 체크포인트",
-        "이미지 프롬프트 품질 관리 자동화 설계",
-        "콘텐츠 스케줄러 장애 대응 운영 로그 템플릿",
-    ),
-    "동그리의-기록": (
-        "오늘 동네 산책 기록을 오래 남기는 방법",
-        "로컬 카페와 하천 산책을 묶는 주말 기록 루트",
-        "계절 변화 관찰 노트를 꾸준히 쓰는 루틴",
-    ),
-    "세상의-기록": (
-        "이번 주 글로벌 이슈 핵심 맥락 정리",
-        "국제 뉴스 소비를 줄이면서 핵심만 보는 프레임",
-        "세계 경제 이슈가 생활 비용에 미치는 영향",
-    ),
-    "시장의-기록": (
-        "이번 주 소비·유통 시장 변화 포인트",
-        "중소상권 매출 흐름을 읽는 핵심 지표",
-        "가격 변동 구간에서 시장 체감도 점검",
-    ),
-    "정보의-기록": (
-        "봄철 지역 행사 참여 전 필수 체크리스트",
-        "주말 외출 동선 계획을 빠르게 만드는 방법",
-        "대중교통·주차·혼잡도 정보를 한 번에 확인하는 법",
-    ),
-    "미스테리아-스토리": (
-        "Dyatlov Pass 자료 재검토: 사실과 가설 분리",
-        "Flannan Isles 실종 사건 기록 비교",
-        "Hinterkaifeck 수사 타임라인 재구성",
-    ),
-}
-
-
 def _topic_matches_category(*, category_slug: str, keyword: str) -> bool:
     lowered = keyword.lower()
-    if category_slug != "미스테리아-스토리" and any(term in lowered for term in MYSTERY_BLOCK_TERMS):
+    if not _is_mysteria_story_category(category_id="", category_slug=category_slug) and any(
+        term in lowered for term in MYSTERY_BLOCK_TERMS
+    ):
         return False
 
     required = CATEGORY_REQUIRED_TERMS.get(category_slug)
@@ -2464,7 +2308,7 @@ def _build_prompt_map(bundle: dict, category_id: str) -> dict[str, str]:
 
 
 SEO_GEO_CTR_STRUCTURE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("missing_summary_section", ("핵심 요약", "요약", "tl;dr")),
+    ("missing_summary_section", ("요약", "한눈에 보기", "tl;dr")),
     ("missing_confirmed_section", ("확인된 사실", "검증된 사실", "confirmed")),
     ("missing_unconfirmed_section", ("미확인", "검증 필요", "불확실", "가정", "주장/증언", "unconfirmed")),
     ("missing_scenario_section", ("시나리오", "전개 가능성", "향후 전개", "impact scenario")),
@@ -3196,6 +3040,7 @@ def generate_cloudflare_posts(
                     keyword=keyword,
                     current_date=current_date,
                     planner_brief=planner_brief_block,
+                    prompt_template=article_prompt_template,
                 )
                 article_prompt = f"{article_prompt}{category_gate}"
                 article_prompt = _append_no_inline_image_rule(article_prompt)

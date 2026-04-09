@@ -327,13 +327,13 @@ def _scheduler_slot_ready(slot: ContentPlanSlot) -> bool:
 
 
 def _run_planner_due_slots(db, *, now: datetime) -> dict:
-    now_naive = now.replace(tzinfo=None)
+    now_utc = now.astimezone(timezone.utc)
     due_slots = (
         db.query(ContentPlanSlot)
         .join(ContentPlanDay, ContentPlanSlot.plan_day_id == ContentPlanDay.id)
         .filter(ContentPlanSlot.status.in_(["planned", "brief_ready"]))
         .filter(ContentPlanSlot.scheduled_for.is_not(None))
-        .filter(ContentPlanSlot.scheduled_for <= now_naive)
+        .filter(ContentPlanSlot.scheduled_for <= now_utc)
         .filter(
             or_(
                 ContentPlanDay.channel_id.like("blogger:%"),

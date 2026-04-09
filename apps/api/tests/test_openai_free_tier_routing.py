@@ -30,6 +30,8 @@ def _usage(*, large_used: int, small_used: int = 0) -> OpenAIFreeUsageRead:
         large=OpenAIFreeUsageBucketRead(
             label="Large Models",
             limit_tokens=LARGE_MODEL_LIMIT,
+            input_tokens=large_used,
+            output_tokens=0,
             used_tokens=large_used,
             remaining_tokens=max(LARGE_MODEL_LIMIT - large_used, 0),
             usage_percent=0.0,
@@ -38,6 +40,8 @@ def _usage(*, large_used: int, small_used: int = 0) -> OpenAIFreeUsageRead:
         small=OpenAIFreeUsageBucketRead(
             label="Small Models",
             limit_tokens=SMALL_MODEL_LIMIT,
+            input_tokens=small_used,
+            output_tokens=0,
             used_tokens=small_used,
             remaining_tokens=max(SMALL_MODEL_LIMIT - small_used, 0),
             usage_percent=0.0,
@@ -243,10 +247,25 @@ def test_usage_count_is_strictly_based_on_free_tier_model_lists(monkeypatch: pyt
 
     usage = openai_usage_service.get_openai_free_usage(object())
 
+    assert usage.large.input_tokens == 200
+    assert usage.large.output_tokens == 100
     assert usage.large.used_tokens == 300
+    assert usage.small.input_tokens == 10
+    assert usage.small.output_tokens == 20
     assert usage.small.used_tokens == 30
     assert "gpt-5.4-2026-03-05" not in usage.large.matched_models
     assert "gpt-5.4-2026-03-05" not in usage.small.matched_models
+
+
+def test_empty_usage_snapshot_sets_input_and_output_to_zero() -> None:
+    snapshot = openai_usage_service._empty_usage_snapshot(datetime(2026, 4, 9, 11, 30, tzinfo=timezone.utc))
+
+    assert snapshot.large.input_tokens == 0
+    assert snapshot.large.output_tokens == 0
+    assert snapshot.large.used_tokens == 0
+    assert snapshot.small.input_tokens == 0
+    assert snapshot.small.output_tokens == 0
+    assert snapshot.small.used_tokens == 0
 
 
 def test_stage_policy_allows_large_for_topic_and_article_only() -> None:

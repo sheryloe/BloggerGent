@@ -708,6 +708,7 @@ async function loadChannelPreviews(channelList: ManagedChannelRead[], blogList: 
 export function SettingsConsole({ settings, config, mode = "all" }: SettingsConsoleProps) {
   const visibleTabKeys = TAB_KEYS_BY_MODE[mode];
   const defaultTab = visibleTabKeys[0] ?? "integrations";
+  const isCompact = mode === "admin";
   const settingsByKey = useMemo(() => new Map(settings.map((item) => [item.key, item])), [settings]);
   const [runtimeConfig, setRuntimeConfig] = useState<BloggerConfigRead>(config);
   const [activeTab, setActiveTab] = useState<SettingsTab>(defaultTab);
@@ -1289,12 +1290,12 @@ export function SettingsConsole({ settings, config, mode = "all" }: SettingsCons
   }, [focusedIntegration.key, integrationChannels]);
 
   return (
-    <div className="space-y-5">
-      <section className="rounded-[28px] border border-slate-200 bg-white px-5 py-5 shadow-sm lg:px-6">
+    <div className={isCompact ? "space-y-4 text-[13px]" : "space-y-5"}>
+      <section className={isCompact ? "rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-sm lg:px-5" : "rounded-[28px] border border-slate-200 bg-white px-5 py-5 shadow-sm lg:px-6"}>
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div className="space-y-2">
             <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">설정 워크스페이스</p>
-            <h2 className="text-[28px] font-semibold tracking-tight text-slate-950">설정 콘솔</h2>
+            <h2 className={isCompact ? "text-[24px] font-semibold tracking-tight text-slate-950" : "text-[28px] font-semibold tracking-tight text-slate-950"}>설정 콘솔</h2>
             <p className="max-w-3xl text-sm leading-6 text-slate-600">
               필요한 설정만 남기고 정리했습니다. 연동은 연동 설정에서, 운영 기준은 관리자 설정에서, 7단계 플로우는 별도 탭에서 수정합니다.
             </p>
@@ -1313,7 +1314,7 @@ export function SettingsConsole({ settings, config, mode = "all" }: SettingsCons
             type="button"
             onClick={() => setActiveTab(tab.key)}
             className={[
-              "rounded-full px-4 py-2 text-sm font-medium transition",
+              isCompact ? "rounded-full px-3 py-1.5 text-xs font-semibold transition" : "rounded-full px-4 py-2 text-sm font-medium transition",
               activeTab === tab.key ? "bg-slate-950 text-white shadow-sm" : "bg-white text-slate-600 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50 hover:text-slate-900",
             ].join(" ")}
           >
@@ -1325,7 +1326,7 @@ export function SettingsConsole({ settings, config, mode = "all" }: SettingsCons
       {bootstrapError ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{bootstrapError}</div> : null}
 
       {activeTab === "channels" ? (
-        <section className="grid gap-4 xl:grid-cols-3">
+        <section className={isCompact ? "grid gap-3 xl:grid-cols-3" : "grid gap-4 xl:grid-cols-3"}>
           {channels.map((channel) => {
             const previews = channelPreviews[channel.channelId] ?? [];
             const capabilityPills = [
@@ -1334,13 +1335,13 @@ export function SettingsConsole({ settings, config, mode = "all" }: SettingsCons
               channel.promptFlowSupported ? "플로우 편집" : null,
             ].filter(Boolean) as string[];
             return (
-              <article key={channel.channelId} className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
+              <article key={channel.channelId} className={isCompact ? "rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm" : "rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm"}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 space-y-2">
                     <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
                       <FlagPill tone="slate">{providerDisplayName(channel.provider)}</FlagPill>
                       <FlagPill tone={channel.status === "connected" ? "emerald" : "amber"}>
-                        {channel.status === "connected" ? "연결됨" : channel.status || "확인 필요"}
+                        {connectionStatusLabel(channel.status)}
                       </FlagPill>
                       {capabilityPills.map((label) => (
                         <FlagPill key={label} tone="indigo">
@@ -1348,8 +1349,8 @@ export function SettingsConsole({ settings, config, mode = "all" }: SettingsCons
                         </FlagPill>
                       ))}
                     </div>
-                    <h3 className="line-clamp-2 text-lg font-semibold text-slate-950">{channel.name}</h3>
-                    <p className="truncate text-sm text-slate-500">{channel.baseUrl || "기본 URL 미설정"}</p>
+                    <h3 className={isCompact ? "line-clamp-2 text-base font-semibold text-slate-950" : "line-clamp-2 text-lg font-semibold text-slate-950"}>{channel.name}</h3>
+                    <p className={isCompact ? "truncate text-[13px] text-slate-500" : "truncate text-sm text-slate-500"}>{channel.baseUrl || "기본 URL 미설정"}</p>
                   </div>
                   <div className="grid shrink-0 grid-cols-3 gap-2 text-center">
                     <StatTile label="게시글" value={String(channel.postsCount)} />
@@ -1357,12 +1358,12 @@ export function SettingsConsole({ settings, config, mode = "all" }: SettingsCons
                     <StatTile label="프롬프트" value={String(channel.promptsCount)} />
                   </div>
                 </div>
-                <div className="mt-4 grid gap-2 text-sm text-slate-600">
+                <div className={isCompact ? "mt-3 grid gap-2 text-[13px] text-slate-600" : "mt-4 grid gap-2 text-sm text-slate-600"}>
                   <InfoRow label="대표 카테고리" value={channel.primaryCategory || "미설정"} />
                   <InfoRow label="운영 목적" value={channel.purpose || "설명 없음"} />
                   <InfoRow label="채널 ID" value={channel.channelId} />
                 </div>
-                <div className="mt-5 border-t border-slate-200 pt-4">
+                <div className={isCompact ? "mt-4 border-t border-slate-200 pt-3" : "mt-5 border-t border-slate-200 pt-4"}>
                   <div className="mb-3 flex items-center justify-between">
                     <h4 className="text-sm font-semibold text-slate-900">최근 게시글</h4>
                     <span className="text-xs text-slate-400">최대 3건</span>
@@ -1371,7 +1372,7 @@ export function SettingsConsole({ settings, config, mode = "all" }: SettingsCons
                     {previews.length ? (
                       previews.map((item) => (
                         <div key={item.id} className="rounded-2xl bg-slate-50 px-3 py-3">
-                          <p className="line-clamp-2 text-sm font-medium text-slate-900">{item.title}</p>
+                          <p className={isCompact ? "line-clamp-2 text-[13px] font-medium text-slate-900" : "line-clamp-2 text-sm font-medium text-slate-900"}>{item.title}</p>
                           <div className="mt-2 flex items-center justify-between gap-2">
                             <span className="text-xs text-slate-500">{formatDateTime(item.publishedAt)}</span>
                             {item.url ? (
@@ -1510,14 +1511,14 @@ export function SettingsConsole({ settings, config, mode = "all" }: SettingsCons
                     </label>
                   </FieldGroup>
                   <ReadonlyField label="구조 변경 가능" value={selectedStep.structureEditable ? "예" : "아니오"} />
-                  <FieldGroup label="Backup Folder" className="xl:col-span-2">
+                  <FieldGroup label="백업 폴더" className="xl:col-span-2">
                     <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 font-mono text-xs leading-6 text-slate-700">
                       {flow?.backupDirectory ?? "channels"}
                     </div>
                   </FieldGroup>
-                  <FieldGroup label="Backup File" className="xl:col-span-2">
+                  <FieldGroup label="백업 파일" className="xl:col-span-2">
                     <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 font-mono text-xs leading-6 text-slate-700">
-                      {selectedStep.backupRelativePath ?? "No prompt backup file for this step."}
+                      {selectedStep.backupRelativePath ?? "이 단계에는 백업 프롬프트 파일이 없습니다."}
                     </div>
                   </FieldGroup>
                   {selectedStep.promptEnabled ? (
@@ -1728,7 +1729,7 @@ export function SettingsConsole({ settings, config, mode = "all" }: SettingsCons
                               <a
                                 href={guideHrefForProvider(channel.provider)}
                                 className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-300 bg-white text-[11px] font-semibold text-slate-600 hover:bg-slate-100"
-                                title={`${channel.provider} 연결 가이드`}
+                                title={`${providerDisplayName(channel.provider)} 연결 가이드`}
                               >
                                 ?
                               </a>
@@ -1736,14 +1737,14 @@ export function SettingsConsole({ settings, config, mode = "all" }: SettingsCons
                             <p className="mt-1 text-xs text-slate-500">{channel.channelId}</p>
                           </div>
                           <div className="flex flex-wrap items-center gap-2">
-                            <FlagPill tone={channel.status === "connected" ? "emerald" : "amber"}>{channel.status}</FlagPill>
-                            <FlagPill tone={channel.oauthState === "connected" ? "emerald" : "slate"}>{channel.oauthState}</FlagPill>
+                            <FlagPill tone={channel.status === "connected" ? "emerald" : "amber"}>{connectionStatusLabel(channel.status)}</FlagPill>
+                            <FlagPill tone={channel.oauthState === "connected" ? "emerald" : "slate"}>{oauthStateLabel(channel.oauthState)}</FlagPill>
                           </div>
                         </div>
 
                         <div className="mt-4 grid gap-2 text-sm text-slate-600">
-                          <InfoRow label="Provider" value={channel.provider} />
-                          <InfoRow label="OAuth 상태" value={integration?.oauthState || channel.oauthState} />
+                          <InfoRow label="플랫폼" value={providerDisplayName(channel.provider)} />
+                          <InfoRow label="OAuth 상태" value={oauthStateLabel(integration?.oauthState || channel.oauthState)} />
                           <InfoRow label="Scope 수" value={String(integration?.scopeCount ?? credential?.scopes.length ?? 0)} />
                           <InfoRow label="토큰 만료" value={credential?.expiresAt ? formatDateTime(credential.expiresAt) : "미기록"} />
                           <InfoRow label="대기 콘텐츠" value={String(channel.pendingItems)} />
@@ -1916,18 +1917,55 @@ function guideHrefForProvider(provider: string) {
 function providerDisplayName(provider: string) {
   const normalized = String(provider || "").trim().toLowerCase();
   if (normalized === "youtube") {
-    return "YouTube";
+    return "유튜브";
   }
   if (normalized === "instagram") {
-    return "Instagram";
+    return "인스타그램";
   }
   if (normalized === "cloudflare") {
     return "Cloudflare";
   }
   if (normalized === "blogger") {
-    return "Blogger";
+    return "블로그";
   }
-  return provider || "Unknown";
+  return provider || "알 수 없음";
+}
+
+function connectionStatusLabel(value: string | null | undefined) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "connected") {
+    return "연결됨";
+  }
+  if (normalized === "attention") {
+    return "확인 필요";
+  }
+  if (normalized === "not_configured") {
+    return "미설정";
+  }
+  if (normalized === "expired") {
+    return "만료";
+  }
+  if (normalized === "error" || normalized === "invalid") {
+    return "오류";
+  }
+  return value || "미설정";
+}
+
+function oauthStateLabel(value: string | null | undefined) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "connected") {
+    return "연결됨";
+  }
+  if (normalized === "not_configured") {
+    return "미설정";
+  }
+  if (normalized === "expired") {
+    return "만료";
+  }
+  if (normalized === "invalid" || normalized === "error") {
+    return "오류";
+  }
+  return value || "미설정";
 }
 
 function StatTile({ label, value }: { label: string; value: string }) {

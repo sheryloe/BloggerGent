@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
-import { getBlogDailySummary, getBlogMonthlyArticles } from "@/lib/api";
+import { deleteBlogMonthlyArticleFact, getBlogDailySummary, getBlogMonthlyArticles } from "@/lib/api";
 import type { AnalyticsArticleFactRead, AnalyticsDailySummaryRead, Blog, ManagedChannelRead } from "@/lib/types";
 
 import { AnalyticsPlatformTabs } from "./analytics-platform-tabs";
@@ -17,7 +17,7 @@ type ViewMode = "list" | "calendar";
 type BloggerRow = AnalyticsArticleFactRead & {
   lighthouseScore: number | null;
   lowFlag: boolean;
-  blogName: string;
+  lighthouseLow: boolean;
 };
 
 const PAGE_SIZE = 25;
@@ -40,8 +40,9 @@ function resolveLighthouseScore(row: AnalyticsArticleFactRead) {
 function isAnyLow(row: AnalyticsArticleFactRead) {
   const seo = scoreOrZero(row.seoScore);
   const geo = scoreOrZero(row.geoScore);
-  const ctr = scoreOrZero(row.ctr);
-  return seo < 70 || geo < 70 || ctr < 70;
+  const ctr = scoreOrZero(row.ctrScore);
+  const lighthouse = scoreOrZero(resolveLighthouseScore(row));
+  return seo < 70 || geo < 70 || ctr < 70 || lighthouse < 70;
 }
 
 function formatScore(value: number | null | undefined) {
@@ -49,17 +50,14 @@ function formatScore(value: number | null | undefined) {
   return `${Math.round(value * 10) / 10}`;
 }
 
-function formatDateTime(value: string | null) {
+function formatPublishedDate(value: string | null) {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleString("ko-KR", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function formatDate(value: string) {
@@ -100,10 +98,66 @@ function buildCalendarCells(month: string, summaries: AnalyticsDailySummaryRead[
   return cells;
 }
 
-function lowToneClass(value: number) {
-  if (value >= 80) return "bg-emerald-100 text-emerald-700";
-  if (value >= 70) return "bg-sky-100 text-sky-700";
-  return "bg-rose-100 text-rose-700";
+function scoreBadgeTone(value: number | null | undefined) {
+  if (value == null || Number.isNaN(value)) {
+    return {
+      badgeClass: "bg-slate-100 text-slate-500",
+      dotClass: "bg-slate-400",
+    };
+  }
+  if (value >= 90) {
+    return {
+      badgeClass: "bg-emerald-100 text-emerald-700",
+      dotClass: "bg-emerald-500",
+    };
+  }
+  if (value >= 80) {
+    return {
+      badgeClass: "bg-violet-100 text-violet-700",
+      dotClass: "bg-violet-500",
+    };
+  }
+  if (value >= 70) {
+    return {
+      badgeClass: "bg-sky-100 text-sky-700",
+      dotClass: "bg-sky-500",
+    };
+  }
+  if (value <= 50) {
+    return {
+      badgeClass: "bg-rose-100 text-rose-700",
+      dotClass: "bg-rose-500",
+    };
+  }
+  return {
+    badgeClass: "bg-amber-100 text-amber-700",
+    dotClass: "bg-amber-500",
+  };
+}
+
+function ScoreBadge({ value }: { value: number | null | undefined }) {
+  const tone = scoreBadgeTone(value);
+  return (
+    <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${tone.badgeClass}`}>
+      <span className={`h-2 w-2 rounded-full ${tone.dotClass}`} />
+      {formatScore(value)}
+    </span>
+  );
+}
+
+function truncateTitle(value: string, limit = 30) {
+  if (value.length <= limit) return value;
+  return `${value.slice(0, limit)}...`;
+}
+
+function indexStatusTone(status: string | null | undefined) {
+  const normalized = String(status ?? "unknown").trim().toLowerCase();
+  if (normalized === "indexed") return "bg-emerald-100 text-emerald-700";
+  if (normalized === "submitted") return "bg-blue-100 text-blue-700";
+  if (normalized === "pending") return "bg-amber-100 text-amber-700";
+  if (normalized === "blocked") return "bg-rose-100 text-rose-800";
+  if (normalized === "failed") return "bg-rose-100 text-rose-700";
+  return "bg-slate-100 text-slate-600";
 }
 
 function mapApiSort(sort: BloggerSortKey): "published_at" | "seo" | "geo" | "lighthouse" | "similarity" | "title" {
@@ -112,6 +166,32 @@ function mapApiSort(sort: BloggerSortKey): "published_at" | "seo" | "geo" | "lig
   if (sort === "geo") return "geo";
   if (sort === "title") return "title";
   return "published_at";
+}
+
+function statusBadge(row: AnalyticsArticleFactRead) {
+  if (row.statusVariant === "error_deleted") {
+    return {
+      label: "에러",
+      className: "bg-rose-100 text-rose-700",
+    };
+  }
+  const normalized = String(row.status ?? "").trim().toLowerCase();
+  if (normalized === "published") {
+    return {
+      label: "Published",
+      className: "bg-emerald-100 text-emerald-700",
+    };
+  }
+  if (normalized === "live" || row.statusVariant === "live") {
+    return {
+      label: "Live",
+      className: "bg-emerald-100 text-emerald-700",
+    };
+  }
+  return {
+    label: row.status ? row.status : "unknown",
+    className: "bg-slate-100 text-slate-600",
+  };
 }
 
 export function BloggerAnalyticsWorkspace({ blogs, channels: _channels }: { blogs: Blog[]; channels: ManagedChannelRead[] }) {
@@ -138,14 +218,10 @@ export function BloggerAnalyticsWorkspace({ blogs, channels: _channels }: { blog
     return availableBlogs[0]?.id ?? null;
   }, [availableBlogs, queryBlogId]);
 
-  const selectedBlog = useMemo(() => {
-    if (!selectedBlogId) return null;
-    return availableBlogs.find((blog) => blog.id === selectedBlogId) ?? null;
-  }, [availableBlogs, selectedBlogId]);
-
   const [facts, setFacts] = useState<AnalyticsArticleFactRead[]>([]);
   const [dailySummaries, setDailySummaries] = useState<AnalyticsDailySummaryRead[]>([]);
   const [loading, setLoading] = useState(false);
+  const [deletingFactId, setDeletingFactId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const setQuery = (patch: Record<string, string | null>) => {
@@ -214,14 +290,46 @@ export function BloggerAnalyticsWorkspace({ blogs, channels: _channels }: { blog
   }, [selectedBlogId, queryMonth, queryStatus, querySort, queryDir]);
 
   const rows = useMemo<BloggerRow[]>(() => {
-    const blogName = selectedBlog?.name ?? "-";
     return facts.map((item) => ({
       ...item,
       lighthouseScore: resolveLighthouseScore(item),
       lowFlag: isAnyLow(item),
-      blogName,
+      lighthouseLow: scoreOrZero(resolveLighthouseScore(item)) < 70,
     }));
-  }, [facts, selectedBlog]);
+  }, [facts]);
+
+  const handleManualDelete = async (row: BloggerRow) => {
+    if (!selectedBlogId || !row.canManualDelete || deletingFactId === row.id) return;
+    const confirmed = window.confirm("LIVE에서 이미 사라진 글을 로컬 DB에서 정리합니다. 계속할까요?");
+    if (!confirmed) return;
+
+    setDeletingFactId(row.id);
+    setError(null);
+    try {
+      await deleteBlogMonthlyArticleFact(selectedBlogId, row.id);
+      const [factPayload, dailyPayload] = await Promise.all([
+        getBlogMonthlyArticles(selectedBlogId, {
+          month: queryMonth,
+          status: queryStatus || null,
+          page: 1,
+          pageSize: 200,
+          sort: mapApiSort(querySort),
+          dir: queryDir,
+        }),
+        getBlogDailySummary(selectedBlogId, {
+          month: queryMonth,
+          status: queryStatus || null,
+        }),
+      ]);
+      setFacts(factPayload.items ?? []);
+      setDailySummaries(dailyPayload.items ?? []);
+    } catch (cause: unknown) {
+      const message = cause instanceof Error ? cause.message : "게시글 수동 삭제에 실패했습니다.";
+      setError(message);
+    } finally {
+      setDeletingFactId(null);
+    }
+  };
 
   const filteredRows = useMemo(() => {
     const loweredQ = queryQ.toLowerCase();
@@ -246,7 +354,7 @@ export function BloggerAnalyticsWorkspace({ blogs, channels: _channels }: { blog
         (left ?? "").localeCompare(right ?? "", "ko");
 
       if (querySort === "title") return compareText(a.title, b.title) * direction;
-      if (querySort === "status") return compareText(a.status, b.status) * direction;
+      if (querySort === "status") return compareText(statusBadge(a).label, statusBadge(b).label) * direction;
       if (querySort === "publishedAt") {
         const left = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
         const right = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
@@ -254,7 +362,7 @@ export function BloggerAnalyticsWorkspace({ blogs, channels: _channels }: { blog
       }
       if (querySort === "seo") return (scoreOrZero(a.seoScore) - scoreOrZero(b.seoScore)) * direction;
       if (querySort === "geo") return (scoreOrZero(a.geoScore) - scoreOrZero(b.geoScore)) * direction;
-      if (querySort === "ctr") return (scoreOrZero(a.ctr) - scoreOrZero(b.ctr)) * direction;
+      if (querySort === "ctr") return (scoreOrZero(a.ctrScore) - scoreOrZero(b.ctrScore)) * direction;
       return (scoreOrZero(a.lighthouseScore) - scoreOrZero(b.lighthouseScore)) * direction;
     });
 
@@ -282,7 +390,7 @@ export function BloggerAnalyticsWorkspace({ blogs, channels: _channels }: { blog
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Blogger Analytics</p>
             <h1 className="mt-2 text-2xl font-semibold text-slate-900">게시글 성과 테이블</h1>
-            <p className="mt-1 text-sm text-slate-600">SEO, GEO, CTR, Lighthouse 지표를 블로그별로 정렬하고 필터링할 수 있습니다.</p>
+            <p className="mt-1 text-sm text-slate-600">SEO, GEO, CTR 점수, Lighthouse, 색인 상태를 한 줄에서 확인합니다.</p>
           </div>
           <div className="flex flex-wrap gap-2 text-xs font-semibold">
             <span className="rounded-xl bg-slate-100 px-3 py-2 text-slate-700">행 수 {filteredRows.length}</span>
@@ -315,7 +423,7 @@ export function BloggerAnalyticsWorkspace({ blogs, channels: _channels }: { blog
             저점 필터
             <select value={queryLow} onChange={(event) => setQuery({ low: event.target.value, page: "1" })} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
               <option value="none">전체</option>
-              <option value="any70">SEO/GEO/CTR 중 70 미만</option>
+              <option value="any70">SEO/GEO/CTR/Lighthouse 중 70 미만</option>
               <option value="lighthouse70">Lighthouse 70 미만</option>
             </select>
           </label>
@@ -378,51 +486,80 @@ export function BloggerAnalyticsWorkspace({ blogs, channels: _channels }: { blog
       ) : (
         <section className="rounded-[28px] border border-slate-200 bg-white p-0 shadow-sm">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1420px] border-collapse text-sm">
+            <table className="w-full min-w-[1480px] border-collapse text-sm">
               <thead>
                 <tr className="bg-slate-100 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-600">
-                  <th className="px-3 py-3"><button type="button" onClick={() => handleSort("publishedAt")}>발행일</button></th>
-                  <th className="px-3 py-3">블로그</th>
-                  <th className="px-3 py-3"><button type="button" onClick={() => handleSort("title")}>제목</button></th>
-                  <th className="px-3 py-3"><button type="button" onClick={() => handleSort("status")}>상태</button></th>
                   <th className="px-3 py-3"><button type="button" onClick={() => handleSort("seo")}>SEO</button></th>
                   <th className="px-3 py-3"><button type="button" onClick={() => handleSort("geo")}>GEO</button></th>
                   <th className="px-3 py-3"><button type="button" onClick={() => handleSort("ctr")}>CTR</button></th>
                   <th className="px-3 py-3"><button type="button" onClick={() => handleSort("lighthouse")}>Lighthouse</button></th>
+                  <th className="px-3 py-3">색인 여부</th>
+                  <th className="px-3 py-3"><button type="button" onClick={() => handleSort("publishedAt")}>발행일</button></th>
+                  <th className="px-3 py-3"><button type="button" onClick={() => handleSort("title")}>제목</button></th>
+                  <th className="px-3 py-3"><button type="button" onClick={() => handleSort("status")}>상태</button></th>
                   <th className="px-3 py-3">품질 상태</th>
                   <th className="px-3 py-3">URL</th>
+                  <th className="px-3 py-3">액션</th>
                 </tr>
               </thead>
               <tbody>
-                {pagedRows.map((row) => (
-                  <tr key={row.id} className="border-t border-slate-100 align-top hover:bg-slate-50">
-                    <td className="px-3 py-3 text-xs text-slate-600">{formatDateTime(row.publishedAt)}</td>
-                    <td className="px-3 py-3 text-xs text-slate-700">{row.blogName}</td>
-                    <td className="px-3 py-3 font-medium text-slate-900">{row.title || "(제목 없음)"}</td>
-                    <td className="px-3 py-3 text-xs text-slate-600">{row.status ?? "-"}</td>
-                    <td className="px-3 py-3"><span className={`rounded-lg px-2 py-1 text-xs font-semibold ${lowToneClass(scoreOrZero(row.seoScore))}`}>{formatScore(row.seoScore)}</span></td>
-                    <td className="px-3 py-3"><span className={`rounded-lg px-2 py-1 text-xs font-semibold ${lowToneClass(scoreOrZero(row.geoScore))}`}>{formatScore(row.geoScore)}</span></td>
-                    <td className="px-3 py-3"><span className={`rounded-lg px-2 py-1 text-xs font-semibold ${lowToneClass(scoreOrZero(row.ctr))}`}>{formatScore(row.ctr)}</span></td>
-                    <td className="px-3 py-3"><span className={`rounded-lg px-2 py-1 text-xs font-semibold ${lowToneClass(scoreOrZero(row.lighthouseScore))}`}>{formatScore(row.lighthouseScore)}</span></td>
-                    <td className="px-3 py-3">
-                      <span className={`rounded-lg px-2 py-1 text-xs font-semibold ${row.lowFlag ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"}`}>
-                        {row.lowFlag ? "주의" : "정상"}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3 text-xs">
-                      {row.actualUrl ? (
-                        <Link href={row.actualUrl} target="_blank" className="text-sky-700 underline-offset-2 hover:underline">
-                          링크 열기
-                        </Link>
-                      ) : (
-                        <span className="text-slate-400">-</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {pagedRows.map((row) => {
+                  const statusTone = statusBadge(row);
+                  const displayTitle = row.title ? truncateTitle(row.title) : "(제목 없음)";
+                  return (
+                    <tr key={row.id} className="border-t border-slate-100 align-top hover:bg-slate-50">
+                      <td className="px-3 py-3"><ScoreBadge value={row.seoScore} /></td>
+                      <td className="px-3 py-3"><ScoreBadge value={row.geoScore} /></td>
+                      <td className="px-3 py-3"><ScoreBadge value={row.ctrScore} /></td>
+                      <td className="px-3 py-3"><ScoreBadge value={row.lighthouseScore} /></td>
+                      <td className="px-3 py-3">
+                        <span className={`rounded-lg px-2 py-1 text-xs font-semibold ${indexStatusTone(row.indexStatus)}`}>
+                          {row.indexStatus ?? "unknown"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-xs text-slate-600">{formatPublishedDate(row.publishedAt)}</td>
+                      <td className="max-w-[320px] px-3 py-3 font-medium text-slate-900" title={row.title || "(제목 없음)"}>
+                        {displayTitle}
+                      </td>
+                      <td className="px-3 py-3 text-xs text-slate-600">
+                        <span className={`rounded-lg px-2 py-1 text-xs font-semibold ${statusTone.className}`}>
+                          {statusTone.label}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className={`rounded-lg px-2 py-1 text-xs font-semibold ${row.lighthouseLow ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>
+                          {row.lighthouseLow ? "주의" : "정상"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-xs">
+                        {row.actualUrl ? (
+                          <Link href={row.actualUrl} target="_blank" className="text-sky-700 underline-offset-2 hover:underline">
+                            링크 열기
+                          </Link>
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-3 text-xs">
+                        {row.canManualDelete ? (
+                          <button
+                            type="button"
+                            onClick={() => handleManualDelete(row)}
+                            disabled={deletingFactId === row.id}
+                            className="rounded-lg border border-rose-200 px-3 py-1 font-semibold text-rose-700 disabled:opacity-40"
+                          >
+                            {deletingFactId === row.id ? "삭제 중" : "수동 삭제"}
+                          </button>
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
                 {pagedRows.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="px-4 py-8 text-center text-sm text-slate-500">조건에 맞는 게시글이 없습니다.</td>
+                    <td colSpan={11} className="px-4 py-8 text-center text-sm text-slate-500">조건에 맞는 게시글이 없습니다.</td>
                   </tr>
                 ) : null}
               </tbody>

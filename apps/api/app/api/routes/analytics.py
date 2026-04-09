@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -19,6 +19,7 @@ from app.schemas.api import (
 from app.services.analytics_service import (
     apply_next_month_weights,
     backfill_analytics,
+    delete_blog_article_fact,
     get_blog_daily_summary,
     get_blog_monthly_articles,
     get_blog_monthly_report,
@@ -61,7 +62,7 @@ def read_blog_monthly_articles(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
-) -> AnalyticsArticleFactListResponse:
+    ) -> AnalyticsArticleFactListResponse:
     return get_blog_monthly_articles(
         db,
         blog_id=blog_id,
@@ -76,6 +77,21 @@ def read_blog_monthly_articles(
         page=page,
         page_size=page_size,
     )
+
+
+@router.delete("/blogs/{blog_id}/article-facts/{fact_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_blog_monthly_article_fact(
+    blog_id: int,
+    fact_id: int,
+    db: Session = Depends(get_db),
+) -> Response:
+    try:
+        delete_blog_article_fact(db, blog_id=blog_id, fact_id=fact_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/blogs/{blog_id}/daily-summary", response_model=AnalyticsDailySummaryListResponse)

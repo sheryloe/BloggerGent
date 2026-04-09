@@ -1490,6 +1490,7 @@ def save_public_binary(
     subdir: str,
     filename: str,
     content: bytes,
+    object_key: str | None = None,
     provider_override: str | None = None,
 ) -> tuple[str, str, dict]:
     values = get_settings_map(db)
@@ -1516,6 +1517,7 @@ def save_public_binary(
     if provider == "cloudflare_r2":
         public_url, _, provider_delivery = upload_binary_to_cloudflare_r2(
             db,
+            object_key=object_key,
             filename=normalized_filename,
             content=normalized_content,
         )
@@ -1543,7 +1545,12 @@ def save_public_binary(
     return file_path, local_public_url, delivery_meta
 
 
-def ensure_existing_public_image_url(db: Session, *, file_path: str) -> tuple[str, dict]:
+def ensure_existing_public_image_url(
+    db: Session,
+    *,
+    file_path: str,
+    object_key: str | None = None,
+) -> tuple[str, dict]:
     path = Path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"Image file not found: {file_path}")
@@ -1568,6 +1575,7 @@ def ensure_existing_public_image_url(db: Session, *, file_path: str) -> tuple[st
         )
         public_url, _, provider_delivery = upload_binary_to_cloudflare_r2(
             db,
+            object_key=object_key,
             filename=upload_filename,
             content=upload_content,
         )

@@ -24,7 +24,12 @@ from app.models.entities import (
     Topic,
     WorkflowStageType,
 )
-from app.services.article_service import build_collage_prompt, ensure_article_editorial_labels, save_article
+from app.services.article_service import (
+    build_article_r2_asset_object_key,
+    build_collage_prompt,
+    ensure_article_editorial_labels,
+    save_article,
+)
 from app.services.audit_service import add_log, count_logs_since
 from app.services.blog_service import get_blog, get_workflow_step, render_agent_prompt, stage_label
 from app.services.content_guard_service import (
@@ -2322,13 +2327,19 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
         f"{blog.name} preparing hero/inline images.",
     )
 
-    def _generate_and_store(prompt_value: str) -> tuple[Image, str]:
+    def _generate_and_store(prompt_value: str, *, asset_role: str = "hero") -> tuple[Image, str]:
         image_bytes, image_raw = image_provider.generate_image(prompt_value, article.slug)
+        object_key = build_article_r2_asset_object_key(
+            article,
+            asset_role=asset_role,
+            content=image_bytes,
+        )
         file_path, public_url, delivery_meta = save_public_binary(
             db,
             subdir="images",
             filename=f"{article.slug}.webp",
             content=image_bytes,
+            object_key=object_key,
         )
         image = _upsert_image(
             db,
@@ -2363,7 +2374,7 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
                 (rendered_visual_prompt or "").strip()
                 or f"Documentary style mystery cover image for {job.keyword_snapshot}."
             )
-            fallback_image, fallback_public_url = _generate_and_store(fallback_prompt)
+            fallback_image, fallback_public_url = _generate_and_store(fallback_prompt, asset_role="hero")
             hero_image_url = fallback_public_url
             fallback_image_payload = {
                 "reason": "wikimedia_empty_result",
@@ -2404,11 +2415,17 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
             )
             try:
                 inline_bytes, inline_raw = image_provider.generate_image(inline_prompt, f"{article.slug}-inline-3x2")
+                inline_object_key = build_article_r2_asset_object_key(
+                    article,
+                    asset_role="inline-3x2",
+                    content=inline_bytes,
+                )
                 inline_file_path, inline_public_url, inline_delivery = save_public_binary(
                     db,
                     subdir="images",
                     filename=f"{article.slug}-inline-3x2.webp",
                     content=inline_bytes,
+                    object_key=inline_object_key,
                 )
                 article.inline_media = [
                     {
@@ -2478,7 +2495,7 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
             )
     else:
         generation_attempts: list[dict] = []
-        image, hero_image_url = _generate_and_store(rendered_visual_prompt)
+        image, hero_image_url = _generate_and_store(rendered_visual_prompt, asset_role="hero")
         generation_attempts.append(
             {
                 "attempt": 1,
@@ -2506,7 +2523,7 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
                     title=article.title,
                     original_prompt=rendered_visual_prompt,
                 )
-                retry_image, retry_public_url = _generate_and_store(retry_prompt)
+                retry_image, retry_public_url = _generate_and_store(retry_prompt, asset_role="hero-retry")
                 retry_prompt_missing = _travel_3x3_prompt_missing_requirements(retry_prompt)
                 retry_size_missing = _travel_3x3_size_missing_requirements(
                     int(retry_image.width or 0),
@@ -2571,11 +2588,17 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
                 )
                 try:
                     inline_bytes, inline_raw = image_provider.generate_image(inline_prompt, f"{article.slug}-inline-3x2")
+                    inline_object_key = build_article_r2_asset_object_key(
+                        article,
+                        asset_role="inline-3x2",
+                        content=inline_bytes,
+                    )
                     inline_file_path, inline_public_url, inline_delivery = save_public_binary(
                         db,
                         subdir="images",
                         filename=f"{article.slug}-inline-3x2.webp",
                         content=inline_bytes,
+                        object_key=inline_object_key,
                     )
                     article.inline_media = [
                         {

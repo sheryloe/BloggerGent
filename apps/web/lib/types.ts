@@ -863,6 +863,8 @@ export interface TrainingStatus {
 export interface OpenAIFreeUsageBucket {
   label: string;
   limit_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
   used_tokens: number;
   remaining_tokens: number;
   usage_percent: number;
@@ -1100,6 +1102,9 @@ export interface PlannerCategoryRead {
   color: string | null;
   sortOrder: number;
   isActive: boolean;
+  planningMode: "auto" | "weekly" | "weekdays";
+  weeklyTarget: number | null;
+  weekdays: number[];
 }
 
 export interface PlannerSlotRead {
@@ -1165,6 +1170,13 @@ export interface PlannerMonthPlanRequest {
   month: string;
   targetPostCount?: number | null;
   overwrite?: boolean;
+}
+
+export interface PlannerCategoryRuleUpdateRequest {
+  categoryKey: string;
+  planningMode: "auto" | "weekly" | "weekdays";
+  weeklyTarget?: number | null;
+  weekdays?: number[];
 }
 
 export interface PlannerSlotCreateRequest {
@@ -1537,12 +1549,15 @@ export interface AnalyticsArticleFactRead {
   actualUrl: string | null;
   sourceType: string;
   ctr: number | null;
+  ctrScore: number | null;
   indexStatus: "indexed" | "submitted" | "pending" | "blocked" | "failed" | "unknown" | string;
   indexCoverageState: string | null;
   lastCrawlTime: string | null;
   lastNotifyTime: string | null;
   nextEligibleAt: string | null;
   indexLastCheckedAt: string | null;
+  statusVariant: string;
+  canManualDelete: boolean;
 }
 
 export interface AnalyticsThemeMonthlyStatRead {

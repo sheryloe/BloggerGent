@@ -71,7 +71,7 @@ export function MediaAnalyticsWorkspace({ provider, channels }: { provider: Plat
     setLoading(true);
     setError(null);
 
-    getWorkspaceContentItems({ provider, limit: 500 })
+    getWorkspaceContentItems({ provider, limit: 200 })
       .then((payload) => {
         if (!cancelled) setItems(payload ?? []);
       })

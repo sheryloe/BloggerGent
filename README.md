@@ -410,8 +410,8 @@ This repository now uses manual indexing for Search Console:
 - No daily auto batch indexing.
 - Indexing is executed per post from `/google`.
 - Each row has two actions:
-  - `»öÀÎ È®ÀÎ` (status refresh via URL Inspection API)
-  - `»öÀÎ ½ÇÇà(1°Ç)` (Playwright click automation in Search Console UI)
+  - `ìƒ‰ì¸ í™•ì¸` (status refresh via URL Inspection API)
+  - `ìƒ‰ì¸ ì‹¤í–‰(1ê±´)` (Playwright click automation in Search Console UI)
 
 ### Required Settings
 

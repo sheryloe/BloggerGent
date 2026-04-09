@@ -8,11 +8,11 @@ export default async function AdminPage() {
   const [settings, config] = await Promise.all([fetchSettings(), fetchBloggerConfig()]);
 
   return (
-    <div className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-3">
+    <div className="space-y-4">
+      <div className="grid gap-3 md:grid-cols-3">
         <Card>
           <CardHeader>
-            <CardDescription>Admin</CardDescription>
+            <CardDescription>관리</CardDescription>
             <CardTitle>연동 설정 바로가기</CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-slate-600">
@@ -23,17 +23,17 @@ export default async function AdminPage() {
         </Card>
         <Card>
           <CardHeader>
-            <CardDescription>Admin</CardDescription>
-            <CardTitle>연동 데이터 동기화</CardTitle>
+            <CardDescription>관리</CardDescription>
+            <CardTitle>채널 데이터 반영</CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-slate-600">연동 완료 후 채널/블로그 목록은 운영 화면에 자동 반영됩니다.</CardContent>
         </Card>
         <Card>
           <CardHeader>
-            <CardDescription>TODO</CardDescription>
-            <CardTitle>AdSense 예정 기능</CardTitle>
+            <CardDescription>예정</CardDescription>
+            <CardTitle>광고 운영 기능</CardTitle>
           </CardHeader>
-          <CardContent className="text-sm text-slate-600">AdSense 관리 기능은 이 화면에 추가할 예정입니다.</CardContent>
+          <CardContent className="text-sm text-slate-600">광고 운영 관련 기능은 이 화면에 단계적으로 추가할 예정입니다.</CardContent>
         </Card>
       </div>
 

@@ -1,0 +1,20 @@
+﻿{
+    "meta":  {
+                 "source":  "stitch",
+                 "space":  "bloggergent-design-system",
+                 "memoryName":  "dashboard_dark_theme_tokens",
+                 "updatedAt":  "2026-04-09T11:37:12.1863377Z",
+                 "version":  1
+             },
+    "tokens":  {
+                   "background":  "#070B14",
+                   "backgroundElevated":  "rgba(15, 23, 42, 0.78)",
+                   "foreground":  "#E5ECF7",
+                   "foregroundMuted":  "#94A3B8",
+                   "border":  "rgba(148, 163, 184, 0.25)",
+                   "shadowSoft":  "0 24px 64px rgba(2, 6, 23, 0.55)",
+                   "accentPrimary":  "#F97316",
+                   "accentSecondary":  "#2563EB",
+                   "accentSuccess":  "#10B981"
+               }
+}

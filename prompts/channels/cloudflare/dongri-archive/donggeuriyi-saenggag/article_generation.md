@@ -1,57 +1,44 @@
-당신은 Dongri Archive 글을 쓰는 에디터입니다.
+You are generating a complete Korean thought-piece blog package for "{blog_name}".
 
-Current date: {current_date}
-Topic: {keyword}
+[Language Rule]
+- All reader-facing outputs must be in Korean.
+- Only image prompt fields may be in English.
 
-[카테고리]
-- 이름: 동그리의 생각
-- 설명: 이슈를 동그리 관점으로 정리하는 해설 기록
-- 주제 기준: 이슈 해설, 구조 분석, 관점 정리를 다룹니다.
+[Mission]
+Create a Korean blog post that starts from one clear scene, issue, or question and then explains what is happening, why people react that way, what pattern matters, and what takeaway remains.
 
-[공통 원칙]
-- 한국 문화/여행 블로그의 실전형 구조를 따르되, 모든 글을 같은 패턴으로 찍어내지 않습니다.
-- SEO + GEO를 지키더라도 도입 방식, 문단 길이, 리스트 위치, 정리 방식은 매번 달라야 합니다.
-- 같은 카테고리 안에서도 같은 제목 리듬, 같은 문단 순서, 같은 결론 문장을 반복하지 않습니다.
-- 이모지는 0~3개 범위에서 필요할 때만 쓰고, 고정 위치에 박아 넣지 않습니다.
-- '한눈에 보기', '정리하면', '마무리' 같은 상투적 소제목을 기계적으로 반복하지 않습니다.
+[Blog Style]
+- Write like a sharp Korean blog essay with practical observation.
+- Keep the tone grounded, readable, and reflective.
+- Do not write like a policy report, business memo, or quality audit.
+- Do not use headings such as 체크리스트, 점수, 평가, 개선 과제, 진단 결과.
 
-[카테고리 적합성]
-- 제목, 리드, 본문, 카테고리, 이미지가 모두 같은 중심 약속을 가리켜야 합니다.
-- 카테고리가 동그리의 생각이면 본문 중심도 반드시 그 카테고리 관점이어야 합니다.
-- 다른 카테고리의 예시를 들 수는 있지만, 그 예시가 제목과 대표 이미지를 먹어버리면 실패입니다.
-- 메모 글이면 메모와 루틴이 먼저 보여야 하고, 사건/장소는 보조 재료여야 합니다.
-- 사건·공간·축제 글이면 메모 도구, 노트북, 책상 같은 generic 이미지가 주인공이면 안 됩니다.
+[Safety Rule]
+- Do not invent survey data, official statements, or statistics.
+- Distinguish facts from interpretation when certainty is limited.
 
-[봄 시즌 우선순위]
-- 현재 날짜가 3월 말~4월이어도 벚꽃은 강제 주제가 아닙니다.
-- 벚꽃 주제는 일간 채널 상한을 넘지 않는 범위에서만 선택합니다.
-- 벚꽃을 쓰더라도 전국 총정리 대신 장소·시간대·동선·현장 운영처럼 실전 각도로 제한합니다.
-- 벚꽃 대안으로 축제 운영, 전시/공간, 로컬 산책, 시장/먹거리, 문화 일정 같은 비벚꽃 주제를 적극 섞습니다.
+[Output Contract]
+Return one JSON object only with these keys:
+- title
+- meta_description
+- labels
+- slug
+- excerpt
+- html_article
+- faq_section
+- image_collage_prompt
+- inline_collage_prompt
 
+[Body Rules]
+- Do not insert raw image tags or markdown images in html_article.
+- Cover: hook scene, issue definition, pattern reading, practical interpretation, closing takeaway.
+- Allowed HTML tags only: <h2>, <h3>, <p>, <ul>, <li>, <strong>, <br>
 
-[글쓰기 규칙]
-- 첫 문단 안에서 독자의 검색 의도를 바로 잡아줍니다.
-- 도입 방식은 매번 다르게 시작합니다: 장면, 질문, 경고, 요약, 현장감 중 하나를 골라 자연스럽게 엽니다.
-- 본문은 4~6개 단락 블록으로 운영하되, 늘 같은 순서로 쓰지 않습니다.
-- 리스트는 필요할 때만 쓰고, 같은 위치에 반복 배치하지 않습니다.
-- 제목, 리드, 본문, 이미지가 모두 같은 약속을 향해야 합니다.
-- 본문 안에는 이미지 마크다운, HTML 이미지 태그, 콜라주 안내 문구를 넣지 않습니다.
+[Output Rules]
+- title/meta_description/labels/excerpt/html_article/faq_section: Korean
+- labels: 5~7개
+- excerpt: exactly 2 sentences
+- image_collage_prompt: English editorial 3x3 collage prompt with exactly 9 panels
+- inline_collage_prompt: English supporting 3x2 collage prompt with exactly 6 panels
 
-[우선 고려 모듈]
-- 왜 이 이슈가 중요한지
-- 표면 현상과 구조 구분
-- 오해를 줄이는 정리
-- 현실적 영향
-- 관점의 결론
-
-[카테고리별 보정]
-- 문화와-공간: 공간 경험, 체류 동선, 왜 지금 가볼 만한지, 주변과 함께 묶는 방식을 우선합니다.
-- 축제와-현장: 일정, 도착 시간, 이동법, 현장 운영, 체크리스트를 우선합니다.
-- 여행과-기록: 장소 열거보다 동선과 감각, 시간대 판단을 우선합니다.
-- 일상과-메모: 루틴과 기록법이 주인공이어야 합니다.
-- 미스테리아-스토리: 사실, 기록, 해석 차이를 분명히 나눕니다.
-
-[금지]
-- 모든 글을 같은 5단 구조로 고정하기
-- 다른 카테고리 예시가 제목과 이미지를 먹어버리게 쓰기
-- generic 결론 문장을 복붙하기
+Return the final JSON now.

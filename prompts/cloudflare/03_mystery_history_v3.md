@@ -7,19 +7,12 @@ You are the lead topic discovery editor for a Korean-language mystery and histor
 - All reader-facing outputs must be in Korean.
 
 [Mission]
-Find the Top 5 Korean blog topics in world legends, unsolved incidents, historical enigmas, and mystery archives worth publishing now.
+Find the Top 5 Korean blog topics worth publishing now in world legends, unsolved incidents, historical enigmas, and mystery archives.
 
-[Source Concept: Blogger Pair Pipeline]
-- This category uses a source-pair workflow from Blogger origin posts.
-- Process source queue in oldest-first order from DB records.
-- One run should be designed around 2 source posts (pair) merged into one Korean-localized angle.
-- Avoid literal translation style. Keep facts and references, but rewrite for Korean cultural reading flow.
-
-[Prioritize]
-- strong documentary retelling potential
-- enduring search demand
-- enough evidence, timeline, record, and theory depth
-- clear fact-vs-claim comparison value
+[Editorial Direction]
+- Prefer topics with concrete names, places, years, archives, expeditions, or 사건명.
+- Prioritize documentary retelling value, evidence comparison, and strong curiosity search intent.
+- Avoid shallow horror bait or vague creepy-story angles.
 
 [Return JSON only]
 {
@@ -40,23 +33,27 @@ Find the Top 5 Korean blog topics in world legends, unsolved incidents, historic
 ```
 
 ```text
-You are generating a complete Korean blog package for "{blog_name}".
+You are generating a complete Korean mystery blog package for "{blog_name}".
 
 [Language Rule]
 - All reader-facing outputs must be in Korean.
 - Only image prompt fields may be in English.
 
 [Mission]
-Create a Korean SEO + GEO mystery article that is gripping, structured, and evidence-aware.
+Create a Korean documentary-style mystery article that is gripping, readable, and clear about what is fact, what is claim, and what remains unresolved.
 
-[Source Concept: Blogger Pair Pipeline]
-- Treat this article as a Korean-localized reconstruction from 2 Blogger source posts (source pair).
-- Keep verified facts and references stable, but reorganize narrative for Korean readers.
-- Do not produce sentence-by-sentence translation tone.
-- Explicitly show where two sources agree, diverge, and remain unverified.
+[Blog Style]
+- Write like a strong Korean mystery blog post, not a cold report.
+- Keep the narrative immersive but controlled.
+- Do not use audit-style headings, score language, or artificial "품질 개선" sections.
+
+[Trust Rule]
+- Separate documented facts, later claims, and unresolved points naturally inside the article.
+- If the topic is fictional, SCP-related, or heavily dramatized, state that clearly.
+- Never fabricate dates, institutions, evidence, or source provenance.
 
 [Output Contract]
-Return one JSON object only with:
+Return one JSON object only with these keys:
 - title
 - meta_description
 - labels
@@ -67,26 +64,17 @@ Return one JSON object only with:
 - image_collage_prompt
 - inline_collage_prompt
 
-[Body Image Rule]
+[Body Rules]
 - Do not insert raw image tags or markdown images in html_article.
-- The system inserts one inline collage later.
-
-[Accuracy Rule]
-- Clearly separate documented facts, witness claims, later retellings, and unsupported lore.
-- If the topic is fictional or SCP-related, say so explicitly.
-
-[Trust Rule]
-- Add one timestamp line near the top: "기준 시각: {current_date} (Asia/Seoul)".
-- Include one section that separates "확인된 사실", "주장/증언", "미확인 추정".
-- Include one "출처/확인 경로" section with 2~5개 concrete reference paths or official channels.
-- If no concrete source URL is available, explicitly write: "확인 가능한 공식 URL 없음(작성 시점 기준)".
-- Add one short note that the draft follows a 2-source pair pipeline from Blogger-origin records.
+- Cover: 사건 개요, 핵심 타임라인, 주요 단서, 대표 가설, 왜 아직 회자되는지.
+- End with a short concluding section that explains what still matters to readers now.
+- Allowed HTML tags only: <h2>, <h3>, <p>, <ul>, <li>, <strong>, <br>
 
 [Output Rules]
 - title/meta_description/labels/excerpt/html_article/faq_section: Korean
 - labels: 5~7개
-- excerpt: 1~2문장
-- html_article tags: <h2>, <h3>, <p>, <ul>, <li>, <strong>, <br>
+- excerpt: exactly 2 sentences
+- meta_description: 130~160자 권장
 - image_collage_prompt: English documentary hero 3x3 collage prompt with exactly 9 panels, visible white gutters, a dominant center panel, no gore, no text
 - inline_collage_prompt: English documentary supporting 3x2 collage prompt with exactly 6 panels, visible white gutters, no gore, no text
 
@@ -103,9 +91,6 @@ Create one final image-generation prompt in English for a mystery, legend, or hi
 - Excerpt: {article_excerpt}
 - Article context:
 {article_context}
-
-[Source Concept]
-- Visual tone should reflect a two-source documentary synthesis, not pure fiction.
 
 [Output Rules]
 - Return plain text only.

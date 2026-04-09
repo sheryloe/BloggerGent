@@ -1,15 +1,16 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 import re
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.entities import Setting
+from app.services.model_policy_service import DEFAULT_LIGHTWEIGHT_MODEL
 from app.services.secret_service import decrypt_secret_value, encrypt_secret_value, is_encrypted_secret
 
 
@@ -26,8 +27,11 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     "default_publish_mode": DefaultSetting("draft", "Default publishing mode for newly created jobs"),
     "default_writer_tone": DefaultSetting("system-operator", "Default writing tone label"),
     "planner_default_daily_posts": DefaultSetting("3", "Default daily slot count when building a month plan"),
+    "planner_publish_start_time": DefaultSetting("11:00", "Planner first publish time in HH:MM"),
+    "planner_slot_interval_minutes": DefaultSetting("5", "Planner slot interval minutes"),
     "planner_day_start_time": DefaultSetting("09:00", "Planner day start time in HH:MM"),
     "planner_day_end_time": DefaultSetting("21:00", "Planner day end time in HH:MM"),
+    "planner_brief_model": DefaultSetting(DEFAULT_LIGHTWEIGHT_MODEL, "Planner brief generation model"),
     "automation_master_enabled": DefaultSetting("false", "Master gate for every automation path"),
     "automation_scheduler_enabled": DefaultSetting("false", "Enable scheduler tick automation"),
     "automation_publish_queue_enabled": DefaultSetting("false", "Enable publish queue automation"),
@@ -52,7 +56,7 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     "provider_mode": DefaultSetting(settings.provider_mode, "mock or live provider mode"),
     "public_image_provider": DefaultSetting(
         settings.public_image_provider,
-        "공개 이미지 제공 방식. 현재 운영 권장값은 cloudflare_r2 입니다.",
+        "怨듦컻 ?대?吏 ?쒓났 諛⑹떇. ?꾩옱 ?댁쁺 沅뚯옣媛믪? cloudflare_r2 ?낅땲??",
     ),
     "public_asset_base_url": DefaultSetting(
         settings.public_asset_base_url,
@@ -72,7 +76,7 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     ),
     "cloudflare_r2_public_base_url": DefaultSetting(
         settings.cloudflare_r2_public_base_url,
-        "Cloudflare 공개 이미지 기본 URL. integration 업로드를 비우면 cloudflare_blog_api_base_url + /assets 가 자동 적용됩니다.",
+        "Cloudflare 怨듦컻 ?대?吏 湲곕낯 URL. integration ?낅줈?쒕? 鍮꾩슦硫?cloudflare_blog_api_base_url + /assets 媛 ?먮룞 ?곸슜?⑸땲??",
     ),
     "cloudflare_r2_prefix": DefaultSetting(
         settings.cloudflare_r2_prefix,
@@ -104,10 +108,10 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
         "OpenAI Admin API key used for free-tier usage reporting",
         True,
     ),
-    "openai_text_model": DefaultSetting(settings.openai_text_model, "기본 OpenAI 보조 텍스트 모델"),
+    "openai_text_model": DefaultSetting(settings.openai_text_model, "기본 OpenAI 텍스트 모델"),
     "article_generation_model": DefaultSetting(
         settings.article_generation_model,
-        "장문 본문 생성과 리라이트에 사용하는 주력 OpenAI 모델",
+        "?λЦ 蹂몃Ц ?앹꽦怨?由щ씪?댄듃???ъ슜?섎뒗 二쇰젰 OpenAI 紐⑤뜽",
     ),
     "openai_image_model": DefaultSetting(settings.openai_image_model, "Default OpenAI image model"),
     "openai_request_saver_mode": DefaultSetting(
@@ -201,15 +205,15 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     "telegram_chat_id": DefaultSetting(settings.telegram_chat_id, "Telegram chat ID", True),
     "cloudflare_channel_enabled": DefaultSetting(
         str(settings.cloudflare_channel_enabled).lower(),
-        "Cloudflare 채널 연동 사용 여부",
+        "Cloudflare 梨꾨꼸 ?곕룞 ?ъ슜 ?щ?",
     ),
     "cloudflare_blog_api_base_url": DefaultSetting(
         settings.cloudflare_blog_api_base_url,
-        "Cloudflare 연동 API 기본 주소. 예: https://api.dongriarchive.com",
+        "Cloudflare ?곕룞 API 湲곕낯 二쇱냼. ?? https://api.dongriarchive.com",
     ),
     "cloudflare_blog_m2m_token": DefaultSetting(
         settings.cloudflare_blog_m2m_token,
-        "Cloudflare integration Bearer 토큰",
+        "Cloudflare integration Bearer ?좏겙",
         True,
     ),
     "google_sheet_url": DefaultSetting(
@@ -401,6 +405,10 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
         "{}",
         "Per-blog integer daily publish allocation map as JSON. Example: {\"1\": 20, \"2\": 10}",
     ),
+    "google_indexing_playwright_last_run_on": DefaultSetting(
+        "",
+        "Last local date when Search Console Playwright publish automation ran.",
+    ),
     "cloudflare_inline_images_enabled": DefaultSetting(
         str(settings.cloudflare_inline_images_enabled).lower(),
         "Enable inline markdown collage images for Cloudflare posts.",
@@ -444,7 +452,7 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     "content_ops_sync_failure_streak": DefaultSetting("0", "Consecutive live sync failure counter."),
     "publish_daily_limit_per_blog": DefaultSetting("3", "Daily publish limit per blog"),
     "publish_min_interval_seconds": DefaultSetting(
-        str(settings.publish_min_interval_seconds),
+        str(max(int(settings.publish_min_interval_seconds), 300)),
         "Minimum interval between Blogger publish requests for the same blog",
     ),
     "same_cluster_cooldown_hours": DefaultSetting("24", "Cooldown for repeating the same topic cluster"),
@@ -457,27 +465,31 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
 }
 
 SETTING_DESCRIPTION_OVERRIDES_KO: dict[str, str] = {
-    "app_name": "워크스페이스 표시 이름",
+    "app_name": "워크스페이스 이름",
     "default_blog_timezone": "기본 블로그 시간대",
     "default_publish_mode": "기본 발행 모드",
     "default_writer_tone": "기본 작성 톤",
     "admin_auth_enabled": "관리자 인증 사용 여부",
     "admin_auth_username": "관리자 인증 사용자명",
     "planner_default_daily_posts": "플래너 기본 일일 게시 수",
+    "planner_publish_start_time": "플래너 첫 게시 시각(HH:MM)",
+    "planner_slot_interval_minutes": "플래너 슬롯 간격(분)",
     "planner_day_start_time": "플래너 시작 시간(HH:MM)",
     "planner_day_end_time": "플래너 종료 시간(HH:MM)",
+    "planner_brief_model": "플래너 브리프 생성 모델",
     "automation_master_enabled": "자동화 전체 마스터 스위치",
     "automation_scheduler_enabled": "스케줄러 자동 실행 사용",
     "automation_publish_queue_enabled": "게시 큐 자동 처리 사용",
-    "automation_content_review_enabled": "콘텐츠 검토 자동화 사용",
+    "automation_content_review_enabled": "콘텐츠 점검 자동화 사용",
     "automation_telegram_enabled": "텔레그램 운영 자동화 사용",
     "automation_sheet_enabled": "시트 동기화 자동화 사용",
     "automation_cloudflare_enabled": "Cloudflare 자동화 사용",
-    "automation_google_indexing_enabled": "Google 인덱싱 자동화 사용",
+    "automation_google_indexing_enabled": "Google 색인 자동화 사용",
     "automation_training_enabled": "학습 자동화 사용",
     "provider_mode": "공급자 실행 모드(mock/live)",
     "cloudflare_account_id": "Cloudflare 계정 ID",
     "cloudflare_r2_bucket": "Cloudflare R2 버킷명",
+    "cloudflare_r2_public_base_url": "Cloudflare R2 공개 기본 URL",
     "github_pages_owner": "GitHub Pages 소유자",
     "github_pages_repo": "GitHub Pages 저장소",
     "github_pages_branch": "GitHub Pages 브랜치",
@@ -502,24 +514,24 @@ SETTING_DESCRIPTION_OVERRIDES_KO: dict[str, str] = {
     "quality_gate_min_seo_score": "최소 SEO 점수(0-100)",
     "quality_gate_min_geo_score": "최소 GEO 점수(0-100)",
     "quality_gate_min_ctr_score": "최소 CTR 점수(0-100)",
-    "schedule_enabled": "전역 스케줄 사용",
+    "schedule_enabled": "전역 스케줄러 사용",
     "schedule_time": "전역 스케줄 시간(HH:MM)",
     "schedule_timezone": "전역 스케줄 시간대",
     "travel_schedule_time": "여행 채널 시작 시간(HH:MM)",
     "travel_schedule_interval_hours": "여행 채널 실행 간격(시간)",
     "mystery_schedule_time": "미스터리 채널 시작 시간(HH:MM)",
     "mystery_schedule_interval_hours": "미스터리 채널 실행 간격(시간)",
-    "cloudflare_daily_publish_enabled": "Cloudflare 일일 발행 자동화 사용",
-    "cloudflare_daily_publish_time": "Cloudflare 일일 발행 시작 시간(HH:MM)",
+    "cloudflare_daily_publish_enabled": "Cloudflare 일일 자동 발행 사용",
+    "cloudflare_daily_publish_time": "Cloudflare 일일 발행 시작 시각(HH:MM)",
     "cloudflare_daily_publish_interval_hours": "Cloudflare 발행 간격(시간)",
     "cloudflare_daily_publish_timezone": "Cloudflare 발행 시간대",
-    "google_indexing_policy_mode": "Google 인덱싱 정책 모드",
-    "google_indexing_daily_quota": "Google 인덱싱 일일 요청 상한",
+    "google_indexing_policy_mode": "Google 색인 정책 모드",
+    "google_indexing_daily_quota": "Google 색인 일일 요청 상한",
     "google_indexing_cooldown_days": "동일 URL 재요청 제한일",
     "publish_daily_limit_per_blog": "블로그별 일일 발행 제한",
-    "publish_min_interval_seconds": "블로그별 발행 최소 간격(초)",
-    "same_cluster_cooldown_hours": "동일 클러스터 쿨다운(시간)",
-    "same_angle_cooldown_days": "동일 앵글 쿨다운(일)",
+    "publish_min_interval_seconds": "블로그별 최소 발행 간격(초)",
+    "same_cluster_cooldown_hours": "동일 클러스터 재사용 제한(시간)",
+    "same_angle_cooldown_days": "동일 앵글 재사용 제한(일)",
     "topic_guard_enabled": "주제 중복 방지 사용",
     "content_ops_scan_enabled": "콘텐츠 운영 스캔 사용",
     "content_ops_auto_fix_drafts": "초안 자동 수정 사용",
@@ -540,7 +552,12 @@ for key, description in SETTING_DESCRIPTION_OVERRIDES_KO.items():
         DEFAULT_SETTINGS[key].description = description
 
 GOOGLE_SHEET_ID_PATTERN = re.compile(r"/spreadsheets/d/([a-zA-Z0-9-_]+)")
-MOJIBAKE_HINTS = ("�", "援ш", "?쒕", "?대씪", "梨꾨")
+MOJIBAKE_HINTS = (
+    "�",
+    "??",
+    "占",
+    "筌",
+)
 
 
 def _is_corrupted_app_name(value: str) -> bool:
@@ -565,53 +582,69 @@ def _extract_google_sheet_id(value: str) -> str:
 
 
 def ensure_default_settings(db: Session) -> None:
-    existing = {item.key: item for item in db.execute(select(Setting)).scalars().all()}
-    changed = False
+    existing_rows = db.execute(
+        select(
+            Setting.key,
+            Setting.value,
+            Setting.description,
+            Setting.is_secret,
+        )
+    ).all()
+    existing = {
+        str(row.key): {
+            "value": row.value,
+            "description": row.description,
+            "is_secret": bool(row.is_secret),
+        }
+        for row in existing_rows
+    }
     missing_rows: list[dict] = []
+    updates: list[tuple[str, dict[str, object]]] = []
     for key, default in DEFAULT_SETTINGS.items():
+        description = SETTING_DESCRIPTION_OVERRIDES_KO.get(key, default.description)
         item = existing.get(key)
         if item:
-            if item.description != default.description:
-                item.description = default.description
-                changed = True
-            if item.is_secret != default.is_secret:
-                item.is_secret = default.is_secret
-                changed = True
-            if item.is_secret and item.value and not is_encrypted_secret(item.value):
-                item.value = encrypt_secret_value(item.value)
-                changed = True
-            if key == "app_name" and _is_corrupted_app_name(item.value):
-                item.value = default.value
-                changed = True
+            payload: dict[str, object] = {}
+            if item["description"] != description:
+                payload["description"] = description
+            if bool(item["is_secret"]) != default.is_secret:
+                payload["is_secret"] = default.is_secret
+            if default.is_secret and item["value"] and not is_encrypted_secret(str(item["value"])):
+                payload["value"] = encrypt_secret_value(str(item["value"]))
+            if key == "app_name" and _is_corrupted_app_name(str(item["value"] or "")):
+                payload["value"] = default.value
+            if payload:
+                updates.append((key, payload))
             continue
         missing_rows.append(
             {
                 "key": key,
                 "value": encrypt_secret_value(default.value) if default.is_secret and default.value else default.value,
-                "description": default.description,
+                "description": description,
                 "is_secret": default.is_secret,
             }
         )
-        changed = True
-    for key, description in SETTING_DESCRIPTION_OVERRIDES_KO.items():
-        item = existing.get(key)
-        if item and item.description != description:
-            item.description = description
-            changed = True
-    if changed:
-        if missing_rows:
-            try:
-                if db.bind and db.bind.dialect.name == "postgresql":
-                    stmt = pg_insert(Setting).values(missing_rows)
-                    stmt = stmt.on_conflict_do_nothing(index_elements=[Setting.key])
-                    db.execute(stmt)
-                else:
-                    for row in missing_rows:
-                        db.add(Setting(**row))
-            except IntegrityError:
-                db.rollback()
-                missing_rows = []
-        db.commit()
+
+    if not updates and not missing_rows:
+        return
+
+    if missing_rows:
+        try:
+            if db.bind and db.bind.dialect.name == "postgresql":
+                stmt = pg_insert(Setting).values(missing_rows)
+                stmt = stmt.on_conflict_do_nothing(index_elements=[Setting.key])
+                db.execute(stmt)
+            else:
+                for row in missing_rows:
+                    db.add(Setting(**row))
+        except IntegrityError:
+            db.rollback()
+            missing_rows = []
+
+    for key, payload in updates:
+        db.execute(update(Setting).where(Setting.key == key).values(**payload))
+
+    db.commit()
 
 
 def get_settings_map(db: Session) -> dict[str, str]:
@@ -679,4 +712,5 @@ def get_blogger_config(db: Session) -> dict:
             for blog in blogs
         ],
     }
+
 

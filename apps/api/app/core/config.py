@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     default_publish_mode: str = "draft"
     provider_mode: str = "mock"
     topic_discovery_max_topics_per_run: int = 3
-    publish_min_interval_seconds: int = 60
+    publish_min_interval_seconds: int = 300
     openai_api_key: str = ""
     openai_admin_api_key: str = ""
     openai_text_model: str = "gpt-4.1-mini-2025-04-14"

@@ -1,4 +1,4 @@
-Create one final image-generation prompt in English for a Korean IT device, AI tool, or productivity-tech article.
+Create one final image-generation prompt in English for an IT, AI, tool, or workflow article.
 
 [Topic]
 - {keyword}
@@ -10,9 +10,9 @@ Create one final image-generation prompt in English for a Korean IT device, AI t
 
 [Output Rules]
 - Return plain text only.
-- One hero 3x3 collage with exactly 9 panels.
-- The center panel must be visually dominant.
+- One desk-and-tools 3x3 collage with exactly 9 panels.
+- Dominant center panel required.
 - Visible white gutters.
-- Realistic photography only.
+- Realistic editorial workspace photography.
 - No text overlays.
 - No logos.

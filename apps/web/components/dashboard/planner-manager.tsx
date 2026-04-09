@@ -14,6 +14,7 @@ import {
   getPlannerDayBriefRuns,
   getPlannerCalendar,
   runPlannerDayBriefAnalysis,
+  updatePlannerCategoryRules,
   updatePlannerSlot,
 } from "@/lib/api";
 import type {
@@ -22,6 +23,7 @@ import type {
   PlannerBriefSuggestion,
   PlannerCalendarRead,
   PlannerCategoryRead,
+  PlannerCategoryRuleUpdateRequest,
   PlannerDayRead,
 } from "@/lib/types";
 
@@ -29,7 +31,7 @@ type PlannerManagerProps = {
   channels: ManagedChannelRead[];
 };
 
-type DetailTab = "day" | "month";
+type DetailTab = "day" | "rules" | "month";
 
 type SlotDraft = {
   categoryKey: string;
@@ -52,6 +54,13 @@ type BriefSuggestionDraft = {
   confidence: string;
   signalSource: string;
   reason: string;
+};
+
+type CategoryRuleDraft = {
+  categoryKey: string;
+  planningMode: "auto" | "weekly" | "weekdays";
+  weeklyTarget: string;
+  weekdays: number[];
 };
 
 type CalendarCell = {
@@ -89,6 +98,10 @@ function formatDayLabel(dateKey: string) {
 function formatWeekday(dateKey: string) {
   const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
   return weekdays[parseDateKey(dateKey).getDay()];
+}
+
+function weekdayShortLabel(weekday: number) {
+  return ["월", "화", "수", "목", "금", "토", "일"][weekday] ?? "";
 }
 
 function toDatetimeLocal(value?: string | null) {
@@ -151,7 +164,8 @@ function scoreText(value: number | null | undefined) {
 }
 
 function parseDetailTab(value: string | null): DetailTab {
-  return value === "month" ? "month" : "day";
+  if (value === "month" || value === "rules") return value;
+  return "day";
 }
 
 function providerTypeLabel(provider: string) {
@@ -173,7 +187,7 @@ function publishModeText(value?: string | null) {
 function defaultDraft(dateKey: string, categories: PlannerCategoryRead[]): SlotDraft {
   return {
     categoryKey: categories[0]?.key ?? "",
-    scheduledFor: `${dateKey}T09:00`,
+    scheduledFor: `${dateKey}T11:00`,
     briefTopic: "",
     briefAudience: "",
     briefInformationLevel: "",
@@ -210,6 +224,18 @@ function buildSuggestionDrafts(day: PlannerDayRead | null, run: PlannerBriefRun 
     });
 }
 
+function buildCategoryRuleDrafts(categories: PlannerCategoryRead[]): CategoryRuleDraft[] {
+  return categories
+    .slice()
+    .sort((left, right) => left.sortOrder - right.sortOrder)
+    .map((category) => ({
+      categoryKey: category.key,
+      planningMode: category.planningMode ?? "auto",
+      weeklyTarget: category.weeklyTarget ? String(category.weeklyTarget) : "",
+      weekdays: [...(category.weekdays ?? [])].sort((left, right) => left - right),
+    }));
+}
+
 export function PlannerManager({ channels }: PlannerManagerProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -244,6 +270,8 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
   const [briefRuns, setBriefRuns] = useState<PlannerBriefRun[]>([]);
   const [selectedBriefRunId, setSelectedBriefRunId] = useState<number | null>(null);
   const [suggestionDrafts, setSuggestionDrafts] = useState<BriefSuggestionDraft[]>([]);
+  const [categoryRuleDrafts, setCategoryRuleDrafts] = useState<CategoryRuleDraft[]>([]);
+  const [categoryRuleFilter, setCategoryRuleFilter] = useState("");
 
   const categories = calendar?.categories ?? [];
   const categoryMap = useMemo(() => new Map(categories.map((item) => [item.key, item])), [categories]);
@@ -275,22 +303,34 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
   }, [calendar]);
 
   const monthCategoryStats = useMemo(() => {
-    const actualMap = new Map<string, number>();
+    const scheduledMap = new Map<string, number>();
+    const generatedMap = new Map<string, number>();
     for (const day of calendar?.days ?? []) {
       for (const slot of day.slots) {
         const key = slot.categoryKey ?? "";
         if (!key) continue;
-        actualMap.set(key, (actualMap.get(key) ?? 0) + 1);
+        scheduledMap.set(key, (scheduledMap.get(key) ?? 0) + 1);
+        if (slot.status === "generated" || slot.status === "published") {
+          generatedMap.set(key, (generatedMap.get(key) ?? 0) + 1);
+        }
       }
     }
-    const totalTarget = monthSummary.target || 1;
-    const totalWeight = categories.reduce((sum, category) => sum + category.weight, 0) || 1;
     return categories.map((category) => ({
       ...category,
-      planned: Math.round((totalTarget * category.weight) / totalWeight),
-      actual: actualMap.get(category.key) ?? 0,
+      planned: scheduledMap.get(category.key) ?? 0,
+      actual: generatedMap.get(category.key) ?? 0,
     }));
-  }, [calendar, categories, monthSummary.target]);
+  }, [calendar, categories]);
+
+  const filteredCategoryRuleDrafts = useMemo(() => {
+    const keyword = categoryRuleFilter.trim().toLowerCase();
+    const categoryNameMap = new Map(categories.map((category) => [category.key, category.name]));
+    return categoryRuleDrafts.filter((draft) => {
+      if (!keyword) return true;
+      const name = categoryNameMap.get(draft.categoryKey) ?? draft.categoryKey;
+      return `${name} ${draft.categoryKey}`.toLowerCase().includes(keyword);
+    });
+  }, [categories, categoryRuleDrafts, categoryRuleFilter]);
 
   function setQuery(updates: Record<string, string | null | undefined>) {
     const next = new URLSearchParams(searchParams.toString());
@@ -360,6 +400,10 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
   }, [selectedDay?.id, selectedBriefRun?.id, briefRuns]);
 
   useEffect(() => {
+    setCategoryRuleDrafts(buildCategoryRuleDrafts(categories));
+  }, [categories]);
+
+  useEffect(() => {
     if (!selectedDay?.slots.length) {
       setSelectedSlotId(null);
       return;
@@ -373,7 +417,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
     if (selectedSlot) {
       setDraft({
         categoryKey: selectedSlot.categoryKey ?? categories[0]?.key ?? "",
-        scheduledFor: toDatetimeLocal(selectedSlot.scheduledFor) || `${selectedDay?.planDate ?? todayDateKey}T09:00`,
+        scheduledFor: toDatetimeLocal(selectedSlot.scheduledFor) || `${selectedDay?.planDate ?? todayDateKey}T11:00`,
         briefTopic: selectedSlot.briefTopic ?? "",
         briefAudience: selectedSlot.briefAudience ?? "",
         briefInformationLevel: selectedSlot.briefInformationLevel ?? "",
@@ -388,19 +432,62 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
     setDraft(null);
   }, [selectedSlot?.id, selectedDay?.planDate, categories]);
 
+  async function autofillMonthBriefs(next: PlannerCalendarRead) {
+    const targetDays = next.days.filter((day) => day.slots.length > 0);
+    if (!targetDays.length) {
+      return { analyzedDays: 0, appliedSlots: 0, skippedSlots: 0, failedDays: 0 };
+    }
+
+    let appliedSlots = 0;
+    let skippedSlots = 0;
+    let failedDays = 0;
+
+    for (let index = 0; index < targetDays.length; index += 1) {
+      const day = targetDays[index];
+      try {
+        setStatusMessage(`소형 모델로 월간 브리프 자동 채우는 중... ${index + 1}/${targetDays.length} (${formatDayLabel(day.planDate)})`);
+        const analysis = await runPlannerDayBriefAnalysis(day.id);
+        const applied = await applyPlannerDayBrief(day.id, {
+          runId: analysis.run.id,
+        });
+        appliedSlots += applied.appliedSlotIds.length;
+        skippedSlots += applied.skippedSlotIds.length;
+      } catch {
+        failedDays += 1;
+      }
+    }
+
+    return {
+      analyzedDays: targetDays.length,
+      appliedSlots,
+      skippedSlots,
+      failedDays,
+    };
+  }
+
   async function handleRebuildMonthPlan() {
     if (!selectedChannelId) return;
     try {
-      setStatusMessage("월간 계획을 다시 만드는 중입니다.");
+      setStatusMessage("월간 계획과 브리프를 다시 만드는 중입니다.");
       const next = await buildPlannerMonthPlan({ channelId: selectedChannelId, month, overwrite: true });
       setCalendar(next);
       const nextDate = next.days.find((day) => day.planDate === todayDateKey)?.planDate ?? next.days[0]?.planDate ?? null;
       if (nextDate) {
         setQuery({ selectedDate: nextDate, panel: "day" });
       }
-      setStatusMessage("월간 계획을 다시 만들었습니다.");
+      const fillResult = await autofillMonthBriefs(next);
+      await loadCalendar(nextDate);
+      if (fillResult.failedDays > 0) {
+        setStatusMessage(
+          `월간 계획 생성 완료. 브리프 반영 ${fillResult.appliedSlots}개, 유지 ${fillResult.skippedSlots}개, 실패 일자 ${fillResult.failedDays}건`,
+        );
+        return;
+      }
+      setStatusMessage(
+        `월간 계획과 브리프 자동 채우기 완료. 반영 ${fillResult.appliedSlots}개, 유지 ${fillResult.skippedSlots}개`,
+      );
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : "월간 계획을 다시 만들지 못했습니다.");
+      setStatusMessage(error instanceof Error ? error.message : "월간 계획과 브리프를 다시 만들지 못했습니다.");
     }
   }
 
@@ -517,6 +604,51 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
     );
   }
 
+  function updateCategoryRuleDraft(categoryKey: string, patch: Partial<CategoryRuleDraft>) {
+    setCategoryRuleDrafts((current) =>
+      current.map((item) => (item.categoryKey === categoryKey ? { ...item, ...patch } : item)),
+    );
+  }
+
+  function toggleCategoryWeekday(categoryKey: string, weekday: number) {
+    setCategoryRuleDrafts((current) =>
+      current.map((item) => {
+        if (item.categoryKey !== categoryKey) return item;
+        const weekdaySet = new Set(item.weekdays);
+        if (weekdaySet.has(weekday)) weekdaySet.delete(weekday);
+        else weekdaySet.add(weekday);
+        return {
+          ...item,
+          weekdays: Array.from(weekdaySet).sort((left, right) => left - right),
+        };
+      }),
+    );
+  }
+
+  async function handleSaveCategoryRules() {
+    if (!selectedChannelId) return;
+    try {
+      setStatusMessage("카테고리 배정 규칙을 저장하고 달력을 재정렬하는 중입니다.");
+      const payload: PlannerCategoryRuleUpdateRequest[] = categoryRuleDrafts.map((item) => {
+        const weeklyValue = item.weeklyTarget.trim();
+        return {
+          categoryKey: item.categoryKey,
+          planningMode: item.planningMode,
+          weeklyTarget:
+            item.planningMode === "weekly" && weeklyValue !== "" && Number.isFinite(Number(weeklyValue))
+              ? Math.max(1, Math.min(7, Number(weeklyValue)))
+              : null,
+          weekdays: item.planningMode === "weekdays" ? item.weekdays : [],
+        };
+      });
+      await updatePlannerCategoryRules(selectedChannelId, payload);
+      await loadCalendar(selectedDay?.planDate ?? null);
+      setStatusMessage("카테고리 배정 규칙을 저장했습니다.");
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "카테고리 배정 규칙 저장에 실패했습니다.");
+    }
+  }
+
   const selectedChannel = typeFilteredChannels.find((item) => item.channelId === selectedChannelId) ?? typeFilteredChannels[0] ?? null;
 
   if (!plannerChannels.length) {
@@ -528,26 +660,9 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
   }
 
   return (
-    <div className="space-y-6 rounded-[32px] bg-[#f5f7ff] p-6 text-slate-900 shadow-[0_24px_80px_rgba(15,23,42,0.08)] md:p-8">
-      <section className="rounded-[28px] bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-indigo-500">Planner</p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">게시 플래너 운영</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-              타입을 먼저 고르고, 그 안에서 실제 연결된 채널별로 월간 배분과 일간 슬롯을 관리합니다. 프롬프트 편집은 관리자 설정의 7단계 플로우에서 처리합니다.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Link href="/admin" className="rounded-full bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-200">
-              관리자 설정 열기
-            </Link>
-            <button type="button" onClick={handleRebuildMonthPlan} className="rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800">
-              월간 계획 다시 만들기
-            </button>
-          </div>
-        </div>
-        <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(180px,220px)_minmax(220px,280px)_200px_minmax(0,1fr)]">
+    <div className="space-y-3 rounded-[24px] bg-[#f5f7ff] p-3.5 text-slate-900 shadow-[0_24px_80px_rgba(15,23,42,0.08)] md:p-4">
+      <section className="rounded-[22px] bg-white p-3.5 shadow-sm">
+        <div className="grid gap-2.5 xl:grid-cols-[minmax(140px,168px)_minmax(220px,1fr)_150px_minmax(240px,320px)_auto] xl:items-end">
           <Field label="타입">
             <select
               value={selectedType}
@@ -580,34 +695,49 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
           <Field label="기준 월">
             <input type="month" value={month} onChange={(event) => setQuery({ month: event.target.value, selectedDate: null })} className={inputClass()} />
           </Field>
-          <div className="grid gap-3 rounded-[24px] bg-slate-50 p-4 md:grid-cols-3">
+          <div className="grid gap-2 rounded-[18px] bg-slate-50 p-2.5 md:grid-cols-3">
             <MetricCard label="목표 슬롯" value={`${monthSummary.target}건`} />
             <MetricCard label="생성 완료" value={`${monthSummary.generated}건`} />
             <MetricCard label="발행 완료" value={`${monthSummary.published}건`} />
           </div>
+          <div className="flex flex-wrap gap-2 xl:justify-end">
+            <Link href="/admin" className="rounded-full bg-slate-100 px-3.5 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-200">
+              관리자 설정
+            </Link>
+            <button type="button" onClick={handleRebuildMonthPlan} className="rounded-full bg-slate-950 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-slate-800">
+              월간 계획 다시 만들기
+            </button>
+          </div>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-[13px] text-slate-600">
+          <span className="font-semibold text-slate-900">현재 기준</span>
+          {selectedChannel ? <FlagPill tone="slate">{selectedChannel.name}</FlagPill> : null}
+          <FlagPill tone="slate">{providerTypeLabel(selectedType)}</FlagPill>
+          <span>{formatMonthLabel(month)} 운영 계획</span>
         </div>
         {statusMessage ? <p className="mt-4 text-sm text-indigo-600">{statusMessage}</p> : null}
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(380px,0.95fr)]">
-        <div className="rounded-[28px] bg-white p-5 shadow-sm">
+      <section className="grid gap-3 xl:grid-cols-[minmax(0,1.92fr)_minmax(340px,0.72fr)]">
+        <div className="rounded-[22px] bg-white p-3.5 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">월간 캘린더</p>
-              <h2 className="mt-2 text-2xl font-semibold text-slate-950">{formatMonthLabel(month)}</h2>
+              <p className="text-[11px] font-semibold tracking-[0.16em] text-slate-400">월간 캘린더</p>
+              <h2 className="mt-1 text-xl font-semibold text-slate-950">{formatMonthLabel(month)}</h2>
+              <p className="mt-1 text-[13px] text-slate-500">{selectedChannel ? `${selectedChannel.name} 기준 월간 계획` : "선택한 채널 기준 월간 계획"}</p>
             </div>
             {selectedChannel ? <FlagPill tone="slate">{selectedChannel.name}</FlagPill> : null}
           </div>
-          <div className="mt-5 overflow-x-auto">
-            <div className="min-w-[780px]">
-              <div className="grid grid-cols-7 gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+          <div className="mt-3 overflow-x-auto">
+            <div className="min-w-[760px]">
+              <div className="grid grid-cols-7 gap-1.5 text-[11px] font-semibold tracking-[0.14em] text-slate-400">
                 {["월", "화", "수", "목", "금", "토", "일"].map((label) => (
                   <div key={label} className="px-2">{label}</div>
                 ))}
               </div>
-              <div className="mt-3 grid grid-cols-7 gap-2">
+              <div className="mt-2 grid grid-cols-7 gap-1.5">
                 {monthCells.map((cell, index) => {
-                  if (!cell) return <div key={`empty-${index}`} className="min-h-[160px] rounded-[24px] bg-transparent" />;
+                  if (!cell) return <div key={`empty-${index}`} className="min-h-[108px] rounded-[18px] bg-transparent" />;
                   const day = cell.plannerDay;
                   const isSelected = cell.dateKey === selectedDay?.planDate;
                   const chips = Object.entries(day?.categoryMix ?? {}).slice(0, 3);
@@ -616,20 +746,20 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
                       key={cell.dateKey}
                       type="button"
                       onClick={() => setQuery({ selectedDate: cell.dateKey, panel: "day" })}
-                      className={`min-h-[160px] rounded-[24px] p-4 text-left transition ${isSelected ? "bg-indigo-50 ring-2 ring-indigo-200" : "bg-slate-50 hover:bg-slate-100"}`}
+                      className={`min-h-[108px] rounded-[18px] p-2.5 text-left transition ${isSelected ? "bg-indigo-50 ring-2 ring-indigo-200" : "bg-slate-50 hover:bg-slate-100"}`}
                     >
-                      <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start justify-between gap-2">
                         <div>
-                          <p className="text-lg font-semibold text-slate-950">{cell.dayNumber}</p>
-                          <p className="mt-1 text-xs text-slate-500">{formatWeekday(cell.dateKey)}요일</p>
+                          <p className="text-[15px] font-semibold text-slate-950">{cell.dayNumber}</p>
+                          <p className="mt-0.5 text-[11px] text-slate-500">{formatWeekday(cell.dateKey)}요일</p>
                         </div>
                         <FlagPill tone="slate">{day?.slotCount ?? 0} 슬롯</FlagPill>
                       </div>
-                      <div className="mt-4 space-y-2 text-xs text-slate-500">
+                      <div className="mt-2.5 space-y-1 text-[11px] text-slate-500">
                         <p>생성 완료 {day?.slots.filter((slot) => slot.status === "generated" || slot.status === "published").length ?? 0}</p>
-                        <div className="flex flex-wrap gap-1.5">
+                        <div className="flex flex-wrap gap-1">
                           {chips.length ? chips.map(([key, count]) => (
-                            <span key={key} className="rounded-full px-2.5 py-1 text-[11px] font-medium text-slate-700" style={{ backgroundColor: `${categoryMap.get(key)?.color ?? "#cbd5e1"}33` }}>
+                            <span key={key} className="rounded-full px-2 py-1 text-[10px] font-medium text-slate-700" style={{ backgroundColor: `${categoryMap.get(key)?.color ?? "#cbd5e1"}33` }}>
                               {categoryMap.get(key)?.name ?? key} {count}
                             </span>
                           )) : <span className="text-slate-400">배정 없음</span>}
@@ -644,41 +774,44 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
         </div>
 
         <div className="space-y-4">
-          <div className="rounded-[28px] bg-white p-4 shadow-sm">
-            <div className="flex items-center gap-2 rounded-full bg-slate-100 p-1 text-sm">
-              <button type="button" onClick={() => setQuery({ panel: "day" })} className={`rounded-full px-4 py-2 font-medium ${selectedTab === "day" ? "bg-white text-slate-950 shadow-sm" : "text-slate-600"}`}>
+          <div className="rounded-[22px] bg-white p-2.5 shadow-sm">
+            <div className="flex items-center gap-1 rounded-full bg-slate-100 p-1 text-[12px]">
+              <button type="button" onClick={() => setQuery({ panel: "day" })} className={`rounded-full px-3 py-1.5 font-semibold ${selectedTab === "day" ? "bg-white text-slate-950 shadow-sm" : "text-slate-600"}`}>
                 일간 계획
               </button>
-              <button type="button" onClick={() => setQuery({ panel: "month" })} className={`rounded-full px-4 py-2 font-medium ${selectedTab === "month" ? "bg-white text-slate-950 shadow-sm" : "text-slate-600"}`}>
+              <button type="button" onClick={() => setQuery({ panel: "rules" })} className={`rounded-full px-3 py-1.5 font-semibold ${selectedTab === "rules" ? "bg-white text-slate-950 shadow-sm" : "text-slate-600"}`}>
+                카테고리 규칙
+              </button>
+              <button type="button" onClick={() => setQuery({ panel: "month" })} className={`rounded-full px-3 py-1.5 font-semibold ${selectedTab === "month" ? "bg-white text-slate-950 shadow-sm" : "text-slate-600"}`}>
                 월간 집계
               </button>
             </div>
           </div>
 
           {selectedTab === "day" ? (
-            <div className="space-y-4 rounded-[28px] bg-white p-5 shadow-sm">
+            <div className="space-y-4 rounded-[22px] bg-white p-3.5 shadow-sm">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">선택 날짜</p>
-                  <h2 className="mt-2 text-2xl font-semibold text-slate-950">{selectedDay ? `${formatDayLabel(selectedDay.planDate)} · ${formatWeekday(selectedDay.planDate)}요일` : "날짜를 선택하세요"}</h2>
+                  <p className="text-[11px] font-semibold tracking-[0.16em] text-slate-400">선택 날짜</p>
+                  <h2 className="mt-1 text-xl font-semibold text-slate-950">{selectedDay ? `${formatDayLabel(selectedDay.planDate)} · ${formatWeekday(selectedDay.planDate)}요일` : "날짜를 선택하세요"}</h2>
                 </div>
-                <button type="button" onClick={handleAddSlot} disabled={!selectedDay || !draft} className="rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300">
+                <button type="button" onClick={handleAddSlot} disabled={!selectedDay || !draft} className="rounded-full bg-slate-950 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300">
                   슬롯 추가
                 </button>
               </div>
 
-              <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+              <div className="rounded-[20px] border border-slate-200 bg-slate-50 p-3.5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold text-slate-950">일별 CTR 분석</p>
-                    <p className="mt-1 text-xs text-slate-500">슬롯별 주제/독자타겟/정보수준/기타정보를 제안하고, 검토 후 빈 칸만 반영합니다.</p>
+                    <p className="mt-1 text-[13px] text-slate-500">각 채널의 1단계 주제 발굴 프롬프트를 기준으로, 관리용 브리프는 채널 언어와 무관하게 모두 한글로 제안하고 빈 칸만 반영합니다.</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
                       onClick={handleRunDayAnalysis}
                       disabled={!selectedDay}
-                      className="rounded-full bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-200"
+                        className="rounded-full bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-200"
                     >
                       분석 실행
                     </button>
@@ -686,7 +819,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
                       type="button"
                       onClick={handleRunDayAnalysis}
                       disabled={!selectedDay}
-                      className="rounded-full bg-slate-800 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                        className="rounded-full bg-slate-800 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                     >
                       분석 재실행
                     </button>
@@ -694,7 +827,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
                       type="button"
                       onClick={handleApplyDayAnalysis}
                       disabled={!selectedDay || !suggestionDrafts.length}
-                      className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-emerald-200"
+                        className="rounded-full bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-emerald-200"
                     >
                       적용(빈 칸만 채우기)
                     </button>
@@ -718,23 +851,23 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
                       onChange={(event) => setSelectedBriefRunId(event.target.value ? Number(event.target.value) : null)}
                       className={inputClass()}
                     >
-                      {!briefRuns.length ? <option value="">이력이 없습니다</option> : null}
-                      {briefRuns.map((run) => (
-                        <option key={run.id} value={run.id}>
-                          #{run.id} · {run.status} · {run.model ?? "model n/a"} · {run.createdAt.slice(0, 16).replace("T", " ")}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
+                        {!briefRuns.length ? <option value="">이력이 없습니다</option> : null}
+                        {briefRuns.map((run) => (
+                          <option key={run.id} value={run.id}>
+                          #{run.id} · {run.status} · {run.model ?? "모델 정보 없음"} · {run.createdAt.slice(0, 16).replace("T", " ")}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
 
                   {selectedBriefRun ? (
-                    <details className="rounded-[20px] border border-slate-200 bg-white p-4">
-                      <summary className="cursor-pointer text-sm font-semibold text-slate-900">원본 프롬프트 / 모델 응답(raw)</summary>
+                    <details className="rounded-[18px] border border-slate-200 bg-white p-3">
+                      <summary className="cursor-pointer text-sm font-semibold text-slate-900">원본 프롬프트 / 모델 응답</summary>
                       <div className="mt-4 grid gap-4">
                         <Field label="실행 프롬프트">
                           <textarea value={selectedBriefRun.prompt} readOnly rows={6} className={textareaClass()} />
                         </Field>
-                        <Field label="모델 원응답(raw JSON)">
+                        <Field label="모델 원응답(JSON)">
                           <textarea
                             value={JSON.stringify(selectedBriefRun.rawResponse ?? {}, null, 2)}
                             readOnly
@@ -749,12 +882,12 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
                   {suggestionDrafts.length ? (
                     <div className="space-y-3">
                       {suggestionDrafts.map((item) => (
-                        <div key={item.slotId} className="rounded-[20px] border border-slate-200 bg-white p-4">
+                        <div key={item.slotId} className="rounded-[18px] border border-slate-200 bg-white p-3.5">
                           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                             <p className="text-sm font-semibold text-slate-900">
                               슬롯 #{item.slotOrder} · {item.categoryKey || "카테고리 미지정"}
                             </p>
-                            <FlagPill tone="slate">slot_id {item.slotId}</FlagPill>
+                            <FlagPill tone="slate">슬롯 ID {item.slotId}</FlagPill>
                           </div>
                           <div className="grid gap-3 md:grid-cols-2">
                             <Field label="주제">
@@ -798,7 +931,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
               <div className="space-y-2">
                 {(selectedDay?.slots ?? []).length ? (
                   selectedDay?.slots.map((slot) => (
-                    <button key={slot.id} type="button" onClick={() => setSelectedSlotId(slot.id)} className={`flex w-full items-center justify-between rounded-[22px] border px-4 py-3 text-left transition ${selectedSlot?.id === slot.id ? "border-indigo-200 bg-indigo-50" : "border-slate-200 bg-slate-50 hover:bg-slate-100"}`}>
+                    <button key={slot.id} type="button" onClick={() => setSelectedSlotId(slot.id)} className={`flex w-full items-center justify-between rounded-[18px] border px-3.5 py-2.5 text-left transition ${selectedSlot?.id === slot.id ? "border-indigo-200 bg-indigo-50" : "border-slate-200 bg-slate-50 hover:bg-slate-100"}`}>
                       <div>
                         <p className="text-sm font-semibold text-slate-950">{slot.briefTopic || "주제 미입력"}</p>
                         <p className="mt-1 text-xs text-slate-500">{slot.categoryName || "카테고리 미선택"} · {toDatetimeLocal(slot.scheduledFor).slice(11, 16) || "시간 미정"}</p>
@@ -807,12 +940,12 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
                     </button>
                   ))
                 ) : (
-                  <div className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500">선택한 날짜에 아직 슬롯이 없습니다.</div>
+                  <div className="rounded-[20px] border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">선택한 날짜에 아직 슬롯이 없습니다.</div>
                 )}
               </div>
 
               {draft ? (
-                <div className="space-y-4 rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+                <div className="space-y-4 rounded-[20px] border border-slate-200 bg-slate-50 p-3.5">
                   <div className="grid gap-4 md:grid-cols-2">
                     <Field label="주제">
                       <input value={draft.briefTopic} onChange={(event) => setDraft((current) => current ? { ...current, briefTopic: event.target.value } : current)} className={inputClass()} />
@@ -830,7 +963,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
                     </Field>
                   </div>
 
-                  <details className="rounded-[20px] border border-slate-200 bg-white p-4">
+                    <details className="rounded-[18px] border border-slate-200 bg-white p-3">
                     <summary className="cursor-pointer text-sm font-semibold text-slate-900">추가 입력</summary>
                     <div className="mt-4 grid gap-4">
                       <Field label="정보 수준">
@@ -843,20 +976,20 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
                   </details>
 
                   <div className="flex flex-wrap gap-2">
-                    <button type="button" onClick={handleSaveSlot} disabled={!selectedSlot} className="rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300">
-                      슬롯 저장
-                    </button>
-                    <button type="button" onClick={handleGenerateSlot} disabled={!selectedSlot} className="rounded-full bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-200">
-                      실행
-                    </button>
-                    <button type="button" onClick={handleCancelSlot} disabled={!selectedSlot} className="rounded-full bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:text-rose-300">
-                      취소
-                    </button>
+                      <button type="button" onClick={handleSaveSlot} disabled={!selectedSlot} className="rounded-full bg-slate-950 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300">
+                        슬롯 저장
+                      </button>
+                      <button type="button" onClick={handleGenerateSlot} disabled={!selectedSlot} className="rounded-full bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-200">
+                        실행
+                      </button>
+                      <button type="button" onClick={handleCancelSlot} disabled={!selectedSlot} className="rounded-full bg-rose-50 px-3.5 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:text-rose-300">
+                        취소
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ) : null}
+                ) : null}
 
-              <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+              <div className="rounded-[20px] border border-slate-200 bg-slate-50 p-3.5">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold text-slate-950">실행 상태</p>
@@ -886,23 +1019,154 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
                 </div>
               </div>
             </div>
+          ) : selectedTab === "rules" ? (
+            <div className="space-y-4 rounded-[22px] bg-white p-3.5 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold tracking-[0.16em] text-slate-400">카테고리 배정 규칙</p>
+                  <h2 className="mt-1 text-lg font-semibold text-slate-950">주간 횟수 / 요일별 배정</h2>
+                  <p className="mt-1 text-[12px] text-slate-500">
+                    저장하면 현재 월의 미실행 슬롯 카테고리가 즉시 다시 배정됩니다. Cloudflare처럼 카테고리가 많은 채널은 검색으로 빠르게 찾을 수 있습니다.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSaveCategoryRules}
+                  className="rounded-full bg-slate-950 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-slate-800"
+                >
+                  규칙 저장
+                </button>
+              </div>
+
+              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
+                <Field label="카테고리 검색">
+                  <input
+                    value={categoryRuleFilter}
+                    onChange={(event) => setCategoryRuleFilter(event.target.value)}
+                    placeholder="카테고리명 또는 키워드 검색"
+                    className={inputClass()}
+                  />
+                </Field>
+                <div className="rounded-[16px] bg-slate-50 px-3 py-2.5 text-[12px] text-slate-600">
+                  {selectedChannel ? `${selectedChannel.name} · ${categories.length}개 카테고리` : `${categories.length}개 카테고리`}
+                </div>
+              </div>
+
+              <div className="max-h-[720px] space-y-2 overflow-y-auto pr-1">
+                {filteredCategoryRuleDrafts.length ? (
+                  filteredCategoryRuleDrafts.map((item) => {
+                    const category = categoryMap.get(item.categoryKey);
+                    return (
+                      <div key={item.categoryKey} className="rounded-[18px] border border-slate-200 bg-slate-50 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: category?.color ?? "#cbd5e1" }} />
+                            <div>
+                              <p className="text-sm font-semibold text-slate-950">{category?.name ?? item.categoryKey}</p>
+                              <p className="text-[11px] text-slate-500">{item.categoryKey}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <select
+                              value={item.planningMode}
+                              onChange={(event) =>
+                                updateCategoryRuleDraft(item.categoryKey, {
+                                  planningMode: event.target.value as CategoryRuleDraft["planningMode"],
+                                  weeklyTarget: event.target.value === "weekly" ? item.weeklyTarget || "1" : "",
+                                  weekdays: event.target.value === "weekdays" ? item.weekdays : [],
+                                })
+                              }
+                              className={inputClass()}
+                            >
+                              <option value="auto">자동 배정</option>
+                              <option value="weekly">주간 횟수</option>
+                              <option value="weekdays">요일 고정</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {item.planningMode === "weekly" ? (
+                          <div className="mt-3 grid gap-3 md:grid-cols-[140px_minmax(0,1fr)] md:items-end">
+                            <Field label="주간 횟수">
+                              <select
+                                value={item.weeklyTarget || "1"}
+                                onChange={(event) => updateCategoryRuleDraft(item.categoryKey, { weeklyTarget: event.target.value })}
+                                className={inputClass()}
+                              >
+                                {Array.from({ length: 7 }, (_value, index) => (
+                                  <option key={index + 1} value={String(index + 1)}>
+                                    주 {index + 1}회
+                                  </option>
+                                ))}
+                              </select>
+                            </Field>
+                            <p className="text-[12px] leading-5 text-slate-500">
+                              이 카테고리를 해당 채널에서 한 주에 몇 번 넣을지 지정합니다. 나머지 슬롯은 자동 배정 카테고리로 채워집니다.
+                            </p>
+                          </div>
+                        ) : null}
+
+                        {item.planningMode === "weekdays" ? (
+                          <div className="mt-3 space-y-2">
+                            <p className="text-[11px] font-semibold text-slate-500">요일 선택</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {Array.from({ length: 7 }, (_value, weekday) => {
+                                const active = item.weekdays.includes(weekday);
+                                return (
+                                  <button
+                                    key={weekday}
+                                    type="button"
+                                    onClick={() => toggleCategoryWeekday(item.categoryKey, weekday)}
+                                    className={`rounded-full px-2.5 py-1.5 text-[11px] font-semibold transition ${
+                                      active ? "bg-slate-950 text-white" : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-100"
+                                    }`}
+                                  >
+                                    {weekdayShortLabel(weekday)}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {item.planningMode === "auto" ? (
+                          <p className="mt-3 text-[12px] text-slate-500">
+                            고정 규칙 없이 자동 가중치 배정으로 들어갑니다.
+                          </p>
+                        ) : null}
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="rounded-[18px] border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+                    검색 결과가 없습니다.
+                  </div>
+                )}
+              </div>
+            </div>
           ) : (
-            <div className="space-y-4 rounded-[28px] bg-white p-5 shadow-sm">
+            <div className="space-y-4 rounded-[22px] bg-white p-3.5 shadow-sm">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">월간 집계</p>
-                <h2 className="mt-2 text-2xl font-semibold text-slate-950">카테고리 배분 현황</h2>
+                <p className="text-[11px] font-semibold tracking-[0.16em] text-slate-400">월간 집계</p>
+                <h2 className="mt-1 text-xl font-semibold text-slate-950">카테고리 배분 현황</h2>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 {monthCategoryStats.map((category) => (
-                  <div key={category.key} className="rounded-[22px] border border-slate-200 bg-slate-50 p-4">
+                  <div key={category.key} className="rounded-[18px] border border-slate-200 bg-slate-50 p-3.5">
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-2">
                         <span className="h-3 w-3 rounded-full" style={{ backgroundColor: category.color ?? "#cbd5e1" }} />
                         <p className="text-sm font-semibold text-slate-950">{category.name}</p>
                       </div>
-                      <FlagPill tone="slate">가중치 {category.weight}</FlagPill>
+                      <FlagPill tone="slate">
+                        {category.planningMode === "weekly"
+                          ? `주 ${category.weeklyTarget ?? 0}회`
+                          : category.planningMode === "weekdays"
+                            ? `${(category.weekdays ?? []).map(weekdayShortLabel).join("/") || "요일 없음"}`
+                            : `가중치 ${category.weight}`}
+                      </FlagPill>
                     </div>
-                    <p className="mt-3 text-sm text-slate-600">목표 {category.planned}건 / 실제 {category.actual}건</p>
+                    <p className="mt-3 text-sm text-slate-600">배정 {category.planned}건 / 생성 완료 {category.actual}건</p>
                   </div>
                 ))}
               </div>
@@ -917,7 +1181,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block space-y-2">
-      <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{label}</span>
+      <span className="text-[11px] font-semibold text-slate-500">{label}</span>
       {children}
     </label>
   );
@@ -925,30 +1189,30 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[20px] bg-white px-4 py-3 shadow-sm">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">{label}</p>
-      <p className="mt-2 text-lg font-semibold text-slate-950">{value}</p>
+    <div className="rounded-[16px] bg-white px-3 py-2.5 shadow-sm">
+      <p className="text-[10px] font-semibold tracking-[0.12em] text-slate-400">{label}</p>
+      <p className="mt-1.5 text-base font-semibold text-slate-950">{value}</p>
     </div>
   );
 }
 
 function ReadonlyItem({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[20px] bg-white px-4 py-3">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">{label}</p>
-      <p className="mt-2 text-sm font-medium text-slate-900">{value}</p>
+    <div className="rounded-[16px] bg-white px-3 py-2.5">
+      <p className="text-[10px] font-semibold tracking-[0.12em] text-slate-400">{label}</p>
+      <p className="mt-1.5 text-[13px] font-medium text-slate-900">{value}</p>
     </div>
   );
 }
 
 function FlagPill({ children, tone }: { children: ReactNode; tone: "slate" }) {
-  return <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">{children}</span>;
+  return <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700">{children}</span>;
 }
 
 function inputClass() {
-  return "h-[44px] w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200";
+  return "h-[40px] w-full rounded-[18px] border border-slate-200 bg-white px-3 text-[13px] text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200";
 }
 
 function textareaClass() {
-  return "w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200";
+  return "w-full rounded-[18px] border border-slate-200 bg-white px-3 py-2.5 text-[13px] leading-5 text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200";
 }

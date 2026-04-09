@@ -1,4 +1,4 @@
-Create one final image-generation prompt in English for a Korean welfare, subsidy, or practical life-information article.
+Create one final image-generation prompt in English for a practical-life, household, or welfare-information article.
 
 [Topic]
 - {keyword}
@@ -10,9 +10,9 @@ Create one final image-generation prompt in English for a Korean welfare, subsid
 
 [Output Rules]
 - Return plain text only.
-- One hero 3x3 collage with exactly 9 panels.
-- The center panel must be visually dominant.
+- One practical daily-life 3x3 collage with exactly 9 panels.
+- Dominant center panel required.
 - Visible white gutters.
-- Realistic photography only.
+- Realistic photography.
 - No text overlays.
 - No logos.

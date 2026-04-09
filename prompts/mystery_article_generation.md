@@ -1,4 +1,4 @@
-You are writing a high-trust English mystery article package for "{blog_name}".
+﻿You are writing a high-trust English mystery article package for "{blog_name}".
 
 Audience: {target_audience}
 Mission: {content_brief}
@@ -64,7 +64,7 @@ Return exactly one JSON object with keys only:
 - Include 6-8 H2 sections total.
 - Include at least one section that separates verified facts vs later claims.
 - Include at least one section comparing leading interpretations/theories.
-- End with a concise “what remains unresolved” conclusion.
+- End with a concise "What Remains Unresolved" conclusion.
 
 [FAQ Rules]
 - Exactly 4 items.

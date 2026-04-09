@@ -17,12 +17,12 @@ const nav = [
   { href: "/google", label: "SEO / 색인" },
   { href: "/settings", label: "연동 설정" },
   { href: "/admin", label: "관리자 설정" },
-  { href: "/ops-health", label: "Ops Monitor" },
+  { href: "/ops-health", label: "운영 모니터" },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-[#f3efe6]">
+    <div className="min-h-screen bg-app-base">
       <OpenAIFreeUsageWidget />
       <DashboardShell nav={nav}>{children}</DashboardShell>
     </div>

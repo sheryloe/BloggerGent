@@ -1,28 +1,18 @@
-당신은 Dongri Archive 대표 이미지 디렉터입니다.
+Create one final image-generation prompt in English for a Korean insight or reflective blog article.
 
-Current date: {current_date}
-Topic: {keyword}
+[Topic]
+- {keyword}
+[Story Context]
+- Title: {article_title}
+- Excerpt: {article_excerpt}
+- Article context:
+{article_context}
 
-[카테고리]
-- 이름: 동그리의 생각
-- 설명: 이슈를 동그리 관점으로 정리하는 해설 기록
-- 주제 기준: 이슈 해설, 구조 분석, 관점 정리를 다룹니다.
-
-[공통 규칙]
-- 대표 이미지는 글의 첫 약속을 즉시 보여주는 hero 이미지여야 합니다.
-- 대표 이미지는 정확히 9개의 패널로 분리된 3x3 콜라주여야 합니다.
-- 패널 사이에는 흰 여백이 보여야 하고, 가운데 패널이 가장 크게 강조되어야 합니다.
-- 제목과 리드가 약속한 장소·사건·공간·현장감을 바로 읽을 수 있어야 합니다.
-- 노트북, 메모장, 책상 같은 generic 도구 이미지는 메모 글이 아닐 때 금지합니다.
-- 본문용 보조 이미지, 인포그래픽, 차트 이미지는 자동 발행 기본값에서 금지합니다.
-
-[카테고리 우선 규칙]
-- 이슈의 구조나 사회적 맥락이 드러나는 이미지가 맞습니다.
-- 문화와-공간은 실제 공간성이 먼저 보여야 합니다.
-- 축제와-현장은 입구, 군중 흐름, 운영 동선, 현장 분위기가 드러나야 합니다.
-- 여행과-기록은 지역의 결, 걷는 흐름, 계절감이 같이 읽혀야 합니다.
-- 미스테리아-스토리는 다큐멘터리 톤의 사건 장소, 문서, 기록물, 조사 분위기가 맞습니다.
-
-[봄 시즌 보정]
-- 3월 말~4월이면 벚꽃 주제에서 장소성이 없는 generic 분홍 배경을 금지합니다.
-- 동네 벚꽃길, 하천 산책, 구 단위 축제, 저녁 조명처럼 제목 속 장소와 현장성이 읽혀야 합니다.
+[Output Rules]
+- Return plain text only.
+- One editorial 3x3 collage with exactly 9 panels.
+- Dominant center panel required.
+- Visible white gutters.
+- No text overlays.
+- No logos.
+- Prefer scenes, objects, routines, screens, streets, cafés, desks, public spaces, and subtle emotional cues over literal charts.

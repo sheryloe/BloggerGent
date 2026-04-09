@@ -106,11 +106,19 @@ function buildBundleCards(mission: MissionControlRead): BundleCard[] {
 
 function statusPill(status: string) {
   const normalized = status.toLowerCase();
-  if (["running", "published", "healthy", "connected", "ready"].includes(normalized)) return "bg-emerald-50 text-emerald-700";
-  if (["failed", "error", "warning", "disconnected"].includes(normalized)) return "bg-rose-50 text-rose-700";
-  if (["queued", "review", "scheduled", "busy"].includes(normalized)) return "bg-indigo-50 text-indigo-700";
-  if (["blocked", "blocked_asset", "attention"].includes(normalized)) return "bg-amber-50 text-amber-700";
-  return "bg-slate-100 text-slate-600";
+  if (["running", "published", "healthy", "connected", "ready"].includes(normalized)) {
+    return "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200";
+  }
+  if (["failed", "error", "warning", "disconnected"].includes(normalized)) {
+    return "bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200";
+  }
+  if (["queued", "review", "scheduled", "busy"].includes(normalized)) {
+    return "bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-200";
+  }
+  if (["blocked", "blocked_asset", "attention"].includes(normalized)) {
+    return "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200";
+  }
+  return "bg-slate-100 text-slate-600 dark:bg-slate-700/40 dark:text-zinc-300";
 }
 
 function roomDescription(room: ManagedChannelRead) {
@@ -140,14 +148,14 @@ function signalTone(status: string): "emerald" | "rose" | "sky" {
 
 function SignalRow({ label, value, tone }: { label: string; value: string; tone: "emerald" | "rose" | "sky" }) {
   const toneClass = {
-    emerald: "bg-[#ecfdf5] text-[#166534]",
-    rose: "bg-[#fff1f2] text-[#9f1239]",
-    sky: "bg-[#f0f9ff] text-[#0c4a6e]",
+    emerald: "bg-[#ecfdf5] text-[#166534] dark:bg-emerald-500/15 dark:text-emerald-200",
+    rose: "bg-[#fff1f2] text-[#9f1239] dark:bg-rose-500/15 dark:text-rose-200",
+    sky: "bg-[#f0f9ff] text-[#0c4a6e] dark:bg-sky-500/15 dark:text-sky-200",
   }[tone];
 
   return (
-    <div className="flex items-center justify-between gap-3 rounded-[22px] border border-slate-200 bg-white px-4 py-3">
-      <span className="text-sm text-slate-500">{label}</span>
+    <div className="flex items-center justify-between gap-3 rounded-[22px] border border-slate-200 bg-white px-4 py-3 dark:border-white/10 dark:bg-slate-900/65">
+      <span className="text-sm text-slate-500 dark:text-zinc-400">{label}</span>
       <span className={`rounded-full px-3 py-1 text-xs font-semibold ${toneClass}`}>{value}</span>
     </div>
   );
@@ -165,9 +173,9 @@ function HeroStat({ label, value, helper }: { label: string; value: string; help
 
 function MiniMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[20px] bg-[#f8fafc] px-3 py-3">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{label}</p>
-      <p className="mt-1 text-lg font-semibold text-slate-950">{value}</p>
+    <div className="rounded-[20px] bg-[#f8fafc] px-3 py-3 dark:bg-slate-900/70">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-zinc-500">{label}</p>
+      <p className="mt-1 text-lg font-semibold text-slate-950 dark:text-zinc-100">{value}</p>
     </div>
   );
 }
@@ -177,7 +185,9 @@ function QuickJump({ href, label, subtle = false }: { href: string; label: strin
     <Link
       href={href}
       className={`inline-flex items-center rounded-full px-4 py-2 text-sm font-semibold transition ${
-        subtle ? "border border-white/20 bg-white/10 text-white hover:bg-white/15" : "bg-white text-slate-950 hover:bg-slate-100"
+        subtle
+          ? "border border-white/20 bg-white/10 text-white hover:bg-white/15"
+          : "bg-white text-slate-950 hover:bg-slate-100 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
       }`}
     >
       {label}
@@ -187,13 +197,13 @@ function QuickJump({ href, label, subtle = false }: { href: string; label: strin
 
 function ActionRow({ href, title, description }: { href: string; title: string; description: string }) {
   return (
-    <Link href={href} className="block rounded-[22px] border border-slate-200 bg-white px-4 py-4 transition hover:border-slate-300 hover:bg-slate-50">
+    <Link href={href} className="block rounded-[22px] border border-slate-200 bg-white px-4 py-4 transition hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-slate-900/65 dark:hover:bg-slate-800/70">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-slate-950">{title}</p>
-          <p className="mt-1 text-sm leading-6 text-slate-600">{description}</p>
+          <p className="text-sm font-semibold text-slate-950 dark:text-zinc-100">{title}</p>
+          <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-zinc-400">{description}</p>
         </div>
-        <ArrowRight className="mt-0.5 h-4 w-4 text-slate-500" />
+        <ArrowRight className="mt-0.5 h-4 w-4 text-slate-500 dark:text-zinc-400" />
       </div>
     </Link>
   );
@@ -229,8 +239,8 @@ export function MissionControl({ mission }: MissionControlProps) {
           </div>
         </article>
 
-        <article className="rounded-[34px] border border-slate-200 bg-white p-6">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">신호 보드</p>
+        <article className="rounded-[34px] border border-slate-200 bg-white p-6 dark:border-white/10 dark:bg-slate-900/70">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400 dark:text-zinc-500">신호 보드</p>
           <div className="mt-4 space-y-3">
             <SignalRow label="작업공간" value={mission.workspaceLabel} tone="sky" />
             <SignalRow label="런타임" value={statusLabel(mission.runtimeHealth.runtimeStatus)} tone={signalTone(mission.runtimeHealth.runtimeStatus)} />
@@ -238,13 +248,13 @@ export function MissionControl({ mission }: MissionControlProps) {
             <SignalRow label="경보" value={`${mission.alerts.length}건`} tone={mission.alerts.length > 0 ? "rose" : "emerald"} />
           </div>
 
-          <div className="mt-5 rounded-[24px] border border-slate-200 bg-[#f8fafc] p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">제어 루프</p>
+          <div className="mt-5 rounded-[24px] border border-slate-200 bg-[#f8fafc] p-4 dark:border-white/10 dark:bg-slate-900/65">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400 dark:text-zinc-500">제어 루프</p>
             <div className="mt-4 grid gap-2">
-              <span className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700">초안</span>
-              <span className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700">검토</span>
-              <span className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700">게시</span>
-              <span className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700">피드백</span>
+              <span className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700 dark:border-white/10 dark:bg-slate-900 dark:text-zinc-300">초안</span>
+              <span className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700 dark:border-white/10 dark:bg-slate-900 dark:text-zinc-300">검토</span>
+              <span className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700 dark:border-white/10 dark:bg-slate-900 dark:text-zinc-300">게시</span>
+              <span className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700 dark:border-white/10 dark:bg-slate-900 dark:text-zinc-300">피드백</span>
             </div>
           </div>
         </article>
@@ -254,16 +264,16 @@ export function MissionControl({ mission }: MissionControlProps) {
         {cards.map((card) => {
           const Icon = card.icon;
           return (
-            <Link key={card.key} href={card.href} className="group rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md">
+            <Link key={card.key} href={card.href} className="group rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md dark:border-white/10 dark:bg-slate-900/70 dark:hover:bg-slate-800/70">
               <div className={`inline-flex rounded-[18px] bg-gradient-to-br p-3 text-white ${card.tone}`}>
                 <Icon className="h-5 w-5" />
               </div>
               <div className="mt-4 space-y-2">
-                <h2 className="text-xl font-semibold text-slate-950">{card.title}</h2>
-                <p className="text-sm leading-6 text-slate-600">{card.purpose}</p>
-                <p className="text-sm font-medium text-slate-900">{card.summary}</p>
+                <h2 className="text-xl font-semibold text-slate-950 dark:text-zinc-100">{card.title}</h2>
+                <p className="text-sm leading-6 text-slate-600 dark:text-zinc-400">{card.purpose}</p>
+                <p className="text-sm font-medium text-slate-900 dark:text-zinc-200">{card.summary}</p>
               </div>
-              <div className="mt-4 inline-flex items-center text-sm font-semibold text-slate-700 group-hover:text-slate-950">
+              <div className="mt-4 inline-flex items-center text-sm font-semibold text-slate-700 group-hover:text-slate-950 dark:text-zinc-300 dark:group-hover:text-zinc-100">
                 바로 이동
                 <ArrowRight className="ml-2 h-4 w-4" />
               </div>
@@ -273,26 +283,26 @@ export function MissionControl({ mission }: MissionControlProps) {
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_360px]">
-        <article className="rounded-[34px] border border-slate-200 bg-white p-6 shadow-sm">
+        <article className="rounded-[34px] border border-slate-200 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-slate-900/70">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">Managed Rooms</p>
-              <h2 className="mt-2 text-2xl font-semibold text-slate-950">연결 채널 운영실</h2>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400 dark:text-zinc-500">Managed Rooms</p>
+              <h2 className="mt-2 text-2xl font-semibold text-slate-950 dark:text-zinc-100">연결 채널 운영실</h2>
             </div>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">{mission.channels.length}개</span>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 dark:bg-slate-700/50 dark:text-zinc-200">{mission.channels.length}개</span>
           </div>
 
           <div className="mt-5 grid gap-4 lg:grid-cols-2">
             {mission.channels.map((room) => (
-              <article key={room.channelId} className="rounded-[26px] border border-slate-200 bg-slate-50 p-5">
+              <article key={room.channelId} className="rounded-[26px] border border-slate-200 bg-slate-50 p-5 dark:border-white/10 dark:bg-slate-900/65">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                      <span className="rounded-full bg-white px-3 py-1 font-semibold text-slate-700">{providerLabel(room.provider)}</span>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-zinc-400">
+                      <span className="rounded-full bg-white px-3 py-1 font-semibold text-slate-700 dark:bg-slate-900 dark:text-zinc-200">{providerLabel(room.provider)}</span>
                       <span className={`rounded-full px-3 py-1 font-semibold ${statusPill(room.status)}`}>{statusLabel(room.status)}</span>
                     </div>
-                    <h3 className="mt-3 text-lg font-semibold text-slate-950">{room.name}</h3>
-                    <p className="mt-2 text-sm leading-6 text-slate-600">{roomDescription(room)}</p>
+                    <h3 className="mt-3 text-lg font-semibold text-slate-950 dark:text-zinc-100">{room.name}</h3>
+                    <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-zinc-400">{roomDescription(room)}</p>
                   </div>
                 </div>
 
@@ -304,11 +314,11 @@ export function MissionControl({ mission }: MissionControlProps) {
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <Link href={roomHref(room)} className="inline-flex items-center rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800">
+                  <Link href={roomHref(room)} className="inline-flex items-center rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200">
                     운영 열기
                   </Link>
                   {room.baseUrl ? (
-                    <a href={room.baseUrl} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100">
+                    <a href={room.baseUrl} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-white/10 dark:bg-slate-900 dark:text-zinc-200 dark:hover:bg-slate-800">
                       사이트 열기
                     </a>
                   ) : null}
@@ -318,10 +328,10 @@ export function MissionControl({ mission }: MissionControlProps) {
           </div>
         </article>
 
-        <article className="space-y-4 rounded-[34px] border border-slate-200 bg-white p-6 shadow-sm">
+        <article className="space-y-4 rounded-[34px] border border-slate-200 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-slate-900/70">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">Quick Actions</p>
-            <h2 className="mt-2 text-2xl font-semibold text-slate-950">바로 실행</h2>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400 dark:text-zinc-500">Quick Actions</p>
+            <h2 className="mt-2 text-2xl font-semibold text-slate-950 dark:text-zinc-100">바로 실행</h2>
           </div>
           <ActionRow href="/settings" title="연동 설정" description="OAuth, API 키, 플랫폼 연결을 먼저 정리합니다." />
           <ActionRow href="/admin" title="관리자 설정" description="게시 플래너 운영, 자동화, 품질 / 발행 기준을 조정합니다." />

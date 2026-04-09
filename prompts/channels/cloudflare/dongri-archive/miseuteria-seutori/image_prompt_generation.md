@@ -8,9 +8,6 @@ Create one final image-generation prompt in English for a mystery, legend, or hi
 - Article context:
 {article_context}
 
-[Source Concept]
-- Visual tone should reflect a two-source documentary synthesis, not pure fiction.
-
 [Output Rules]
 - Return plain text only.
 - One documentary-style hero 3x3 collage with exactly 9 panels.

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import re
+from datetime import datetime, timezone
 
 from slugify import slugify
 from sqlalchemy import select
@@ -55,6 +57,192 @@ TRAVEL_EDITORIAL_LOCALIZED_CATEGORY_LABELS: dict[str, dict[str, str]] = {
         "food": "\u30b0\u30eb\u30e1\u30fb\u30ab\u30d5\u30a7",
     },
 }
+TRAVEL_EDITORIAL_CANONICAL_KEYS = {"travel", "culture", "food"}
+MYSTERY_EDITORIAL_CANONICAL_KEYS = {"mystery", "history", "casefile"}
+
+
+def _normalize_slug_token(value: str | None, *, fallback: str) -> str:
+    raw = str(value or "").strip()
+    normalized = slugify(raw, separator="-") if raw else ""
+    return normalized or fallback
+
+
+def resolve_r2_blog_group(
+    *,
+    profile_key: str | None,
+    primary_language: str | None = None,
+    channel_provider: str | None = None,
+) -> str:
+    normalized_profile = (profile_key or "").strip().lower()
+    normalized_language = (primary_language or "").strip().lower()
+    normalized_provider = (channel_provider or "").strip().lower()
+
+    if normalized_provider == "cloudflare":
+        return "archive"
+
+    if normalized_profile == "korea_travel":
+        if normalized_language == "es":
+            return "korea-travel-es"
+        if normalized_language == "ja":
+            return "korea-travel-ja"
+        return "korea-travel-en"
+    if normalized_profile == "world_mystery":
+        return "world-mystery"
+    if normalized_profile in {"archive", "cloudflare_archive"}:
+        return "archive"
+    return "archive"
+
+
+def _travel_category_alias_map(primary_language: str | None) -> dict[str, str]:
+    localized = _travel_localized_category_map(primary_language)
+    aliases: dict[str, str] = {
+        "travel": "travel",
+        "viaje": "travel",
+        "viajes": "travel",
+        "trip": "travel",
+        "trips": "travel",
+        "旅行": "travel",
+        "旅行・お祭り": "travel",
+        "culture": "culture",
+        "cultura": "culture",
+        "lifestyle": "culture",
+        "ライフスタイル": "culture",
+        "food": "food",
+        "gastronomia": "food",
+        "gastronomía": "food",
+        "gourmet": "food",
+        "グルメ": "food",
+        "グルメ・カフェ": "food",
+        "cafe": "food",
+    }
+    for key, value in localized.items():
+        aliases[value] = key
+    for key, (label, _keywords) in TRAVEL_EDITORIAL_CATEGORY_MAP.items():
+        aliases[key] = key
+        aliases[label] = key
+    return {_normalize_label_key(raw): canonical for raw, canonical in aliases.items() if _normalize_label_key(raw)}
+
+
+def resolve_r2_category_key(
+    *,
+    profile_key: str | None,
+    primary_language: str | None = None,
+    editorial_category_key: str | None = None,
+    editorial_category_label: str | None = None,
+    labels: list[str] | None = None,
+    title: str = "",
+    summary: str = "",
+    category_slug: str | None = None,
+) -> str:
+    normalized_profile = (profile_key or "").strip().lower()
+    normalized_key = (editorial_category_key or "").strip().lower()
+
+    if normalized_profile == "korea_travel":
+        if normalized_key in TRAVEL_EDITORIAL_CANONICAL_KEYS:
+            return normalized_key
+
+        alias_map = _travel_category_alias_map(primary_language)
+        candidate_labels = [editorial_category_label or "", *(labels or [])]
+        for candidate in candidate_labels:
+            resolved = alias_map.get(_normalize_label_key(candidate))
+            if resolved:
+                return resolved
+
+        inferred_key, _ = infer_editorial_category(
+            profile_key="korea_travel",
+            primary_language=primary_language,
+            labels=list(labels or []),
+            title=title,
+            summary=summary,
+        )
+        if inferred_key in TRAVEL_EDITORIAL_CANONICAL_KEYS:
+            return inferred_key
+        return "travel"
+
+    if normalized_profile == "world_mystery":
+        if normalized_key in MYSTERY_EDITORIAL_CANONICAL_KEYS:
+            if normalized_key in {"history", "casefile"}:
+                return normalized_key
+            return "mystery"
+
+        normalized_label = _normalize_label_key(editorial_category_label)
+        if normalized_label in {"history", "historical"}:
+            return "history"
+        if normalized_label in {"case files", "casefile", "case-file"}:
+            return "casefile"
+        return "mystery"
+
+    slug_candidate = _normalize_slug_token(category_slug, fallback="")
+    return slug_candidate or "uncategorized"
+
+
+def build_r2_asset_object_key(
+    *,
+    profile_key: str | None,
+    primary_language: str | None = None,
+    editorial_category_key: str | None = None,
+    editorial_category_label: str | None = None,
+    labels: list[str] | None = None,
+    title: str = "",
+    summary: str = "",
+    category_slug: str | None = None,
+    channel_provider: str | None = None,
+    post_slug: str,
+    asset_role: str,
+    content: bytes | None = None,
+    timestamp: datetime | None = None,
+) -> str:
+    resolved_time = timestamp.astimezone(timezone.utc) if timestamp else datetime.now(timezone.utc)
+    blog_group = resolve_r2_blog_group(
+        profile_key=profile_key,
+        primary_language=primary_language,
+        channel_provider=channel_provider,
+    )
+    category_key = resolve_r2_category_key(
+        profile_key=profile_key,
+        primary_language=primary_language,
+        editorial_category_key=editorial_category_key,
+        editorial_category_label=editorial_category_label,
+        labels=labels,
+        title=title,
+        summary=summary,
+        category_slug=category_slug,
+    )
+    slug_token = _normalize_slug_token(post_slug, fallback="post")
+    role_token = _normalize_slug_token(asset_role, fallback="asset")
+    hash_source = (
+        content
+        if content
+        else f"{blog_group}:{category_key}:{slug_token}:{role_token}:{resolved_time:%Y%m%d%H%M}".encode("utf-8")
+    )
+    digest = hashlib.sha256(hash_source).hexdigest()[:12]
+    return (
+        f"assets/media/{blog_group}/{category_key}/"
+        f"{resolved_time:%Y}/{resolved_time:%m}/{slug_token}/{role_token}-{digest}.webp"
+    )
+
+
+def build_article_r2_asset_object_key(
+    article: Article,
+    *,
+    asset_role: str,
+    content: bytes | None = None,
+    timestamp: datetime | None = None,
+) -> str:
+    blog = article.blog
+    return build_r2_asset_object_key(
+        profile_key=str(getattr(blog, "profile_key", "") or ""),
+        primary_language=str(getattr(blog, "primary_language", "") or ""),
+        editorial_category_key=article.editorial_category_key,
+        editorial_category_label=article.editorial_category_label,
+        labels=list(article.labels or []),
+        title=article.title,
+        summary=article.excerpt,
+        post_slug=article.slug,
+        asset_role=asset_role,
+        content=content,
+        timestamp=timestamp,
+    )
 
 def estimate_reading_time(html_fragment: str) -> int:
     text = TAG_RE.sub(" ", html_fragment)

@@ -1,4 +1,4 @@
-Create one final image-generation prompt in English for a Korean crypto analysis article.
+Create one final image-generation prompt in English for a crypto, blockchain, or digital-asset article.
 
 [Topic]
 - {keyword}
@@ -10,9 +10,8 @@ Create one final image-generation prompt in English for a Korean crypto analysis
 
 [Output Rules]
 - Return plain text only.
-- One hero 3x3 collage with exactly 9 panels.
-- The center panel must be visually dominant.
+- One editorial crypto 3x3 collage with exactly 9 panels.
+- Dominant center panel required.
 - Visible white gutters.
-- Realistic editorial style.
 - No text overlays.
-- No logos.
+- No exchange or token logos.

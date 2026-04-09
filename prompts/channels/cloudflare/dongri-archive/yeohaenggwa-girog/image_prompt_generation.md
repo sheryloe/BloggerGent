@@ -10,9 +10,9 @@ Create one final image-generation prompt in English for a Korean travel, festiva
 
 [Output Rules]
 - Return plain text only.
-- One hero 3x3 collage with exactly 9 panels.
+- One realistic hero 3x3 collage with exactly 9 panels.
 - The center panel must be visually dominant.
 - Visible white gutters.
-- Realistic photography only.
+- Natural travel photography.
 - No text overlays.
 - No logos.

@@ -333,7 +333,8 @@ def test_multilingual_slot_generation_disables_topic_discovery_and_sets_bundle_p
     assert publishing_step is not None and publishing_step.is_enabled is True
     assert refreshed_slot is not None
     assert refreshed_slot.scheduled_for is not None
-    assert refreshed_slot.scheduled_for.minute == 30
+    assert refreshed_slot.scheduled_for.hour == 9
+    assert refreshed_slot.scheduled_for.minute == 12
     assert captured["raw_prompts"]["planner_brief"]["bundle_key"] == "jeju-evening-route-2026-04-08"
     assert captured["raw_prompts"]["planner_brief"]["language"] == "ja"
     assert captured["raw_prompts"]["planner_brief"]["facts"] == ["shuttle from city hall"]

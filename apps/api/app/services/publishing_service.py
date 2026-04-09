@@ -13,7 +13,7 @@ from app.services.blogger_editor_service import (
     is_blogger_playwright_enabled,
     sync_article_search_description,
 )
-from app.services.article_service import ensure_article_editorial_labels
+from app.services.article_service import build_article_r2_asset_object_key, ensure_article_editorial_labels
 from app.services.html_assembler import assemble_article_html
 from app.services.providers.factory import get_blogger_provider
 from app.services.publish_trust_gate_service import enforce_publish_trust_requirements, ensure_trust_gate_appendix
@@ -147,7 +147,15 @@ def refresh_article_public_image(db: Session, article: Article) -> str | None:
     if not (image.file_path or "").strip():
         return image.public_url
 
-    public_url, delivery_meta = ensure_existing_public_image_url(db, file_path=image.file_path)
+    object_key = build_article_r2_asset_object_key(
+        article,
+        asset_role="hero-refresh",
+    )
+    public_url, delivery_meta = ensure_existing_public_image_url(
+        db,
+        file_path=image.file_path,
+        object_key=object_key,
+    )
     metadata = dict(image.image_metadata or {})
     metadata["delivery"] = delivery_meta
 

@@ -52,6 +52,8 @@ _LAST_USAGE_CACHE_AT: datetime | None = None
 @dataclass(slots=True)
 class UsageBucket:
     limit_tokens: int
+    input_tokens: int = 0
+    output_tokens: int = 0
     used_tokens: int = 0
     matched_models: set[str] | None = None
 
@@ -279,6 +281,8 @@ def _bucket_to_read(label: str, bucket: UsageBucket) -> OpenAIFreeUsageBucketRea
     return OpenAIFreeUsageBucketRead(
         label=label,
         limit_tokens=bucket.limit_tokens,
+        input_tokens=bucket.input_tokens,
+        output_tokens=bucket.output_tokens,
         used_tokens=bucket.used_tokens,
         remaining_tokens=remaining,
         usage_percent=usage_percent,
@@ -421,11 +425,15 @@ def get_openai_free_usage(db: Session) -> OpenAIFreeUsageRead:
             continue
 
         if _is_small_model(model):
+            small.input_tokens += input_tokens
+            small.output_tokens += output_tokens
             small.used_tokens += total_tokens
             small.matched_models.add(model)
             continue
 
         if _is_large_model(model):
+            large.input_tokens += input_tokens
+            large.output_tokens += output_tokens
             large.used_tokens += total_tokens
             large.matched_models.add(model)
 

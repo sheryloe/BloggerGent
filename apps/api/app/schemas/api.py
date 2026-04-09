@@ -806,6 +806,8 @@ class TrainingStatusRead(BaseModel):
 class OpenAIFreeUsageBucketRead(BaseModel):
     label: str
     limit_tokens: int
+    input_tokens: int = 0
+    output_tokens: int = 0
     used_tokens: int
     remaining_tokens: int
     usage_percent: float
@@ -1743,6 +1745,9 @@ class PlannerCategoryRead(BaseModel):
     color: str | None = None
     sort_order: int
     is_active: bool
+    planning_mode: str = "auto"
+    weekly_target: int | None = Field(default=None, ge=1, le=7)
+    weekdays: list[int] = Field(default_factory=list)
 
 
 class PlannerSlotCreate(BaseModel):
@@ -1833,6 +1838,19 @@ class PlannerMonthPlanRequest(BaseModel):
     overwrite: bool = False
 
 
+class PlannerCategoryRuleUpdate(BaseModel):
+    category_key: str = Field(min_length=1, max_length=100)
+    planning_mode: str = Field(default="auto", pattern=r"^(auto|weekly|weekdays)$")
+    weekly_target: int | None = Field(default=None, ge=1, le=7)
+    weekdays: list[int] = Field(default_factory=list)
+
+
+class PlannerCategoryRulesUpdateRequest(BaseModel):
+    channel_id: str | None = None
+    blog_id: int | None = Field(default=None, ge=1)
+    rules: list[PlannerCategoryRuleUpdate] = Field(default_factory=list)
+
+
 class PlannerBriefSuggestionRead(BaseModel):
     slot_id: int
     slot_order: int | None = None
@@ -1918,12 +1936,15 @@ class AnalyticsArticleFactRead(BaseModel):
     actual_url: str | None = None
     source_type: str
     ctr: float | None = None
+    ctr_score: float | None = None
     index_status: str = "unknown"
     index_coverage_state: str | None = None
     last_crawl_time: str | None = None
     last_notify_time: str | None = None
     next_eligible_at: str | None = None
     index_last_checked_at: str | None = None
+    status_variant: str = "unknown"
+    can_manual_delete: bool = False
 
 
 class AnalyticsThemeMonthlyStatRead(BaseModel):

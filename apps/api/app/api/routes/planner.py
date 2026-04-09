@@ -12,6 +12,7 @@ from app.schemas.api import (
     PlannerDayBriefApplyRequest,
     PlannerDayBriefApplyResponse,
     PlannerBriefRunRead,
+    PlannerCategoryRulesUpdateRequest,
     PlannerMonthPlanRequest,
     PlannerSlotCreate,
     PlannerSlotRead,
@@ -28,6 +29,7 @@ from app.services.planner_service import (
     list_categories,
     run_slot_generation,
     update_slot,
+    update_category_rules,
 )
 
 router = APIRouter(prefix="/planner", tags=["planner"])
@@ -54,6 +56,22 @@ def read_categories(
 ) -> list[PlannerCategoryRead]:
     try:
         return list_categories(db, channel_id=channel_id, blog_id=blog_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.put("/category-rules", response_model=list[PlannerCategoryRead])
+def save_category_rules(payload: PlannerCategoryRulesUpdateRequest, db: Session = Depends(get_db)) -> list[PlannerCategoryRead]:
+    try:
+        return update_category_rules(
+            db,
+            channel_id=payload.channel_id,
+            blog_id=payload.blog_id,
+            rules=[
+                item.model_dump() if hasattr(item, "model_dump") else item.dict()
+                for item in payload.rules
+            ],
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 

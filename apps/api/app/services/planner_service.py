@@ -5,6 +5,7 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Iterable
+from zoneinfo import ZoneInfo
 
 import httpx
 from sqlalchemy import and_
@@ -48,7 +49,6 @@ from app.services.blog_service import get_blog, get_workflow_step, sync_stage_pr
 from app.services.google_indexing_service import load_fact_enrichment_maps
 from app.services.job_service import create_job
 from app.services.multilingual_bundle_service import (
-    bundle_publish_offset_minutes,
     default_target_audience_for_language,
     parse_planner_bundle_context,
     resolve_blog_bundle_language,
@@ -61,8 +61,8 @@ from app.services.platform_service import (
 from app.services.prompt_service import get_prompt_template, render_prompt_template
 from app.services.providers.base import ProviderRuntimeError
 from app.services.providers.factory import get_runtime_config
-from app.services.openai_usage_service import route_openai_free_tier_text_model
-from app.services.settings_service import get_settings_map
+from app.services.openai_usage_service import FREE_TIER_DEFAULT_SMALL_TEXT_MODEL, route_openai_free_tier_text_model
+from app.services.settings_service import get_settings_map, upsert_settings
 from app.services.workspace_service import get_managed_channel, list_channel_categories
 from app.tasks.pipeline import run_job
 
@@ -107,6 +107,21 @@ MULTILINGUAL_FIXED_WORKFLOW_STAGES: tuple[WorkflowStageType, ...] = (
     WorkflowStageType.HTML_ASSEMBLY,
     WorkflowStageType.PUBLISHING,
 )
+_CLOUDFLARE_WEIGHT_ID_FALLBACKS: dict[str, str] = {
+    "travel": "여행과기록",
+    "festival": "축제와현장",
+    "culture": "문화와공간",
+    "mystery": "미스터리-스토리",
+    "stocks": "주식-흐름",
+    "crypto": "크립토-흐름",
+    "welfare": "생활-실용",
+    "life": "생활-기록",
+    "memo": "일상과메모",
+    "development": "개발과도구",
+    "dev": "개발과도구",
+    "it": "기술의기록",
+    "ai": "기술의기록",
+}
 PLANNER_DAILY_BRIEF_PROMPT_KEY = "planner_daily_brief_analysis"
 BRIEF_APPLY_FIELD_MAP: tuple[tuple[str, str], ...] = (
     ("brief_topic", "topic"),
@@ -114,6 +129,19 @@ BRIEF_APPLY_FIELD_MAP: tuple[tuple[str, str], ...] = (
     ("brief_information_level", "information_level"),
     ("brief_extra_context", "extra_context"),
 )
+KOREAN_BRIEF_FIELDS: tuple[str, ...] = (
+    "topic",
+    "audience",
+    "information_level",
+    "extra_context",
+    "expected_ctr_lift",
+    "reason",
+)
+KOREAN_MANAGEMENT_OUTPUT_INSTRUCTION = (
+    "관리자 화면용 결과이므로 topic, audience, information_level, extra_context, expected_ctr_lift, reason은 "
+    "채널 언어와 무관하게 모두 자연스러운 한국어로 작성하세요."
+)
+PLANNER_CATEGORY_RULE_MODES = {"auto", "weekly", "weekdays"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +152,9 @@ class PlannerCategoryDefinition:
     color: str | None
     sort_order: int
     is_active: bool = True
+    planning_mode: str = "auto"
+    weekly_target: int | None = None
+    weekdays: tuple[int, ...] = ()
 
 
 @dataclass(slots=True)
@@ -184,6 +215,133 @@ def _parse_weight_overrides(raw_value: str | None, defaults: list[tuple[str, str
     if parsed:
         return parsed
     return {key: weight for key, _label, weight, _color in defaults}
+
+
+def _parse_positive_int(raw_value: str | None, fallback: int) -> int:
+    try:
+        parsed = int(str(raw_value or fallback).strip())
+    except (TypeError, ValueError):
+        return fallback
+    return parsed if parsed > 0 else fallback
+
+
+def _planner_timezone(settings_map: dict[str, str] | None = None) -> ZoneInfo:
+    timezone_name = str((settings_map or {}).get("schedule_timezone") or "Asia/Seoul").strip() or "Asia/Seoul"
+    try:
+        return ZoneInfo(timezone_name)
+    except Exception:  # noqa: BLE001
+        return ZoneInfo("Asia/Seoul")
+
+
+def _to_planner_storage_datetime(value: datetime, settings_map: dict[str, str] | None = None) -> datetime:
+    timezone = _planner_timezone(settings_map)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone).astimezone(UTC)
+    return value.astimezone(UTC)
+
+
+def _planner_display_datetime(value: datetime | None, settings_map: dict[str, str] | None = None) -> datetime | None:
+    if value is None:
+        return None
+    timezone = _planner_timezone(settings_map)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC).astimezone(timezone)
+    return value.astimezone(timezone)
+
+
+def _planner_category_rules_setting_key(channel_id: str) -> str:
+    normalized = "".join(ch.lower() if ch.isalnum() else "_" for ch in str(channel_id or "").strip())
+    collapsed = "_".join(part for part in normalized.split("_") if part)
+    return f"planner_category_rules__{collapsed or 'channel'}"
+
+
+def _normalize_weekdays(raw_value: Any) -> tuple[int, ...]:
+    if not isinstance(raw_value, list | tuple | set):
+        return ()
+    weekdays: set[int] = set()
+    for item in raw_value:
+        try:
+            weekday = int(item)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= weekday <= 6:
+            weekdays.add(weekday)
+    return tuple(sorted(weekdays))
+
+
+def _normalize_category_rule_payload(raw_rule: Any) -> dict[str, Any]:
+    payload = raw_rule if isinstance(raw_rule, dict) else {}
+    planning_mode = str(payload.get("planning_mode") or payload.get("mode") or "auto").strip().lower()
+    if planning_mode not in PLANNER_CATEGORY_RULE_MODES:
+        planning_mode = "auto"
+
+    weekly_target: int | None = None
+    raw_weekly_target = payload.get("weekly_target")
+    if raw_weekly_target is not None and str(raw_weekly_target).strip():
+        try:
+            weekly_target = max(1, min(int(raw_weekly_target), 7))
+        except (TypeError, ValueError):
+            weekly_target = None
+
+    weekdays = _normalize_weekdays(payload.get("weekdays"))
+
+    if planning_mode == "weekly" and weekly_target is None:
+        planning_mode = "auto"
+    if planning_mode == "weekdays" and not weekdays:
+        planning_mode = "auto"
+    if planning_mode == "auto":
+        weekly_target = None
+        weekdays = ()
+
+    return {
+        "planning_mode": planning_mode,
+        "weekly_target": weekly_target,
+        "weekdays": weekdays,
+    }
+
+
+def _load_category_rule_map(settings_map: dict[str, str], channel_id: str) -> dict[str, dict[str, Any]]:
+    raw_value = settings_map.get(_planner_category_rules_setting_key(channel_id))
+    if not raw_value:
+        return {}
+    try:
+        payload = json.loads(raw_value)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+
+    normalized: dict[str, dict[str, Any]] = {}
+    for category_key, raw_rule in payload.items():
+        key = str(category_key or "").strip()
+        if not key:
+            continue
+        normalized[key] = _normalize_category_rule_payload(raw_rule)
+    return normalized
+
+
+def _apply_category_rule_map(
+    *,
+    categories: list[PlannerCategoryDefinition],
+    rule_map: dict[str, dict[str, Any]],
+) -> list[PlannerCategoryDefinition]:
+    applied: list[PlannerCategoryDefinition] = []
+    for category in categories:
+        rule = rule_map.get(category.key, {"planning_mode": "auto", "weekly_target": None, "weekdays": ()})
+        applied.append(
+            PlannerCategoryDefinition(
+                key=category.key,
+                name=category.name,
+                weight=category.weight,
+                color=category.color,
+                sort_order=category.sort_order,
+                is_active=category.is_active,
+                planning_mode=str(rule.get("planning_mode") or "auto"),
+                weekly_target=rule.get("weekly_target"),
+                weekdays=tuple(rule.get("weekdays") or ()),
+            )
+        )
+    return applied
 
 
 def _load_legacy_blog_themes(db: Session, blog_id: int) -> list[BlogTheme]:
@@ -286,11 +444,30 @@ def _sync_legacy_blogger_themes(
 
 def _build_cloudflare_categories(db: Session) -> list[PlannerCategoryDefinition]:
     leaf_categories = [item for item in list_cloudflare_categories(db) if bool(item.get("isLeaf"))]
+
+    def resolve_weight(item: dict[str, Any]) -> int:
+        slug = str(item.get("slug") or "").strip()
+        name = str(item.get("name") or "").strip()
+        category_id = _normalize_weight_key(str(item.get("id") or ""))
+        candidates = [
+            slug,
+            slug.replace("-", "").replace(" ", ""),
+            name,
+            name.replace("-", "").replace(" ", ""),
+        ]
+        fallback_key = _CLOUDFLARE_WEIGHT_ID_FALLBACKS.get(category_id)
+        if fallback_key:
+            candidates.extend([fallback_key, fallback_key.replace("-", "")])
+        for candidate in candidates:
+            if candidate in README_V3_LEAF_WEIGHTS:
+                return max(int(README_V3_LEAF_WEIGHTS[candidate]), 1)
+        return 1
+
     return [
         PlannerCategoryDefinition(
             key=str(item.get("slug") or "").strip(),
             name=str(item.get("name") or item.get("slug") or "").strip(),
-            weight=max(int(README_V3_LEAF_WEIGHTS.get(str(item.get("slug") or "").strip(), 1)), 1),
+            weight=resolve_weight(item),
             color=CLOUDFLARE_CATEGORY_COLORS[(index - 1) % len(CLOUDFLARE_CATEGORY_COLORS)],
             sort_order=index,
             is_active=True,
@@ -328,10 +505,14 @@ def _resolve_channel_context(
     normalized_channel_id = _normalize_channel_id(channel_id=channel_id, blog_id=blog_id)
     provider, raw_id = _parse_channel_id(normalized_channel_id)
     current_settings = settings_map or get_settings_map(db)
+    rule_map = _load_category_rule_map(current_settings, normalized_channel_id)
 
     if provider == "blogger":
         blog = db.query(Blog).filter(Blog.id == int(raw_id)).one()
-        categories = _build_blogger_categories(db, blog, current_settings)
+        categories = _apply_category_rule_map(
+            categories=_build_blogger_categories(db, blog, current_settings),
+            rule_map=rule_map,
+        )
         _sync_legacy_blogger_themes(db, blog=blog, categories=categories)
         return PlannerChannelContext(
             channel_id=normalized_channel_id,
@@ -345,17 +526,20 @@ def _resolve_channel_context(
         channel = get_managed_channel(db, normalized_channel_id)
         if channel is None:
             raise ValueError("managed channel not found")
-        categories = [
-            PlannerCategoryDefinition(
-                key=item["key"],
-                name=item["name"],
-                weight=max(int(item.get("weight") or 1), 1),
-                color=item.get("color"),
-                sort_order=int(item.get("sort_order") or 0),
-                is_active=bool(item.get("is_active", True)),
-            )
-            for item in list_channel_categories(channel)
-        ]
+        categories = _apply_category_rule_map(
+            categories=[
+                PlannerCategoryDefinition(
+                    key=item["key"],
+                    name=item["name"],
+                    weight=max(int(item.get("weight") or 1), 1),
+                    color=item.get("color"),
+                    sort_order=int(item.get("sort_order") or 0),
+                    is_active=bool(item.get("is_active", True)),
+                )
+                for item in list_channel_categories(channel)
+            ],
+            rule_map=rule_map,
+        )
         return PlannerChannelContext(
             channel_id=normalized_channel_id,
             provider=provider,
@@ -368,7 +552,10 @@ def _resolve_channel_context(
     resolved_id = str(overview.get("channel_id") or "").strip()
     if raw_id != resolved_id:
         raise ValueError("cloudflare channel not found")
-    categories = _build_cloudflare_categories(db)
+    categories = _apply_category_rule_map(
+        categories=_build_cloudflare_categories(db),
+        rule_map=rule_map,
+    )
     return PlannerChannelContext(
         channel_id=normalized_channel_id,
         provider="cloudflare",
@@ -425,13 +612,17 @@ def _serialize_category(category: PlannerCategoryDefinition) -> PlannerCategoryR
         color=category.color,
         sort_order=category.sort_order,
         is_active=category.is_active,
+        planning_mode=category.planning_mode,
+        weekly_target=category.weekly_target,
+        weekdays=list(category.weekdays),
     )
 
 
-def _serialize_slot(slot: ContentPlanSlot) -> PlannerSlotRead:
+def _serialize_slot(slot: ContentPlanSlot, *, settings_map: dict[str, str] | None = None) -> PlannerSlotRead:
     result_payload = slot.result_payload if isinstance(slot.result_payload, dict) else {}
     result_quality = result_payload.get("quality_gate") if isinstance(result_payload.get("quality_gate"), dict) else {}
     result_scores = result_quality.get("scores") if isinstance(result_quality.get("scores"), dict) else {}
+    display_scheduled_for = _planner_display_datetime(slot.scheduled_for, settings_map)
 
     article_publish_status = None
     article_published_url = None
@@ -460,7 +651,7 @@ def _serialize_slot(slot: ContentPlanSlot) -> PlannerSlotRead:
         category_key=_slot_category_key(slot),
         category_name=_slot_category_name(slot),
         category_color=_slot_category_color(slot),
-        scheduled_for=slot.scheduled_for.isoformat() if slot.scheduled_for else None,
+        scheduled_for=display_scheduled_for.isoformat() if display_scheduled_for else None,
         slot_order=slot.slot_order,
         status=_slot_status(slot),
         brief_topic=slot.brief_topic,
@@ -486,7 +677,7 @@ def _serialize_slot(slot: ContentPlanSlot) -> PlannerSlotRead:
     )
 
 
-def _serialize_day(plan_day: ContentPlanDay) -> PlannerDayRead:
+def _serialize_day(plan_day: ContentPlanDay, *, settings_map: dict[str, str] | None = None) -> PlannerDayRead:
     category_counter: dict[str, int] = {}
     for slot in plan_day.slots:
         key = _slot_category_key(slot)
@@ -503,7 +694,7 @@ def _serialize_day(plan_day: ContentPlanDay) -> PlannerDayRead:
         status=plan_day.status,
         slot_count=len(plan_day.slots),
         category_mix=category_counter,
-        slots=[_serialize_slot(slot) for slot in ordered_slots],
+        slots=[_serialize_slot(slot, settings_map=settings_map) for slot in ordered_slots],
     )
 
 
@@ -511,27 +702,35 @@ def _normalize_existing_slots(
     db: Session,
     *,
     context: PlannerChannelContext,
+    settings_map: dict[str, str],
     days: list[ContentPlanDay],
 ) -> bool:
     valid_categories = _category_lookup(context.categories)
-    category_cycle = _weighted_category_cycle(context.categories)
-    if not valid_categories or not category_cycle:
+    if not valid_categories:
         return False
 
     legacy_themes = _sync_legacy_blogger_themes(db, blog=context.blog, categories=context.categories) if context.blog else {}
     changed = False
-    cycle_index = 0
 
     ordered_days = sorted(days, key=lambda item: item.plan_date)
+    assignment_map = _build_category_assignments(
+        day_specs=[
+            (plan_day.plan_date, max(len(plan_day.slots), int(plan_day.target_post_count or 0)))
+            for plan_day in ordered_days
+        ],
+        categories=context.categories,
+    )
     for plan_day in ordered_days:
         ordered_slots = sorted(
             plan_day.slots,
-            key=lambda item: (item.scheduled_for or datetime.max, item.slot_order, item.id),
+            key=lambda item: (item.slot_order, item.id),
         )
-        for slot in ordered_slots:
-            fallback_category = category_cycle[cycle_index % len(category_cycle)]
-            cycle_index += 1
-
+        expected_times = _build_slot_times(plan_day.plan_date, len(ordered_slots), settings_map)
+        expected_categories = assignment_map.get(plan_day.plan_date, [])
+        for slot_index, slot in enumerate(ordered_slots):
+            fallback_category = valid_categories.get(_slot_category_key(slot) or "") or next(iter(valid_categories.values()))
+            if slot_index < len(expected_categories):
+                fallback_category = expected_categories[slot_index]
             current_key = _slot_category_key(slot)
             category = valid_categories.get(current_key or "") or fallback_category
             legacy_theme = legacy_themes.get(category.key)
@@ -546,6 +745,13 @@ def _normalize_existing_slots(
                 _apply_slot_category(slot, category, legacy_theme)
                 if slot.status not in ACTIVE_SLOT_STATUSES:
                     slot.status = _slot_status(slot)
+                changed = True
+
+        for slot, expected_time in zip(ordered_slots, expected_times, strict=False):
+            if slot.status in ACTIVE_SLOT_STATUSES:
+                continue
+            if slot.scheduled_for != expected_time:
+                slot.scheduled_for = expected_time
                 changed = True
 
     if changed:
@@ -568,16 +774,96 @@ def _weighted_category_cycle(categories: Iterable[PlannerCategoryDefinition]) ->
     return expanded or active_categories
 
 
+def _week_bucket_key(day: date) -> tuple[int, int]:
+    iso = day.isocalendar()
+    return iso.year, iso.week
+
+
+def _pick_fill_category(
+    day_assignments: list[PlannerCategoryDefinition],
+    cycle: list[PlannerCategoryDefinition],
+    cycle_index: int,
+) -> tuple[PlannerCategoryDefinition, int]:
+    seen_keys = {item.key for item in day_assignments}
+    limit = len(cycle)
+    for offset in range(limit):
+        candidate = cycle[(cycle_index + offset) % limit]
+        if candidate.key not in seen_keys:
+            return candidate, cycle_index + offset + 1
+    candidate = cycle[cycle_index % limit]
+    return candidate, cycle_index + 1
+
+
+def _build_category_assignments(
+    *,
+    day_specs: list[tuple[date, int]],
+    categories: list[PlannerCategoryDefinition],
+) -> dict[date, list[PlannerCategoryDefinition]]:
+    ordered_specs = sorted(((day, max(0, count)) for day, count in day_specs), key=lambda item: item[0])
+    assignments: dict[date, list[PlannerCategoryDefinition]] = {day: [] for day, _count in ordered_specs}
+    active_categories = [category for category in categories if category.is_active]
+    if not ordered_specs or not active_categories:
+        return assignments
+
+    weekday_categories = [category for category in active_categories if category.planning_mode == "weekdays" and category.weekdays]
+    for category in sorted(weekday_categories, key=lambda item: (item.sort_order, item.name.lower(), item.key)):
+        for day, capacity in ordered_specs:
+            if capacity <= 0 or day.weekday() not in category.weekdays:
+                continue
+            day_assignments = assignments[day]
+            if len(day_assignments) >= capacity or any(item.key == category.key for item in day_assignments):
+                continue
+            day_assignments.append(category)
+
+    weekly_categories = [category for category in active_categories if category.planning_mode == "weekly" and category.weekly_target]
+    week_buckets: dict[tuple[int, int], list[tuple[date, int]]] = {}
+    for day, capacity in ordered_specs:
+        week_buckets.setdefault(_week_bucket_key(day), []).append((day, capacity))
+    for category in sorted(weekly_categories, key=lambda item: (item.sort_order, item.name.lower(), item.key)):
+        for week_key in sorted(week_buckets):
+            remaining = max(1, min(int(category.weekly_target or 0), 7))
+            while remaining > 0:
+                candidates = sorted(
+                    week_buckets[week_key],
+                    key=lambda item: (
+                        len(assignments[item[0]]),
+                        item[0].weekday(),
+                        item[0].toordinal(),
+                    ),
+                )
+                candidate_day = next(
+                    (
+                        day
+                        for day, capacity in candidates
+                        if capacity > len(assignments[day]) and not any(item.key == category.key for item in assignments[day])
+                    ),
+                    None,
+                )
+                if candidate_day is None:
+                    break
+                assignments[candidate_day].append(category)
+                remaining -= 1
+
+    filler_categories = [category for category in active_categories if category.planning_mode == "auto"] or active_categories
+    filler_cycle = _weighted_category_cycle(filler_categories)
+    if not filler_cycle:
+        return assignments
+
+    cycle_index = 0
+    for day, capacity in ordered_specs:
+        while len(assignments[day]) < capacity:
+            category, cycle_index = _pick_fill_category(assignments[day], filler_cycle, cycle_index)
+            assignments[day].append(category)
+    return assignments
+
+
 def _build_slot_times(day: date, count: int, settings_map: dict[str, str]) -> list[datetime]:
-    start_clock = _parse_clock(settings_map.get("planner_day_start_time"), time(9, 0))
-    end_clock = _parse_clock(settings_map.get("planner_day_end_time"), time(21, 0))
-    start_dt = datetime.combine(day, start_clock)
-    end_dt = datetime.combine(day, end_clock)
-    if count <= 1 or end_dt <= start_dt:
+    start_clock = _parse_clock(settings_map.get("planner_publish_start_time"), time(11, 0))
+    interval_minutes = _parse_positive_int(settings_map.get("planner_slot_interval_minutes"), 5)
+    start_dt = _to_planner_storage_datetime(datetime.combine(day, start_clock), settings_map)
+    if count <= 1:
         return [start_dt]
-    total_seconds = int((end_dt - start_dt).total_seconds())
-    interval = max(total_seconds // max(count - 1, 1), 1)
-    return [start_dt + timedelta(seconds=interval * index) for index in range(count)]
+    return [start_dt + timedelta(minutes=interval_minutes * index) for index in range(count)]
 
 
 def _resequence_slots(plan_day: ContentPlanDay, *, sort_by_time: bool = False) -> None:
@@ -627,12 +913,11 @@ def _ensure_day(
     return plan_day
 
 
-def _datetime_to_iso(value: datetime | None) -> str | None:
-    if value is None:
+def _datetime_to_iso(value: datetime | None, settings_map: dict[str, str] | None = None) -> str | None:
+    display_value = _planner_display_datetime(value, settings_map)
+    if display_value is None:
         return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC).isoformat()
-    return value.astimezone(UTC).isoformat()
+    return display_value.isoformat()
 
 
 def _enforce_multilingual_blogger_setup(db: Session, blog: Blog) -> tuple[Blog, str | None]:
@@ -689,10 +974,7 @@ def _build_planner_brief_payload(
     language: str | None,
 ) -> dict[str, Any]:
     parsed_context = parse_planner_bundle_context(slot.brief_extra_context)
-    offset_minutes = bundle_publish_offset_minutes(language)
-    recommended_publish_at = None
-    if slot.scheduled_for is not None:
-        recommended_publish_at = _datetime_to_iso(slot.scheduled_for + timedelta(minutes=offset_minutes))
+    recommended_publish_at = _datetime_to_iso(slot.scheduled_for) if slot.scheduled_for is not None else None
 
     return {
         "topic": slot.brief_topic or "",
@@ -707,7 +989,7 @@ def _build_planner_brief_payload(
         "prohibited_claims": parsed_context.prohibited_claims,
         "context_notes": parsed_context.notes,
         "language": language or "",
-        "publish_offset_minutes": offset_minutes,
+        "publish_offset_minutes": 0,
         "recommended_publish_at": recommended_publish_at,
     }
 
@@ -749,7 +1031,7 @@ def _planner_manual_topic_payload(slot: ContentPlanSlot) -> dict[str, list[dict[
                 "information_level": slot.brief_information_level or "",
                 "extra_context": slot.brief_extra_context or "",
                 "category_name": _slot_category_name(slot) or category_key,
-                "scheduled_for": slot.scheduled_for.isoformat() if slot.scheduled_for else "",
+                "scheduled_for": _datetime_to_iso(slot.scheduled_for) or "",
                 "bundle_key": parsed_context.bundle_key,
                 "facts": parsed_context.facts,
                 "prohibited_claims": parsed_context.prohibited_claims,
@@ -888,6 +1170,7 @@ def _build_day_analysis_context(
     *,
     plan_day: ContentPlanDay,
     context: PlannerChannelContext,
+    settings_map: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     slots = sorted(plan_day.slots, key=lambda item: (item.slot_order, item.id))
     month = plan_day.plan_date.strftime("%Y-%m")
@@ -904,7 +1187,7 @@ def _build_day_analysis_context(
         {
             "slot_id": slot.id,
             "slot_order": slot.slot_order,
-            "scheduled_for": slot.scheduled_for.isoformat() if slot.scheduled_for else None,
+            "scheduled_for": _datetime_to_iso(slot.scheduled_for, settings_map),
             "category_key": _slot_category_key(slot),
             "category_name": _slot_category_name(slot),
             "brief_topic": slot.brief_topic,
@@ -926,6 +1209,19 @@ def _build_day_analysis_context(
     if context.blog is not None:
         monthly_signals = _load_monthly_signal_payload(db, blog=context.blog, month=month)
 
+    topic_discovery_step: dict[str, Any] | None = None
+    if context.blog is not None:
+        step = get_workflow_step(context.blog, WorkflowStageType.TOPIC_DISCOVERY)
+        if step is not None:
+            topic_discovery_step = {
+                "enabled": bool(step.is_enabled),
+                "name": str(step.name or "").strip(),
+                "role_name": str(step.role_name or "").strip(),
+                "objective": str(step.objective or "").strip(),
+                "provider_model": str(step.provider_model or "").strip() or None,
+                "prompt_template": str(step.prompt_template or "").strip(),
+            }
+
     return {
         "channel": {
             "channel_id": context.channel_id,
@@ -940,6 +1236,9 @@ def _build_day_analysis_context(
             "date": plan_day.plan_date.isoformat(),
             "target_post_count": plan_day.target_post_count,
             "status": plan_day.status,
+        },
+        "workflow": {
+            "topic_discovery": topic_discovery_step,
         },
         "slots": slot_payload,
         "category_weights": category_weights,
@@ -965,6 +1264,29 @@ def _build_day_analysis_prompt(*, analysis_context: dict[str, Any], prompt_overr
         analysis_context_json=json.dumps(analysis_context, ensure_ascii=False, indent=2),
         user_prompt_override=(prompt_override or "").strip() or "(none)",
     )
+
+
+def _merge_prompt_override(prompt_override: str | None, extra_instruction: str) -> str:
+    base = str(prompt_override or "").strip()
+    if extra_instruction in base:
+        return base
+    if base:
+        return f"{base}\n\n{extra_instruction}"
+    return extra_instruction
+
+
+def _has_sufficient_korean_management_text(slot_suggestions: list[dict[str, Any]]) -> bool:
+    combined = " ".join(
+        str(item.get(field) or "").strip()
+        for item in slot_suggestions
+        for field in KOREAN_BRIEF_FIELDS
+    )
+    meaningful = [ch for ch in combined if ch.isalnum() or ("\uac00" <= ch <= "\ud7a3")]
+    if not meaningful:
+        return False
+    hangul_count = sum(1 for ch in meaningful if "\uac00" <= ch <= "\ud7a3")
+    latin_count = sum(1 for ch in meaningful if ("a" <= ch.lower() <= "z"))
+    return hangul_count >= 12 and hangul_count >= max(6, latin_count)
 
 
 def _run_daily_analysis_with_openai(
@@ -1159,7 +1481,12 @@ def analyze_day_briefs(
         blog_id=plan_day.blog_id,
         settings_map=settings_map,
     )
-    analysis_context = _build_day_analysis_context(db, plan_day=plan_day, context=context)
+    analysis_context = _build_day_analysis_context(
+        db,
+        plan_day=plan_day,
+        context=context,
+        settings_map=settings_map,
+    )
     prompt = _build_day_analysis_prompt(analysis_context=analysis_context, prompt_override=prompt_override)
 
     run = PlannerBriefRun(
@@ -1180,14 +1507,47 @@ def analyze_day_briefs(
     db.refresh(run)
 
     try:
-        parsed_payload, raw_response, resolved_model = _run_daily_analysis_with_openai(
-            db,
-            prompt=prompt,
-            requested_model=settings_map.get("openai_text_model"),
-        )
-        slot_suggestions = _normalize_analysis_suggestions(parsed_payload, slots=ordered_slots)
-        run.model = resolved_model
-        run.raw_response = raw_response
+        requested_model = settings_map.get("planner_brief_model") or FREE_TIER_DEFAULT_SMALL_TEXT_MODEL
+        attempt_log: list[dict[str, Any]] = []
+        latest_prompt = prompt
+        latest_model: str | None = None
+        slot_suggestions: list[dict[str, Any]] = []
+
+        attempt_override = prompt_override
+        for attempt_index in range(2):
+            latest_prompt = _build_day_analysis_prompt(
+                analysis_context=analysis_context,
+                prompt_override=attempt_override,
+            )
+            parsed_payload, raw_response, resolved_model = _run_daily_analysis_with_openai(
+                db,
+                prompt=latest_prompt,
+                requested_model=requested_model,
+            )
+            latest_model = resolved_model
+            slot_suggestions = _normalize_analysis_suggestions(parsed_payload, slots=ordered_slots)
+            attempt_log.append(
+                {
+                    "attempt": attempt_index + 1,
+                    "retry_reason": "non_korean_output" if attempt_index == 1 else None,
+                    "model": resolved_model,
+                    "raw_response": raw_response,
+                }
+            )
+            if _has_sufficient_korean_management_text(slot_suggestions):
+                break
+            if attempt_index == 0:
+                attempt_override = _merge_prompt_override(
+                    prompt_override,
+                    KOREAN_MANAGEMENT_OUTPUT_INSTRUCTION,
+                )
+
+        run.prompt = latest_prompt
+        run.model = latest_model
+        run.raw_response = {
+            "attempts": attempt_log,
+            "retried_for_korean_output": len(attempt_log) > 1,
+        }
         run.slot_suggestions = slot_suggestions
         run.status = "completed"
         run.error_message = None
@@ -1365,7 +1725,7 @@ def get_calendar(db: Session, channel_id: str | None, month: str, blog_id: int |
         )
 
     days = load_days()
-    if _normalize_existing_slots(db, context=context, days=days):
+    if _normalize_existing_slots(db, context=context, settings_map=settings_map, days=days):
         days = load_days()
     return PlannerCalendarRead(
         channel_id=context.channel_id,
@@ -1374,13 +1734,60 @@ def get_calendar(db: Session, channel_id: str | None, month: str, blog_id: int |
         blog_id=context.blog_id,
         month=month,
         categories=[_serialize_category(category) for category in context.categories],
-        days=[_serialize_day(day) for day in days],
+        days=[_serialize_day(day, settings_map=settings_map) for day in days],
     )
 
 
 def list_categories(db: Session, channel_id: str | None, blog_id: int | None = None) -> list[PlannerCategoryRead]:
     context = _resolve_channel_context(db, channel_id=channel_id, blog_id=blog_id)
     return [_serialize_category(category) for category in context.categories]
+
+
+def update_category_rules(
+    db: Session,
+    *,
+    channel_id: str | None,
+    blog_id: int | None = None,
+    rules: list[dict[str, Any]],
+) -> list[PlannerCategoryRead]:
+    settings_map = get_settings_map(db)
+    context = _resolve_channel_context(db, channel_id=channel_id, blog_id=blog_id, settings_map=settings_map)
+    category_map = _category_lookup(context.categories)
+    stored_rule_map = _load_category_rule_map(settings_map, context.channel_id)
+
+    for raw_rule in rules:
+        category_key = str(raw_rule.get("category_key") or "").strip()
+        if not category_key or category_key not in category_map:
+            raise ValueError(f"planner category rule target is invalid: {category_key or '(blank)'}")
+        stored_rule_map[category_key] = _normalize_category_rule_payload(raw_rule)
+
+    serialized_payload = {
+        key: {
+            "planning_mode": str(rule.get("planning_mode") or "auto"),
+            "weekly_target": rule.get("weekly_target"),
+            "weekdays": list(rule.get("weekdays") or ()),
+        }
+        for key, rule in stored_rule_map.items()
+        if str(rule.get("planning_mode") or "auto") != "auto"
+    }
+    upsert_settings(
+        db,
+        {
+            _planner_category_rules_setting_key(context.channel_id): json.dumps(
+                serialized_payload,
+                ensure_ascii=False,
+            )
+        },
+    )
+
+    refreshed_settings = get_settings_map(db)
+    refreshed_context = _resolve_channel_context(
+        db,
+        channel_id=context.channel_id,
+        settings_map=refreshed_settings,
+    )
+    return [_serialize_category(category) for category in refreshed_context.categories]
+
 
 def create_month_plan(
     db: Session,
@@ -1408,11 +1815,19 @@ def create_month_plan(
             db.delete(day)
         db.flush()
 
-    category_cycle = _weighted_category_cycle(context.categories)
-    if not category_cycle:
+    assignment_map = _build_category_assignments(
+        day_specs=[
+            (day_cursor, daily_target)
+            for day_cursor in (
+                start_date + timedelta(days=offset)
+                for offset in range((end_date - start_date).days + 1)
+            )
+        ],
+        categories=context.categories,
+    )
+    if not assignment_map:
         raise ValueError("at least one active category is required")
 
-    cycle_index = 0
     day_cursor = start_date
     while day_cursor <= end_date:
         plan_day = _ensure_day(db, context=context, plan_date=day_cursor, target_post_count=daily_target)
@@ -1422,9 +1837,9 @@ def create_month_plan(
                     db.delete(slot)
                 db.flush()
             times = _build_slot_times(day_cursor, daily_target, settings_map)
+            day_categories = assignment_map.get(day_cursor, [])
             for day_slot_order, slot_time in enumerate(times, start=1):
-                category = category_cycle[cycle_index % len(category_cycle)]
-                cycle_index += 1
+                category = day_categories[day_slot_order - 1]
                 slot = ContentPlanSlot(
                     plan_day_id=plan_day.id,
                     scheduled_for=slot_time,
@@ -1441,16 +1856,7 @@ def create_month_plan(
 
 
 def _apply_multilingual_schedule_default(slot: ContentPlanSlot, blog: Blog | None) -> None:
-    if blog is None or slot.scheduled_for is None:
-        return
-    parsed_context = parse_planner_bundle_context(slot.brief_extra_context)
-    if not parsed_context.bundle_key:
-        return
-    language = resolve_blog_bundle_language(blog)
-    if not language:
-        return
-    base_time = slot.scheduled_for.replace(minute=0, second=0, microsecond=0)
-    slot.scheduled_for = base_time + timedelta(minutes=bundle_publish_offset_minutes(language))
+    return
 
 
 def create_slot(db: Session, payload: PlannerSlotCreate) -> PlannerSlotRead:
@@ -1460,12 +1866,13 @@ def create_slot(db: Session, payload: PlannerSlotCreate) -> PlannerSlotRead:
         .filter(ContentPlanDay.id == payload.plan_day_id)
         .one()
     )
+    settings_map = get_settings_map(db)
     context = _resolve_channel_context(db, channel_id=plan_day.channel_id, blog_id=plan_day.blog_id)
     category = _select_category(context, payload.category_key)
     legacy_themes = _sync_legacy_blogger_themes(db, blog=context.blog, categories=context.categories) if context.blog else {}
     slot = ContentPlanSlot(
         plan_day_id=payload.plan_day_id,
-        scheduled_for=datetime.fromisoformat(payload.scheduled_for),
+        scheduled_for=_to_planner_storage_datetime(datetime.fromisoformat(payload.scheduled_for), settings_map),
         slot_order=len(plan_day.slots) + 1,
         brief_topic=payload.brief_topic,
         brief_audience=payload.brief_audience,
@@ -1482,7 +1889,7 @@ def create_slot(db: Session, payload: PlannerSlotCreate) -> PlannerSlotRead:
     _resequence_slots(plan_day, sort_by_time=True)
     db.commit()
     db.refresh(slot)
-    return _serialize_slot(slot)
+    return _serialize_slot(slot, settings_map=settings_map)
 
 
 def update_slot(db: Session, slot_id: int, payload: PlannerSlotUpdate) -> PlannerSlotRead:
@@ -1500,6 +1907,7 @@ def update_slot(db: Session, slot_id: int, payload: PlannerSlotUpdate) -> Planne
     updates = payload.model_dump(exclude_unset=True) if hasattr(payload, "model_dump") else payload.dict(exclude_unset=True)
     explicit_status = updates.pop("status", None)
     sort_by_time = False
+    settings_map = get_settings_map(db)
 
     context = _resolve_channel_context(db, channel_id=slot.plan_day.channel_id, blog_id=slot.plan_day.blog_id)
     legacy_themes = _sync_legacy_blogger_themes(db, blog=context.blog, categories=context.categories) if context.blog else {}
@@ -1509,7 +1917,7 @@ def update_slot(db: Session, slot_id: int, payload: PlannerSlotUpdate) -> Planne
         _apply_slot_category(slot, category, legacy_themes.get(category.key))
 
     if "scheduled_for" in updates and updates["scheduled_for"] is not None:
-        slot.scheduled_for = datetime.fromisoformat(str(updates.pop("scheduled_for")))
+        slot.scheduled_for = _to_planner_storage_datetime(datetime.fromisoformat(str(updates.pop("scheduled_for"))), settings_map)
         sort_by_time = True
 
     for key, value in updates.items():
@@ -1520,7 +1928,7 @@ def update_slot(db: Session, slot_id: int, payload: PlannerSlotUpdate) -> Planne
     _resequence_slots(slot.plan_day, sort_by_time=sort_by_time)
     db.commit()
     db.refresh(slot)
-    return _serialize_slot(slot)
+    return _serialize_slot(slot, settings_map=settings_map)
 
 
 def cancel_slot(db: Session, slot_id: int) -> PlannerSlotRead:
@@ -1536,9 +1944,10 @@ def cancel_slot(db: Session, slot_id: int) -> PlannerSlotRead:
     )
     slot.status = "canceled"
     slot.error_message = None
+    settings_map = get_settings_map(db)
     db.commit()
     db.refresh(slot)
-    return _serialize_slot(slot)
+    return _serialize_slot(slot, settings_map=settings_map)
 
 
 def _ensure_slot_ready(slot: ContentPlanSlot) -> None:

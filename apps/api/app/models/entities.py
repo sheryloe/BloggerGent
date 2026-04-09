@@ -507,6 +507,37 @@ class SyncedCloudflarePost(TimestampMixin, Base):
     managed_channel: Mapped["ManagedChannel"] = relationship(back_populates="synced_cloudflare_posts")
 
 
+class R2AssetRelayoutMapping(TimestampMixin, Base):
+    __tablename__ = "r2_asset_relayout_mappings"
+    __table_args__ = (
+        sa.UniqueConstraint(
+            "source_type",
+            "source_post_id",
+            "legacy_key",
+            "migrated_key",
+            name="uq_r2_asset_relayout_source_post_legacy_migrated",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    source_type: Mapped[str] = mapped_column(sa.String(20), nullable=False, index=True)
+    source_blog_id: Mapped[int | None] = mapped_column(sa.ForeignKey("blogs.id", ondelete="SET NULL"), nullable=True, index=True)
+    source_post_id: Mapped[str] = mapped_column(sa.String(255), nullable=False, index=True)
+    source_post_url: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    legacy_url: Mapped[str | None] = mapped_column(sa.String(1500), nullable=True)
+    legacy_key: Mapped[str | None] = mapped_column(sa.String(1024), nullable=True, index=True)
+    migrated_url: Mapped[str | None] = mapped_column(sa.String(1500), nullable=True)
+    migrated_key: Mapped[str | None] = mapped_column(sa.String(1024), nullable=True, index=True)
+    blog_group: Mapped[str | None] = mapped_column(sa.String(80), nullable=True, index=True)
+    category_key: Mapped[str | None] = mapped_column(sa.String(80), nullable=True, index=True)
+    asset_role: Mapped[str | None] = mapped_column(sa.String(80), nullable=True)
+    status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="mapped", index=True)
+    notes: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    cleaned_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
+
+    source_blog: Mapped[Blog | None] = relationship(foreign_keys=[source_blog_id])
+
+
 class GoogleIndexUrlState(TimestampMixin, Base):
     __tablename__ = "google_index_url_states"
     __table_args__ = (sa.UniqueConstraint("blog_id", "url", name="uq_google_index_url_states_blog_url"),)
