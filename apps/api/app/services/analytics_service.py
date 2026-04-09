@@ -5,7 +5,7 @@ from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta, timezone
 from statistics import mean
 
-from sqlalchemy import and_, case, delete, func, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.entities import (
@@ -102,6 +102,59 @@ def _fact_url_key(*, blog_id: int, url: str | None) -> tuple[int, str] | None:
     return (blog_id, normalized)
 
 
+def _normalize_fact_status(value: str | None) -> str | None:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return None
+    if normalized in {"live", "published"}:
+        return "published"
+    return normalized
+
+
+def _status_filter_values(status: str | None) -> list[str]:
+    normalized = _normalize_fact_status(status)
+    if not normalized:
+        return []
+    if normalized == "published":
+        return ["published", "live"]
+    return [normalized]
+
+
+def _normalize_fact_url_for_dedupe(url: str | None) -> str | None:
+    normalized = str(url or "").strip()
+    if not normalized:
+        return None
+    trimmed = normalized[:-1] if normalized.endswith("/") else normalized
+    return trimmed or normalized
+
+
+def _fact_dedupe_key(fact: AnalyticsArticleFact) -> tuple[int, str]:
+    normalized_url = _normalize_fact_url_for_dedupe(fact.actual_url)
+    if normalized_url:
+        return (fact.blog_id, f"url:{normalized_url}")
+    return (fact.blog_id, f"id:{fact.id}")
+
+
+def _dedupe_fact_rows(facts: list[AnalyticsArticleFact]) -> list[AnalyticsArticleFact]:
+    seen: set[tuple[int, str]] = set()
+    deduped: list[AnalyticsArticleFact] = []
+    for fact in facts:
+        key = _fact_dedupe_key(fact)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(fact)
+    return deduped
+
+
+def _ensure_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _serialize_fact(
     fact: AnalyticsArticleFact,
     *,
@@ -120,9 +173,10 @@ def _serialize_fact(
         category=fact.category,
         seo_score=fact.seo_score,
         geo_score=fact.geo_score,
+        lighthouse_score=fact.lighthouse_score,
         similarity_score=fact.similarity_score,
         most_similar_url=fact.most_similar_url,
-        status=fact.status,
+        status=_normalize_fact_status(fact.status) or fact.status,
         actual_url=fact.actual_url,
         source_type=fact.source_type,
         ctr=ctr_value,
@@ -166,6 +220,7 @@ def _serialize_report(db: Session, blog: Blog, month: str, report: AnalyticsBlog
         .where(AnalyticsArticleFact.blog_id == blog.id, AnalyticsArticleFact.month == month)
         .order_by(AnalyticsArticleFact.published_at.desc(), AnalyticsArticleFact.id.desc())
     ).scalars().all()
+    facts = _dedupe_fact_rows(facts)
     pairs = {
         key
         for key in (_fact_url_key(blog_id=fact.blog_id, url=fact.actual_url) for fact in facts)
@@ -230,9 +285,15 @@ def _apply_article_fact_payload(fact: AnalyticsArticleFact, article: Article, mo
     fact.category = article.editorial_category_label or "Unassigned"
     fact.seo_score = _coerce_score(article.quality_seo_score)
     fact.geo_score = _coerce_score(article.quality_geo_score)
+    fact.lighthouse_score = _coerce_score(article.quality_lighthouse_score)
     fact.similarity_score = _coerce_score(article.quality_similarity_score)
     fact.most_similar_url = article.quality_most_similar_url
-    fact.status = getattr(getattr(article, "blogger_post", None), "post_status", None).value if getattr(article, "blogger_post", None) and getattr(article.blogger_post, "post_status", None) else "draft"
+    raw_status = (
+        getattr(getattr(article, "blogger_post", None), "post_status", None).value
+        if getattr(article, "blogger_post", None) and getattr(article.blogger_post, "post_status", None)
+        else "draft"
+    )
+    fact.status = _normalize_fact_status(raw_status) or str(raw_status or "").strip().lower() or "draft"
     fact.actual_url = getattr(getattr(article, "blogger_post", None), "published_url", None)
     fact.source_type = "generated"
 
@@ -250,9 +311,10 @@ def _apply_synced_fact_payload(fact: AnalyticsArticleFact, post: SyncedBloggerPo
     fact.category = theme_name
     fact.seo_score = None
     fact.geo_score = None
+    fact.lighthouse_score = None
     fact.similarity_score = None
     fact.most_similar_url = None
-    fact.status = post.status
+    fact.status = _normalize_fact_status(post.status) or str(post.status or "").strip().lower() or None
     fact.actual_url = post.url
     fact.source_type = "synced"
 
@@ -264,6 +326,7 @@ def rebuild_blog_month_rollup(db: Session, blog_id: int, month: str, *, commit: 
         .where(AnalyticsArticleFact.blog_id == blog_id, AnalyticsArticleFact.month == month)
         .order_by(AnalyticsArticleFact.published_at.desc(), AnalyticsArticleFact.id.desc())
     ).scalars().all()
+    facts = _dedupe_fact_rows(facts)
     themes = db.execute(select(BlogTheme).where(BlogTheme.blog_id == blog_id).order_by(BlogTheme.sort_order.asc())).scalars().all()
     theme_names = {theme.key: theme.name for theme in themes}
     base_weights = {theme.key: theme.weight for theme in themes}
@@ -527,6 +590,7 @@ def _build_fact_order(sort: str, dir: str):
         "published_at": AnalyticsArticleFact.published_at,
         "seo": AnalyticsArticleFact.seo_score,
         "geo": AnalyticsArticleFact.geo_score,
+        "lighthouse": AnalyticsArticleFact.lighthouse_score,
         "similarity": AnalyticsArticleFact.similarity_score,
         "title": AnalyticsArticleFact.title,
     }
@@ -563,19 +627,14 @@ def get_blog_monthly_articles(
         category=category,
         status=status,
     )
-    total = int(
-        db.execute(
-            select(func.count()).select_from(base_query.order_by(None).subquery())
-        ).scalar_one()
-        or 0
-    )
     ordered_field, dir_name = _build_fact_order(sort, dir)
     offset = max(page - 1, 0) * max(page_size, 1)
-    items = db.execute(
+    ordered_items = db.execute(
         base_query.order_by(ordered_field, AnalyticsArticleFact.id.asc() if dir_name == "asc" else AnalyticsArticleFact.id.desc())
-        .offset(offset)
-        .limit(page_size)
     ).scalars().all()
+    deduped_items = _dedupe_fact_rows(ordered_items)
+    total = len(deduped_items)
+    items = deduped_items[offset : offset + page_size]
     pairs = {
         key
         for key in (_fact_url_key(blog_id=item.blog_id, url=item.actual_url) for item in items)
@@ -613,38 +672,63 @@ def get_blog_daily_summary(
     category: str | None = None,
     status: str | None = None,
 ) -> AnalyticsDailySummaryListResponse:
-    query = _apply_fact_filters(
-        select(
-            func.date(AnalyticsArticleFact.published_at).label("date_key"),
-            func.count(AnalyticsArticleFact.id).label("total_posts"),
-            func.sum(case((AnalyticsArticleFact.source_type == "generated", 1), else_=0)).label("generated_posts"),
-            func.sum(case((AnalyticsArticleFact.source_type == "synced", 1), else_=0)).label("synced_posts"),
-            func.avg(AnalyticsArticleFact.seo_score).label("avg_seo"),
-            func.avg(AnalyticsArticleFact.geo_score).label("avg_geo"),
-        ).where(
-            AnalyticsArticleFact.blog_id == blog_id,
-            AnalyticsArticleFact.month == month,
-        ),
-        source_type=source_type,
-        theme_key=theme_key,
-        category=category,
-        status=status,
-    ).group_by(func.date(AnalyticsArticleFact.published_at)).order_by(func.date(AnalyticsArticleFact.published_at).asc())
+    facts = db.execute(
+        _apply_fact_filters(
+            select(AnalyticsArticleFact).where(
+                AnalyticsArticleFact.blog_id == blog_id,
+                AnalyticsArticleFact.month == month,
+            ),
+            source_type=source_type,
+            theme_key=theme_key,
+            category=category,
+            status=status,
+        ).order_by(AnalyticsArticleFact.published_at.desc(), AnalyticsArticleFact.id.desc())
+    ).scalars().all()
+    facts = _dedupe_fact_rows(facts)
 
-    rows = db.execute(query).all()
-    items: list[AnalyticsDailySummaryRead] = []
-    for row in rows:
-        date_key = str(row.date_key)
-        if not date_key or date_key == "None":
+    daily_map: dict[str, dict[str, object]] = {}
+    for fact in facts:
+        published_at = _ensure_utc(fact.published_at)
+        if published_at is None:
             continue
+        date_key = published_at.date().isoformat()
+        bucket = daily_map.setdefault(
+            date_key,
+            {
+                "total_posts": 0,
+                "generated_posts": 0,
+                "synced_posts": 0,
+                "seo_scores": [],
+                "geo_scores": [],
+            },
+        )
+        bucket["total_posts"] = int(bucket["total_posts"] or 0) + 1
+        if fact.source_type == "generated":
+            bucket["generated_posts"] = int(bucket["generated_posts"] or 0) + 1
+        elif fact.source_type == "synced":
+            bucket["synced_posts"] = int(bucket["synced_posts"] or 0) + 1
+        if fact.seo_score is not None:
+            seo_scores = bucket.get("seo_scores")
+            if isinstance(seo_scores, list):
+                seo_scores.append(fact.seo_score)
+        if fact.geo_score is not None:
+            geo_scores = bucket.get("geo_scores")
+            if isinstance(geo_scores, list):
+                geo_scores.append(fact.geo_score)
+
+    items: list[AnalyticsDailySummaryRead] = []
+    for date_key in sorted(daily_map.keys()):
+        row = daily_map[date_key]
+        seo_scores = row.get("seo_scores") if isinstance(row, dict) else []
+        geo_scores = row.get("geo_scores") if isinstance(row, dict) else []
         items.append(
             AnalyticsDailySummaryRead(
                 date=date_key,
-                total_posts=int(row.total_posts or 0),
-                generated_posts=int(row.generated_posts or 0),
-                synced_posts=int(row.synced_posts or 0),
-                avg_seo=round(float(row.avg_seo), 2) if row.avg_seo is not None else None,
-                avg_geo=round(float(row.avg_geo), 2) if row.avg_geo is not None else None,
+                total_posts=int(row.get("total_posts") or 0) if isinstance(row, dict) else 0,
+                generated_posts=int(row.get("generated_posts") or 0) if isinstance(row, dict) else 0,
+                synced_posts=int(row.get("synced_posts") or 0) if isinstance(row, dict) else 0,
+                avg_seo=_safe_mean(seo_scores if isinstance(seo_scores, list) else []),
+                avg_geo=_safe_mean(geo_scores if isinstance(geo_scores, list) else []),
             )
         )
 
@@ -713,7 +797,9 @@ def _apply_fact_filters(
     if category:
         query = query.where(AnalyticsArticleFact.category == category)
     if status:
-        query = query.where(AnalyticsArticleFact.status == status)
+        status_values = _status_filter_values(status)
+        if status_values:
+            query = query.where(func.lower(func.coalesce(AnalyticsArticleFact.status, "")).in_(status_values))
     return query
 
 
@@ -732,38 +818,23 @@ def get_integrated_dashboard(
     start_dt, end_dt = _range_window(range_name, month)
     base_window = and_(AnalyticsArticleFact.published_at >= start_dt, AnalyticsArticleFact.published_at <= end_dt)
 
-    kpi_row = db.execute(
+    facts = db.execute(
         _apply_fact_filters(
-            select(
-                func.count(AnalyticsArticleFact.id).label("total_posts"),
-                func.avg(AnalyticsArticleFact.seo_score).label("avg_seo"),
-                func.avg(AnalyticsArticleFact.geo_score).label("avg_geo"),
-                func.avg(AnalyticsArticleFact.similarity_score).label("avg_similarity"),
-            ).where(base_window),
+            select(AnalyticsArticleFact).where(base_window),
             blog_id=blog_id,
             source_type=source_type,
             theme_key=theme_key,
             category=category,
             status=status,
-        )
-    ).one()
+        ).order_by(AnalyticsArticleFact.published_at.desc(), AnalyticsArticleFact.id.desc())
+    ).scalars().all()
+    facts = _dedupe_fact_rows(facts)
     recent_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
-    recent_upload_count = int(
-        db.execute(
-            _apply_fact_filters(
-                select(func.count(AnalyticsArticleFact.id)).where(
-                    base_window,
-                    AnalyticsArticleFact.published_at >= recent_cutoff,
-                ),
-                blog_id=blog_id,
-                source_type=source_type,
-                theme_key=theme_key,
-                category=category,
-                status=status,
-            )
-        ).scalar_one()
-        or 0
-    )
+    recent_upload_count = 0
+    for fact in facts:
+        published_at = _ensure_utc(fact.published_at)
+        if published_at is not None and published_at >= recent_cutoff:
+            recent_upload_count += 1
 
     summaries = get_monthly_blog_summaries(db, month).items
     selected_blog_id = blog_id or (summaries[0].blog_id if summaries else None)
@@ -776,43 +847,23 @@ def get_integrated_dashboard(
     underused = max(stats, key=lambda item: item.coverage_gap_score, default=None)
     overused = min(stats, key=lambda item: item.coverage_gap_score, default=None)
     kpis = AnalyticsIntegratedKpiRead(
-        total_posts=int(kpi_row.total_posts or 0),
-        avg_seo_score=round(float(kpi_row.avg_seo), 2) if kpi_row.avg_seo is not None else None,
-        avg_geo_score=round(float(kpi_row.avg_geo), 2) if kpi_row.avg_geo is not None else None,
-        avg_similarity_score=round(float(kpi_row.avg_similarity), 2) if kpi_row.avg_similarity is not None else None,
+        total_posts=len(facts),
+        avg_seo_score=_safe_mean([fact.seo_score for fact in facts]),
+        avg_geo_score=_safe_mean([fact.geo_score for fact in facts]),
+        avg_similarity_score=_safe_mean([fact.similarity_score for fact in facts]),
         most_underused_theme_name=underused.theme_name if underused else None,
         most_overused_theme_name=overused.theme_name if overused else None,
         recent_upload_count=recent_upload_count,
     )
-    theme_rows = db.execute(
-        _apply_fact_filters(
-            select(
-                AnalyticsArticleFact.theme_key,
-                func.max(AnalyticsArticleFact.theme_name).label("theme_name"),
-            )
-            .where(base_window)
-            .where(AnalyticsArticleFact.theme_key.isnot(None)),
-            blog_id=blog_id,
-            source_type=source_type,
-            category=category,
-            status=status,
-        ).group_by(AnalyticsArticleFact.theme_key)
-    ).all()
-    available_theme_map: dict[str, str] = {str(row.theme_key): str(row.theme_name or row.theme_key) for row in theme_rows if row.theme_key}
+    available_theme_map: dict[str, str] = {}
+    for fact in facts:
+        if not fact.theme_key:
+            continue
+        key = str(fact.theme_key)
+        available_theme_map.setdefault(key, str(fact.theme_name or fact.theme_key))
     if theme_key and theme_key not in available_theme_map:
         available_theme_map[theme_key] = theme_key
-    category_rows = db.execute(
-        _apply_fact_filters(
-            select(func.distinct(AnalyticsArticleFact.category).label("category_value"))
-            .where(base_window)
-            .where(AnalyticsArticleFact.category.isnot(None)),
-            blog_id=blog_id,
-            source_type=source_type,
-            theme_key=theme_key,
-            status=status,
-        )
-    ).all()
-    available_categories = sorted(str(row.category_value) for row in category_rows if row.category_value)
+    available_categories = sorted({str(fact.category) for fact in facts if fact.category})
     if category and category not in available_categories:
         available_categories.append(category)
         available_categories.sort()

@@ -9,13 +9,13 @@ import type { AnalyticsArticleFactRead, AnalyticsDailySummaryRead, Blog, Managed
 
 import { AnalyticsPlatformTabs } from "./analytics-platform-tabs";
 
-type BloggerSortKey = "publishedAt" | "title" | "status" | "seo" | "geo" | "ctr" | "dbs";
+type BloggerSortKey = "publishedAt" | "title" | "status" | "seo" | "geo" | "ctr" | "lighthouse";
 type SortDir = "asc" | "desc";
-type LowFilter = "none" | "any70" | "dbs70";
+type LowFilter = "none" | "any70" | "lighthouse70";
 type ViewMode = "list" | "calendar";
 
 type BloggerRow = AnalyticsArticleFactRead & {
-  dbsScore: number;
+  lighthouseScore: number | null;
   lowFlag: boolean;
   blogName: string;
 };
@@ -30,12 +30,11 @@ function scoreOrZero(value: number | null) {
   return Number.isFinite(value as number) ? Number(value) : 0;
 }
 
-function computeDbs(row: AnalyticsArticleFactRead) {
-  const seo = scoreOrZero(row.seoScore);
-  const geo = scoreOrZero(row.geoScore);
-  const ctr = scoreOrZero(row.ctr);
-  const raw = seo * 0.4 + geo * 0.35 + ctr * 0.25;
-  return clamp(Math.round(raw * 10) / 10, 0, 100);
+function resolveLighthouseScore(row: AnalyticsArticleFactRead) {
+  if (typeof row.lighthouseScore === "number" && Number.isFinite(row.lighthouseScore)) {
+    return clamp(Math.round(row.lighthouseScore * 10) / 10, 0, 100);
+  }
+  return null;
 }
 
 function isAnyLow(row: AnalyticsArticleFactRead) {
@@ -107,7 +106,8 @@ function lowToneClass(value: number) {
   return "bg-rose-100 text-rose-700";
 }
 
-function mapApiSort(sort: BloggerSortKey): "published_at" | "seo" | "geo" | "similarity" | "title" {
+function mapApiSort(sort: BloggerSortKey): "published_at" | "seo" | "geo" | "lighthouse" | "similarity" | "title" {
+  if (sort === "lighthouse") return "lighthouse";
   if (sort === "seo") return "seo";
   if (sort === "geo") return "geo";
   if (sort === "title") return "title";
@@ -183,7 +183,7 @@ export function BloggerAnalyticsWorkspace({ blogs, channels: _channels }: { blog
         month: queryMonth,
         status: queryStatus || null,
         page: 1,
-        pageSize: 500,
+        pageSize: 200,
         sort: mapApiSort(querySort),
         dir: queryDir,
       }),
@@ -217,7 +217,7 @@ export function BloggerAnalyticsWorkspace({ blogs, channels: _channels }: { blog
     const blogName = selectedBlog?.name ?? "-";
     return facts.map((item) => ({
       ...item,
-      dbsScore: computeDbs(item),
+      lighthouseScore: resolveLighthouseScore(item),
       lowFlag: isAnyLow(item),
       blogName,
     }));
@@ -237,7 +237,7 @@ export function BloggerAnalyticsWorkspace({ blogs, channels: _channels }: { blog
     const byLow = bySearch.filter((row) => {
       if (queryLow === "none") return true;
       if (queryLow === "any70") return row.lowFlag;
-      return row.dbsScore < 70;
+      return scoreOrZero(row.lighthouseScore) < 70;
     });
 
     const sorted = [...byLow].sort((a, b) => {
@@ -255,7 +255,7 @@ export function BloggerAnalyticsWorkspace({ blogs, channels: _channels }: { blog
       if (querySort === "seo") return (scoreOrZero(a.seoScore) - scoreOrZero(b.seoScore)) * direction;
       if (querySort === "geo") return (scoreOrZero(a.geoScore) - scoreOrZero(b.geoScore)) * direction;
       if (querySort === "ctr") return (scoreOrZero(a.ctr) - scoreOrZero(b.ctr)) * direction;
-      return (a.dbsScore - b.dbsScore) * direction;
+      return (scoreOrZero(a.lighthouseScore) - scoreOrZero(b.lighthouseScore)) * direction;
     });
 
     return sorted;
@@ -270,7 +270,7 @@ export function BloggerAnalyticsWorkspace({ blogs, channels: _channels }: { blog
   }, [currentPage, filteredRows]);
 
   const lowCount = filteredRows.filter((row) => row.lowFlag).length;
-  const dbsLowCount = filteredRows.filter((row) => row.dbsScore < 70).length;
+  const lighthouseLowCount = filteredRows.filter((row) => scoreOrZero(row.lighthouseScore) < 70).length;
   const calendarCells = useMemo(() => buildCalendarCells(queryMonth, dailySummaries), [queryMonth, dailySummaries]);
 
   return (
@@ -282,12 +282,12 @@ export function BloggerAnalyticsWorkspace({ blogs, channels: _channels }: { blog
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Blogger Analytics</p>
             <h1 className="mt-2 text-2xl font-semibold text-slate-900">게시글 성과 테이블</h1>
-            <p className="mt-1 text-sm text-slate-600">SEO, GEO, CTR, DBS 지표를 블로그별로 정렬하고 필터링할 수 있습니다.</p>
+            <p className="mt-1 text-sm text-slate-600">SEO, GEO, CTR, Lighthouse 지표를 블로그별로 정렬하고 필터링할 수 있습니다.</p>
           </div>
           <div className="flex flex-wrap gap-2 text-xs font-semibold">
             <span className="rounded-xl bg-slate-100 px-3 py-2 text-slate-700">행 수 {filteredRows.length}</span>
             <span className="rounded-xl bg-rose-100 px-3 py-2 text-rose-700">저점 항목 {lowCount}</span>
-            <span className="rounded-xl bg-amber-100 px-3 py-2 text-amber-700">DBS 70 미만 {dbsLowCount}</span>
+            <span className="rounded-xl bg-amber-100 px-3 py-2 text-amber-700">Lighthouse 70 미만 {lighthouseLowCount}</span>
           </div>
         </div>
 
@@ -316,7 +316,7 @@ export function BloggerAnalyticsWorkspace({ blogs, channels: _channels }: { blog
             <select value={queryLow} onChange={(event) => setQuery({ low: event.target.value, page: "1" })} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
               <option value="none">전체</option>
               <option value="any70">SEO/GEO/CTR 중 70 미만</option>
-              <option value="dbs70">DBS 70 미만</option>
+              <option value="lighthouse70">Lighthouse 70 미만</option>
             </select>
           </label>
           <label className="text-xs font-semibold text-slate-600">
@@ -336,7 +336,7 @@ export function BloggerAnalyticsWorkspace({ blogs, channels: _channels }: { blog
               <option value="seo">SEO</option>
               <option value="geo">GEO</option>
               <option value="ctr">CTR</option>
-              <option value="dbs">DBS</option>
+              <option value="lighthouse">Lighthouse</option>
             </select>
           </label>
           <label className="text-xs font-semibold text-slate-600">
@@ -388,7 +388,7 @@ export function BloggerAnalyticsWorkspace({ blogs, channels: _channels }: { blog
                   <th className="px-3 py-3"><button type="button" onClick={() => handleSort("seo")}>SEO</button></th>
                   <th className="px-3 py-3"><button type="button" onClick={() => handleSort("geo")}>GEO</button></th>
                   <th className="px-3 py-3"><button type="button" onClick={() => handleSort("ctr")}>CTR</button></th>
-                  <th className="px-3 py-3"><button type="button" onClick={() => handleSort("dbs")}>DBS</button></th>
+                  <th className="px-3 py-3"><button type="button" onClick={() => handleSort("lighthouse")}>Lighthouse</button></th>
                   <th className="px-3 py-3">품질 상태</th>
                   <th className="px-3 py-3">URL</th>
                 </tr>
@@ -403,7 +403,7 @@ export function BloggerAnalyticsWorkspace({ blogs, channels: _channels }: { blog
                     <td className="px-3 py-3"><span className={`rounded-lg px-2 py-1 text-xs font-semibold ${lowToneClass(scoreOrZero(row.seoScore))}`}>{formatScore(row.seoScore)}</span></td>
                     <td className="px-3 py-3"><span className={`rounded-lg px-2 py-1 text-xs font-semibold ${lowToneClass(scoreOrZero(row.geoScore))}`}>{formatScore(row.geoScore)}</span></td>
                     <td className="px-3 py-3"><span className={`rounded-lg px-2 py-1 text-xs font-semibold ${lowToneClass(scoreOrZero(row.ctr))}`}>{formatScore(row.ctr)}</span></td>
-                    <td className="px-3 py-3"><span className={`rounded-lg px-2 py-1 text-xs font-semibold ${lowToneClass(row.dbsScore)}`}>{formatScore(row.dbsScore)}</span></td>
+                    <td className="px-3 py-3"><span className={`rounded-lg px-2 py-1 text-xs font-semibold ${lowToneClass(scoreOrZero(row.lighthouseScore))}`}>{formatScore(row.lighthouseScore)}</span></td>
                     <td className="px-3 py-3">
                       <span className={`rounded-lg px-2 py-1 text-xs font-semibold ${row.lowFlag ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"}`}>
                         {row.lowFlag ? "주의" : "정상"}

@@ -56,7 +56,7 @@ def read_blog_monthly_articles(
     theme_key: str | None = Query(default=None),
     category: str | None = Query(default=None),
     status: str | None = Query(default=None),
-    sort: str = Query(default="published_at", pattern=r"^(published_at|seo|geo|similarity|title)$"),
+    sort: str = Query(default="published_at", pattern=r"^(published_at|seo|geo|lighthouse|similarity|title)$"),
     dir: str = Query(default="desc", pattern=r"^(asc|desc)$"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),

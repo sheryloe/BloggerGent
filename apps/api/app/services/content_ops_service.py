@@ -1713,12 +1713,14 @@ def _article_to_content_overview_row(article: Article) -> dict[str, Any] | None:
         "most_similar_url": _safe_str(article.quality_most_similar_url),
         "seo_score": float(article.quality_seo_score) if article.quality_seo_score is not None else None,
         "geo_score": float(article.quality_geo_score) if article.quality_geo_score is not None else None,
+        "lighthouse_score": float(article.quality_lighthouse_score) if article.quality_lighthouse_score is not None else None,
         "quality_status": quality_status,
         "suggested_action": suggested_action,
         "auto_fixable": auto_fixable,
         "manual_review": manual_review,
         "rewrite_attempts": int(article.quality_rewrite_attempts or 0),
         "last_audited_at": _format_datetime(article.quality_last_audited_at),
+        "lighthouse_last_audited_at": _format_datetime(article.quality_lighthouse_last_audited_at),
     }
 
 
@@ -1746,9 +1748,11 @@ def _content_overview_payload(*, rows: list[dict[str, Any]]) -> list[dict[str, s
                 "most_similar_url": _safe_str(row.get("most_similar_url")),
                 "seo_score": _safe_str(row.get("seo_score")),
                 "geo_score": _safe_str(row.get("geo_score")),
+                "lighthouse_score": _safe_str(row.get("lighthouse_score")),
                 "quality_status": _safe_str(row.get("quality_status")),
                 "rewrite_attempts": _safe_str(row.get("rewrite_attempts")),
                 "last_audited_at": _safe_str(row.get("last_audited_at")),
+                "lighthouse_last_audited_at": _safe_str(row.get("lighthouse_last_audited_at")),
             }
         )
     return payload
