@@ -72,6 +72,10 @@ import {
   TrainingSchedule,
   TrainingStatus,
   SyncedBloggerPostPage,
+  HelpTopicRead,
+  TelegramPollNowRead,
+  TelegramSubscriptionsRead,
+  TelegramTelemetryRead,
   TelegramTestResult,
   Topic,
   WorkspaceIntegrationOverviewRead,
@@ -307,6 +311,72 @@ export async function testTelegram(message?: string) {
   });
 }
 
+export async function pollTelegramNow() {
+  return apiFetch<TelegramPollNowRead>("/telegram/poll-now", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function getTelegramSubscriptions(chatId?: string) {
+  const suffix = chatId ? `?chat_id=${encodeURIComponent(chatId)}` : "";
+  const payload = await apiFetch<any>(`/telegram/subscriptions${suffix}`, { revalidate: false });
+  return {
+    chatId: payload.chat_id,
+    subscriptions: payload.subscriptions ?? {},
+    updatedAt: payload.updated_at ?? null,
+  } satisfies TelegramSubscriptionsRead;
+}
+
+export async function updateTelegramSubscriptions(chatId: string, subscriptions: Record<string, boolean>) {
+  const payload = await apiFetch<any>("/telegram/subscriptions", {
+    method: "PUT",
+    body: JSON.stringify({
+      chat_id: chatId,
+      subscriptions,
+    }),
+  });
+  return {
+    chatId: payload.chat_id,
+    subscriptions: payload.subscriptions ?? {},
+    updatedAt: payload.updated_at ?? null,
+  } satisfies TelegramSubscriptionsRead;
+}
+
+export async function getTelegramTelemetry(days = 7) {
+  const payload = await apiFetch<any>(`/telegram/telemetry?days=${Math.max(1, Math.min(days, 30))}`, { revalidate: false });
+  return {
+    days: payload.days ?? 7,
+    commandEvents: payload.command_events ?? 0,
+    commandSuccess: payload.command_success ?? 0,
+    commandFailed: payload.command_failed ?? 0,
+    deliveriesSent: payload.deliveries_sent ?? 0,
+    deliveriesFailed: payload.deliveries_failed ?? 0,
+    topCommands: (payload.top_commands ?? []).map((item: any) => ({
+      command: item.command,
+      count: item.count ?? 0,
+    })),
+  } satisfies TelegramTelemetryRead;
+}
+
+export async function getHelpTopics(params?: { keyword?: string; tag?: string }) {
+  const search = new URLSearchParams();
+  if (params?.keyword) {
+    search.set("keyword", params.keyword);
+  }
+  if (params?.tag) {
+    search.set("tag", params.tag);
+  }
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+  const payload = await apiFetch<any[]>(`/help/topics${suffix}`, { revalidate: false });
+  return (payload ?? []).map(mapHelpTopic);
+}
+
+export async function getHelpTopic(topicId: string) {
+  const payload = await apiFetch<any>(`/help/topics/${encodeURIComponent(topicId)}`, { revalidate: false });
+  return mapHelpTopic(payload);
+}
+
 export async function getOpenAIFreeUsage() {
   return apiFetch<OpenAIFreeUsage>("/settings/openai-free-usage");
 }
@@ -530,6 +600,20 @@ export async function requestGoogleIndexStatusRefresh(payload: {
 
 export async function getBlogSeoMeta(blogId: number) {
   return apiFetch<BlogSeoMeta>(`/blogs/${blogId}/seo-meta`);
+}
+
+
+function mapHelpTopic(payload: any): HelpTopicRead {
+  return {
+    topicId: payload.topic_id,
+    title: payload.title,
+    summary: payload.summary,
+    tags: payload.tags ?? [],
+    relatedScreens: payload.related_screens ?? [],
+    commands: payload.commands ?? [],
+    deepLinks: payload.deep_links ?? [],
+    runbook: payload.runbook ?? null,
+  };
 }
 
 
@@ -1538,4 +1622,3 @@ export const fetchBlogs = getBlogs;
 export const fetchChannels = getChannels;
 export const fetchSettings = getSettings;
 export const fetchBloggerConfig = getBloggerConfig;
-

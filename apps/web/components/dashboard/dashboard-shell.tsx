@@ -13,7 +13,6 @@ import {
   Link2,
   Orbit,
   PanelsTopLeft,
-  Radar,
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
@@ -61,13 +60,6 @@ const PRIMARY_ROOMS: WorkspaceCard[] = [
     description: "채널 성과와 개선 신호를 추적합니다.",
     icon: LineChart,
     accent: "from-[#2563eb] via-[#1d4ed8] to-[#1e3a8a]",
-  },
-  {
-    href: "/google",
-    label: "SEO / 색인",
-    description: "블로그별 색인, 검색, 검증 상태를 관리합니다.",
-    icon: Radar,
-    accent: "from-[#f59e0b] via-[#d97706] to-[#b45309]",
   },
   {
     href: "/settings",
@@ -122,6 +114,13 @@ const OPERATOR_LINKS: WorkspaceCard[] = [
     accent: "from-[#94a3b8] via-[#64748b] to-[#475569]",
   },
   {
+    href: "/help",
+    label: "운영형 도움말",
+    description: "Telegram /help 카탈로그를 검색하고 runbook 기준으로 실행합니다.",
+    icon: Orbit,
+    accent: "from-[#0ea5e9] via-[#0284c7] to-[#0369a1]",
+  },
+  {
     href: "/training",
     label: "학습",
     description: "학습 상태와 운영 기록을 확인합니다.",
@@ -134,47 +133,14 @@ function isActivePath(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-function findCurrentRoom(pathname: string) {
-  return (
-    [...PRIMARY_ROOMS, ...OPERATOR_LINKS].find((item) => isActivePath(pathname, item.href)) ??
-    PRIMARY_ROOMS[0]
-  );
-}
-
-function StatusChip({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone: "amber" | "sky" | "emerald";
-}) {
-  const toneClass = {
-    amber:
-      "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200",
-    sky: "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/30 dark:bg-sky-500/15 dark:text-sky-200",
-    emerald:
-      "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200",
-  }[tone];
-
-  return (
-    <div className={`rounded-2xl border px-3 py-2 ${toneClass}`}>
-      <p className="text-[11px] font-semibold uppercase tracking-[0.18em]">{label}</p>
-      <p className="mt-1 text-sm font-semibold">{value}</p>
-    </div>
-  );
-}
-
 export function DashboardShell({ children, nav }: { children: React.ReactNode; nav?: NavItem[] }) {
   const pathname = usePathname();
-  const currentRoom = findCurrentRoom(pathname);
   const navSet = new Set((nav ?? []).map((item) => item.href));
   const primaryRooms = PRIMARY_ROOMS.filter((item) => navSet.size === 0 || navSet.has(item.href));
   const compactWorkspace = pathname.startsWith("/planner") || pathname.startsWith("/admin");
   const shellGridClass = compactWorkspace
-    ? "mx-auto grid min-h-[calc(100vh-2rem)] w-full gap-3 2xl:grid-cols-[280px_minmax(0,1fr)_280px] xl:grid-cols-[280px_minmax(0,1fr)]"
-    : "mx-auto grid min-h-[calc(100vh-2rem)] w-full gap-4 2xl:grid-cols-[300px_minmax(0,1fr)_320px] xl:grid-cols-[300px_minmax(0,1fr)]";
+    ? "mx-auto grid min-h-[calc(100vh-2rem)] w-full gap-3 xl:grid-cols-[256px_minmax(0,1fr)] 2xl:grid-cols-[256px_minmax(0,1fr)]"
+    : "mx-auto grid min-h-[calc(100vh-2rem)] w-full gap-4 xl:grid-cols-[256px_minmax(0,1fr)] 2xl:grid-cols-[256px_minmax(0,1fr)]";
   const mainCardClass = compactWorkspace
     ? "min-w-0 rounded-[30px] border border-slate-200 bg-white/95 p-3 shadow-[0_20px_50px_rgba(15,23,42,0.06)] backdrop-blur dark:border-white/10 dark:bg-slate-900/70 dark:shadow-[0_20px_50px_rgba(0,0,0,0.42)] sm:p-4 lg:p-5"
     : "min-w-0 rounded-[30px] border border-slate-200 bg-white/95 p-4 shadow-[0_20px_50px_rgba(15,23,42,0.06)] backdrop-blur dark:border-white/10 dark:bg-slate-900/70 dark:shadow-[0_20px_50px_rgba(0,0,0,0.42)] sm:p-5 lg:p-6";
@@ -291,20 +257,6 @@ export function DashboardShell({ children, nav }: { children: React.ReactNode; n
         <main className={mainCardClass}>
           {children}
         </main>
-
-        <aside className="hidden rounded-[30px] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.08)] backdrop-blur dark:border-white/10 dark:bg-slate-900/70 dark:shadow-[0_20px_50px_rgba(0,0,0,0.45)] 2xl:block">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400 dark:text-zinc-500">현재 작업</p>
-            <h2 className="mt-2 text-2xl font-semibold text-slate-950 dark:text-zinc-100">{currentRoom.label}</h2>
-            <p className="mt-3 text-sm leading-6 text-slate-600 dark:text-zinc-400">{currentRoom.description}</p>
-          </div>
-
-          <div className="mt-5 space-y-3">
-            <StatusChip label="브랜드" value="동그리 자동 블로그전트" tone="sky" />
-            <StatusChip label="레이아웃" value="집중형 3단 레이아웃" tone="amber" />
-            <StatusChip label="포커스" value="오른쪽 작업 도크" tone="emerald" />
-          </div>
-        </aside>
       </div>
     </div>
   );

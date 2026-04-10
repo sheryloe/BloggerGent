@@ -727,6 +727,79 @@ class Setting(Base):
     )
 
 
+class TelegramChatBinding(TimestampMixin, Base):
+    __tablename__ = "telegram_chat_bindings"
+    __table_args__ = (sa.UniqueConstraint("chat_id", name="uq_telegram_chat_bindings_chat_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    chat_id: Mapped[str] = mapped_column(sa.String(64), nullable=False, index=True)
+    channel_id: Mapped[str | None] = mapped_column(sa.String(120), nullable=True, index=True)
+    username: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    chat_title: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    is_admin: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False)
+    is_active: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
+    binding_metadata: Mapped[dict] = mapped_column("metadata", sa.JSON, nullable=False, default=dict)
+
+    subscriptions: Mapped[list["TelegramSubscription"]] = relationship(
+        "TelegramSubscription",
+        back_populates="chat_binding",
+        cascade="all, delete-orphan",
+        order_by="TelegramSubscription.event_key.asc()",
+    )
+
+
+class TelegramSubscription(TimestampMixin, Base):
+    __tablename__ = "telegram_subscriptions"
+    __table_args__ = (
+        sa.UniqueConstraint(
+            "chat_binding_id",
+            "event_key",
+            name="uq_telegram_subscriptions_chat_binding_event_key",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    chat_binding_id: Mapped[int] = mapped_column(
+        sa.ForeignKey("telegram_chat_bindings.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    event_key: Mapped[str] = mapped_column(sa.String(100), nullable=False, index=True)
+    is_enabled: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
+    config_payload: Mapped[dict] = mapped_column(sa.JSON, nullable=False, default=dict)
+
+    chat_binding: Mapped["TelegramChatBinding"] = relationship("TelegramChatBinding", back_populates="subscriptions")
+
+
+class TelegramCommandEvent(Base):
+    __tablename__ = "telegram_command_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    chat_id: Mapped[str] = mapped_column(sa.String(64), nullable=False, index=True)
+    user_id: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, index=True)
+    username: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    command: Mapped[str] = mapped_column(sa.String(255), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="ok", index=True)
+    detail: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    event_payload: Mapped[dict] = mapped_column("payload", sa.JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False, index=True)
+
+
+class TelegramDeliveryEvent(Base):
+    __tablename__ = "telegram_delivery_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    chat_id: Mapped[str] = mapped_column(sa.String(64), nullable=False, index=True)
+    message_type: Mapped[str] = mapped_column(sa.String(50), nullable=False, default="message", index=True)
+    dedupe_key: Mapped[str | None] = mapped_column(sa.String(255), nullable=True, unique=True, index=True)
+    status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="sent", index=True)
+    error_code: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    event_payload: Mapped[dict] = mapped_column("payload", sa.JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False, index=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
 

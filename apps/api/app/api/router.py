@@ -11,6 +11,7 @@ from app.api.routes import (
     content_ops,
     dashboard,
     google,
+    help,
     jobs,
     planner,
     prompts,
@@ -40,6 +41,7 @@ api_router.include_router(seo.router)
 api_router.include_router(prompts.router, prefix="/prompts", tags=["prompts"])
 api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
 api_router.include_router(settings.blogger_router, prefix="/blogger", tags=["blogger"])
+api_router.include_router(help.router, prefix="/help", tags=["help"])
 api_router.include_router(telegram.router, prefix="/telegram", tags=["telegram"])
 api_router.include_router(training.router, prefix="/training", tags=["training"])
 api_router.include_router(workspace.router)

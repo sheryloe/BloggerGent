@@ -12,12 +12,12 @@ const guideByPath: Record<string, { title: string; purpose: string; whenToUse: s
     dataSource: "현재 저장된 설정값, Blogger 연결 상태, Google 연동 상태를 사용합니다.",
     caution: "가이드는 설명 페이지입니다. 실제 값 변경은 설정 페이지에서만 수행하세요.",
   },
-  "/google": {
-    title: "구글 데이터",
-    purpose: "Blogger, Search Console, GA4 상태와 동기화 결과를 블로그별로 확인합니다.",
-    whenToUse: "구글 연동이 정상인지, 기존 게시글 동기화가 끝났는지 점검할 때 들어옵니다.",
-    dataSource: "Blogger API, Search Console, GA4, 로컬 동기화 데이터베이스를 사용합니다.",
-    caution: "이 화면은 분석과 동기화 확인용입니다. 실제 콘텐츠 수정은 콘텐츠 운영 탭에서 처리하세요.",
+  "/help": {
+    title: "운영형 도움말",
+    purpose: "Telegram `/help`와 동일한 토픽 카탈로그를 운영 화면에서 검색하고 실행 흐름으로 연결합니다.",
+    whenToUse: "명령어를 바로 확인하거나, runbook ID 기준으로 단계별 실행 순서를 다시 확인할 때 사용합니다.",
+    dataSource: "백엔드 정적 Help 카탈로그(`/api/v1/help/topics`, `/api/v1/help/topics/{id}`)를 사용합니다.",
+    caution: "이 화면은 실행 가이드입니다. 실제 동작은 명령 실행 또는 각 운영 페이지에서 처리됩니다.",
   },
   "/ops-health": {
     title: "운영 점검",

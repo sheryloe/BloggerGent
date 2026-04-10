@@ -547,6 +547,45 @@ export interface TelegramTestResult {
   skipped_reason?: string | null;
 }
 
+export interface TelegramPollNowRead {
+  status: string;
+  processed: number;
+  ignored: number;
+  reason?: string | null;
+}
+
+export interface TelegramSubscriptionsRead {
+  chatId: string;
+  subscriptions: Record<string, boolean>;
+  updatedAt: string | null;
+}
+
+export interface TelegramTelemetryCommand {
+  command: string;
+  count: number;
+}
+
+export interface TelegramTelemetryRead {
+  days: number;
+  commandEvents: number;
+  commandSuccess: number;
+  commandFailed: number;
+  deliveriesSent: number;
+  deliveriesFailed: number;
+  topCommands: TelegramTelemetryCommand[];
+}
+
+export interface HelpTopicRead {
+  topicId: string;
+  title: string;
+  summary: string;
+  tags: string[];
+  relatedScreens: string[];
+  commands: string[];
+  deepLinks: string[];
+  runbook: string | null;
+}
+
 export interface DashboardPoint {
   date: string;
   completed: number;

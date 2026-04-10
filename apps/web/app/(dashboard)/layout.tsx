@@ -14,10 +14,10 @@ const nav = [
   { href: "/planner", label: "게시 플래너 운영" },
   { href: "/content-ops", label: "콘텐츠 운영" },
   { href: "/analytics", label: "분석" },
-  { href: "/google", label: "SEO / 색인" },
   { href: "/settings", label: "연동 설정" },
   { href: "/admin", label: "관리자 설정" },
   { href: "/ops-health", label: "운영 모니터" },
+  { href: "/help", label: "운영형 도움말" },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {

@@ -10,7 +10,7 @@ const sections = [
     title: "Blogger 블로그 연동",
     steps: [
       "연동 설정에서 Google OAuth를 연결합니다.",
-      "SEO / 색인 화면에서 블로그별 Search Console, GA4, 색인 상태를 확인합니다.",
+      "분석 화면에서 블로그별 Search Console, GA4, 색인 상태를 확인합니다.",
       "콘텐츠 운영과 플래너에서 초안, 자산, 업로드 흐름을 처리합니다.",
     ],
   },
@@ -55,6 +55,9 @@ export default function GuidePage() {
           <div className="flex flex-wrap gap-2">
             <Link href="/settings" className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700">
               연동 설정 이동
+            </Link>
+            <Link href="/help" className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700">
+              운영형 도움말 이동
             </Link>
             <Link href="/admin" className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700">
               관리자 설정 이동

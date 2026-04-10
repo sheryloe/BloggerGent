@@ -842,6 +842,50 @@ class TelegramTestRead(BaseModel):
     skipped_reason: str | None = None
 
 
+class TelegramPollNowRead(BaseModel):
+    status: str
+    processed: int = 0
+    ignored: int = 0
+    reason: str | None = None
+
+
+class HelpTopicRead(BaseModel):
+    topic_id: str
+    title: str
+    summary: str
+    tags: list[str] = Field(default_factory=list)
+    related_screens: list[str] = Field(default_factory=list)
+    commands: list[str] = Field(default_factory=list)
+    deep_links: list[str] = Field(default_factory=list)
+    runbook: str | None = None
+
+
+class TelegramSubscriptionsRead(BaseModel):
+    chat_id: str
+    subscriptions: dict[str, bool] = Field(default_factory=dict)
+    updated_at: str | None = None
+
+
+class TelegramSubscriptionsUpdate(BaseModel):
+    chat_id: str = Field(min_length=1, max_length=64)
+    subscriptions: dict[str, bool] = Field(default_factory=dict)
+
+
+class TelegramCommandAggregateRead(BaseModel):
+    command: str
+    count: int
+
+
+class TelegramTelemetryRead(BaseModel):
+    days: int
+    command_events: int = 0
+    command_success: int = 0
+    command_failed: int = 0
+    deliveries_sent: int = 0
+    deliveries_failed: int = 0
+    top_commands: list[TelegramCommandAggregateRead] = Field(default_factory=list)
+
+
 class PromptTemplateRead(BaseModel):
     key: str
     title: str
