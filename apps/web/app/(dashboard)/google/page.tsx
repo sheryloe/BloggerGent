@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 
 import { GoogleIndexingRowActions } from "@/components/dashboard/google-indexing-row-actions";
 import { GooglePostSyncButton } from "@/components/dashboard/google-post-sync-button";
@@ -200,8 +200,17 @@ export default async function GoogleDataPage({
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="font-medium text-slate-900">{post.title}</p>
                         {post.status ? <Badge className="bg-transparent">{post.status}</Badge> : null}
+                        <Badge className="bg-transparent">이미지 {post.live_image_count ?? "-"}</Badge>
+                        {post.live_image_issue ? (
+                          <Badge className="border-red-200 bg-red-50 text-red-700">{post.live_image_issue}</Badge>
+                        ) : null}
                       </div>
                       <p className="mt-1 text-xs text-slate-500">수정 시각: {formatDateTime(post.updated)}</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        커버: {post.live_cover_present ? "정상" : post.live_cover_present === false ? "누락" : "-"} / 본문:{" "}
+                        {post.live_inline_present ? "정상" : post.live_inline_present === false ? "누락" : "-"} / 점검:{" "}
+                        {formatDateTime(post.live_image_audited_at)}
+                      </p>
                       {post.url ? (
                         <a href={post.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-sm text-sky-700 hover:underline">
                           게시글 열기
@@ -245,7 +254,10 @@ export default async function GoogleDataPage({
                         <Badge className="bg-transparent">{post.provider_status}</Badge>
                       </div>
                       <p className="mt-1 text-xs text-slate-500">
-                        카테고리: {post.category_slug || "-"} / 수정 시각: {formatDateTime(post.updated_at)}
+                        카테고리: {post.canonical_category_slug || post.category_slug || "-"} / 수정 시각: {formatDateTime(post.updated_at)}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        SEO {post.seo_score ?? "-"} / GEO {post.geo_score ?? "-"} / CTR {post.ctr ?? "-"} / LH {post.lighthouse_score ?? "-"}
                       </p>
                       {post.published_url ? (
                         <a href={post.published_url} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-sm text-sky-700 hover:underline">
@@ -273,3 +285,4 @@ export default async function GoogleDataPage({
     </div>
   );
 }
+

@@ -51,3 +51,7 @@ scripts/fix_cloudflare_ctr_images.py
 /popup.json
 /public_top.json
 /rss.xml
+
+# Codex optimization gate (2026-04-10)
+storage/playwright-browser/
+apps/api/storage/reports/

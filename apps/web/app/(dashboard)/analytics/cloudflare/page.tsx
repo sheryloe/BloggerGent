@@ -60,7 +60,7 @@ export default async function CloudflareAnalyticsPage() {
                   <Badge className="bg-transparent">{post.provider_status}</Badge>
                 </div>
                 <p className="mt-1 text-xs text-slate-500">
-                  카테고리: {post.category_slug || "-"} · SEO: {post.seo_score ?? "-"}
+                  카테고리: {post.canonical_category_slug || post.category_slug || "-"} · SEO: {post.seo_score ?? "-"} · GEO: {post.geo_score ?? "-"} · CTR: {post.ctr ?? "-"} · LH: {post.lighthouse_score ?? "-"}
                 </p>
                 {post.published_url ? (
                   <a href={post.published_url} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-sm text-sky-700 hover:underline">

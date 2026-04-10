@@ -24,7 +24,6 @@ from app.models.entities import Blog, GoogleIndexUrlState, SyncedBloggerPost
 from app.services.audit_service import add_log
 from app.services.openai_usage_service import (
     FREE_TIER_DEFAULT_LARGE_TEXT_MODEL,
-    FREE_TIER_DEFAULT_SMALL_TEXT_MODEL,
     route_openai_free_tier_text_model,
 )
 from app.services.providers.factory import get_article_provider, get_image_provider, get_runtime_config, get_topic_provider
@@ -42,6 +41,10 @@ DEFAULT_PROMPT_STAGES = (
 TOPIC_PROVIDER_CATEGORY_MISMATCH_FALLBACK_STREAK = 2
 TOPIC_TEMPLATE_CATEGORY_MISMATCH_FALLBACK_STREAK = 2
 CLOUDFLARE_RELAXED_GEO_MIN_SCORE = 40.0
+RELAXED_GEO_CATEGORY_SLUGS = {
+    "개발과-프로그래밍",
+    "개발과도구",
+}
 CLOUDFLARE_DAILY_MAX_CATEGORY_ATTEMPTS = 3
 MAX_TOPIC_REGEN_ATTEMPTS_PER_CATEGORY = 4
 DEFAULT_TOPIC_HISTORY_LOOKBACK_DAYS = 180
@@ -189,6 +192,63 @@ FALLBACK_CATEGORIES: tuple[dict[str, str | None], ...] = (
         "parentId": "cat-donggri",
     },
 )
+
+CLOUDFLARE_CANONICAL_CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "개발과-프로그래밍": (
+        "ai",
+        "llm",
+        "gpt",
+        "claude",
+        "cursor",
+        "codex",
+        "agent",
+        "workflow",
+        "automation",
+        "api",
+        "python",
+        "개발",
+        "프로그래밍",
+        "자동화",
+        "에이전트",
+        "코딩",
+    ),
+    "삶을-유용하게": (
+        "복지",
+        "지원금",
+        "신청",
+        "대상",
+        "서류",
+        "혜택",
+        "환급",
+        "할인",
+        "이벤트",
+        "행사",
+        "정책",
+        "지원",
+        "생활정보",
+    ),
+    "삶의-기름칠": (
+        "명언",
+        "마음가짐",
+        "태도",
+        "루틴",
+        "습관",
+        "멘탈",
+        "집중",
+        "회복",
+        "동기",
+        "마음",
+        "생각정리",
+    ),
+    "여행과-기록": ("여행", "코스", "동선", "방문", "route", "trip", "travel", "visit", "itinerary"),
+    "축제와-현장": ("축제", "현장", "행사", "festival", "event", "fair", "expo", "팝업현장"),
+    "문화와-공간": ("문화", "공간", "전시", "미술관", "박물관", "popup", "museum", "gallery", "architecture"),
+    "미스테리아-스토리": ("미스터리", "미스테리아", "전설", "괴담", "unsolved", "mystery", "legend", "haunted"),
+    "동그리의-생각": ("생각", "브랜드", "해석", "인사이트", "opinion", "analysis", "company", "service"),
+    "주식의-흐름": ("주식", "증시", "실적", "etf", "stock", "earnings", "market"),
+    "크립토의-흐름": ("비트코인", "이더리움", "코인", "토큰", "crypto", "bitcoin", "ethereum", "token"),
+    "일상과-메모": ("일상", "메모", "정리", "노트", "daily", "memo", "note", "diary"),
+}
 
 CATEGORY_TOPIC_GUIDANCE: dict[str, str] = {}
 CATEGORY_MODULE_GUIDANCE: dict[str, tuple[str, ...]] = {}
@@ -573,6 +633,123 @@ def _fetch_json(url: str) -> Any:
     return payload
 
 
+_REMOTE_CATEGORY_CHILD_KEYS: tuple[str, ...] = (
+    "children",
+    "childCategories",
+    "subcategories",
+    "subCategories",
+)
+
+
+def _remote_category_text(*values: Any) -> str:
+    return " ".join(str(value or "").strip() for value in values if str(value or "").strip()).casefold()
+
+
+def _iter_remote_category_children(item: dict[str, Any]) -> list[dict[str, Any]]:
+    children: list[dict[str, Any]] = []
+    for key in _REMOTE_CATEGORY_CHILD_KEYS:
+        raw = item.get(key)
+        if not isinstance(raw, list):
+            continue
+        children.extend(child for child in raw if isinstance(child, dict))
+    return children
+
+
+def _build_generated_category_id(*, parent_id: str, slug: str, name: str) -> str:
+    source = slug.strip() or name.strip()
+    if not source:
+        return ""
+    normalized = slugify(source, separator="-")
+    if not normalized:
+        return ""
+    parent_key = slugify(parent_id, separator="-") if parent_id else "root"
+    return f"cat-generated-{parent_key}-{normalized}"
+
+
+def _flatten_remote_categories(payload: Any) -> list[dict[str, Any]]:
+    if not isinstance(payload, list):
+        return []
+    raw_items = [item for item in payload if isinstance(item, dict)]
+    flattened: list[dict[str, Any]] = []
+    index_by_id: dict[str, int] = {}
+
+    def walk(node: dict[str, Any], parent_id: str | None) -> None:
+        raw_id = str(node.get("id") or "").strip()
+        raw_slug = str(node.get("slug") or "").strip()
+        raw_name = str(node.get("name") or "").strip()
+        raw_parent = str(node.get("parentId") or "").strip()
+        resolved_parent = raw_parent or (parent_id or "")
+        category_id = raw_id or _build_generated_category_id(parent_id=resolved_parent, slug=raw_slug, name=raw_name)
+
+        if category_id and raw_slug:
+            normalized = dict(node)
+            normalized["id"] = category_id
+            if resolved_parent:
+                normalized["parentId"] = resolved_parent
+            elif "parentId" in normalized:
+                normalized["parentId"] = None
+            if category_id in index_by_id:
+                existing = flattened[index_by_id[category_id]]
+                if not str(existing.get("parentId") or "").strip() and str(normalized.get("parentId") or "").strip():
+                    existing["parentId"] = normalized.get("parentId")
+                for key in ("name", "description", "createdAt", "updatedAt"):
+                    if not existing.get(key) and normalized.get(key):
+                        existing[key] = normalized.get(key)
+            else:
+                index_by_id[category_id] = len(flattened)
+                flattened.append(normalized)
+
+        next_parent = category_id or resolved_parent or None
+        for child in _iter_remote_category_children(node):
+            walk(child, next_parent)
+
+    for item in raw_items:
+        walk(item, None)
+    return flattened
+
+
+def _ensure_midnight_scp_leaf(categories: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not categories:
+        return categories
+    midnight = next(
+        (
+            item
+            for item in categories
+            if "midnight" in _remote_category_text(item.get("slug"), item.get("name"), item.get("id"))
+        ),
+        None,
+    )
+    if midnight is None:
+        return categories
+
+    midnight_id = str(midnight.get("id") or "").strip()
+    for item in categories:
+        text = _remote_category_text(item.get("slug"), item.get("name"), item.get("id"))
+        if "scp" not in text:
+            continue
+        parent_id = str(item.get("parentId") or "").strip()
+        if parent_id == midnight_id:
+            return categories
+
+    scp_id = f"{midnight_id}-scp" if midnight_id else "cat-midnight-scp"
+    if any(str(item.get("id") or "").strip() == scp_id for item in categories):
+        return categories
+
+    appended = list(categories)
+    appended.append(
+        {
+            "id": scp_id,
+            "slug": "scp",
+            "name": "SCP",
+            "description": "Midnight category SCP archive",
+            "parentId": midnight_id or None,
+            "createdAt": _utc_now_iso(),
+            "updatedAt": _utc_now_iso(),
+        }
+    )
+    return appended
+
+
 def _list_remote_categories(values: dict[str, str]) -> list[dict]:
     url = _public_api_url(values, "/api/public/categories")
     if not url:
@@ -581,7 +758,8 @@ def _list_remote_categories(values: dict[str, str]) -> list[dict]:
         payload = _fetch_json(url)
     except (HTTPError, URLError, TimeoutError, json.JSONDecodeError):
         return []
-    return [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
+    flattened = _flatten_remote_categories(payload)
+    return _ensure_midnight_scp_leaf(flattened)
 
 
 def _list_remote_posts(values: dict[str, str]) -> list[dict]:
@@ -626,6 +804,12 @@ def _cloudflare_prompt_profile(category_slug: str, category_name: str, category_
 
 
 def _category_topic_guidance(category_slug: str, category_name: str, category_description: str) -> str:
+    if category_slug == "삶을-유용하게":
+        return "복지, 지원금, 신청 절차, 생활 실용 정보, 행사·이벤트처럼 바로 확인하고 실행할 수 있는 주제만 다룹니다."
+    if category_slug == "삶의-기름칠":
+        return "명언, 마음가짐, 태도, 루틴, 삶의 정리처럼 내면 정돈과 생활 감각을 다루되 복지·지원금형 정보 글은 배제합니다."
+    if category_slug == "개발과-프로그래밍":
+        return "AI 코딩, LLM 에이전트, 자동화 워크플로우, 무료 vs 유료 비교, 실사용 셋업처럼 바로 적용 가능한 개발 주제만 다룹니다."
     profile = _cloudflare_prompt_profile(category_slug, category_name, category_description)
     if profile == "mystery":
         return "문서화된 사실, 기록, 해석 차이를 분리해서 읽을 수 있는 다큐형 미스터리 주제를 다룹니다."
@@ -642,6 +826,12 @@ def _category_topic_guidance(category_slug: str, category_name: str, category_de
 
 def _category_modules(category_slug: str) -> tuple[str, ...]:
     normalized = _cloudflare_category_search_text(category_slug)
+    if category_slug == "삶을-유용하게":
+        return ("대상 확인", "핵심 혜택", "신청 방법", "실수 방지", "바로 할 일")
+    if category_slug == "삶의-기름칠":
+        return ("문제 장면", "생각 전환", "실천 루틴", "지속 팁", "마무리 문장")
+    if category_slug == "개발과-프로그래밍":
+        return ("문제 정의", "도구 비교", "설정 방법", "실사용 예시", "선택 기준")
     if any(token in normalized for token in ("travel", "festival", "culture", "food", "여행", "축제", "문화", "맛집")):
         return ("검색 의도", "방문 결정 포인트", "현장 감각", "주의사항", "실행 팁")
     if any(token in normalized for token in ("mystery", "mysteria", "case", "archive", "legend", "미스터리", "전설", "괴담")):
@@ -657,6 +847,12 @@ def _category_modules(category_slug: str) -> tuple[str, ...]:
 
 def _category_image_guidance(category_slug: str) -> str:
     normalized = _cloudflare_category_search_text(category_slug)
+    if category_slug == "삶을-유용하게":
+        return "한국 생활 맥락이 읽히는 실제 신청·확인·준비 장면과 생활 도구가 보이는 현실 사진이 맞습니다."
+    if category_slug == "삶의-기름칠":
+        return "과한 감성 연출보다 한국 일상 공간에서 생각을 정리하거나 루틴을 실천하는 현실적인 장면이 맞습니다."
+    if category_slug == "개발과-프로그래밍":
+        return "한국형 업무 환경에서 노트북, IDE, 터미널, 협업 문서, 자동화 흐름이 보이는 실사 장면이 맞습니다."
     if any(token in normalized for token in ("mystery", "mysteria", "case", "archive", "legend", "미스터리", "괴담", "전설")):
         return "문서, 장소, 흔적, 조사 분위기가 바로 읽히는 다큐멘터리형 장면이 맞습니다."
     if any(token in normalized for token in ("travel", "festival", "culture", "food", "여행", "축제", "문화", "맛집")):
@@ -686,6 +882,12 @@ def _cloudflare_editorial_category_key(category_slug: str) -> str:
 
 
 def _cloudflare_target_audience(category_slug: str, category_name: str) -> str:
+    if category_slug == "삶을-유용하게":
+        return "지원 제도, 생활 혜택, 행사 정보, 신청 순서를 빠르게 파악하고 바로 행동하려는 독자"
+    if category_slug == "삶의-기름칠":
+        return "삶의 태도와 루틴을 가볍지 않게 정리하고, 실제로 지속 가능한 변화를 만들고 싶은 독자"
+    if category_slug == "개발과-프로그래밍":
+        return "AI 도구와 자동화 흐름을 실무에 바로 붙이고 싶고, 무료와 유료 선택 기준까지 알고 싶은 개발 실무 독자"
     profile = _cloudflare_prompt_profile(category_slug, category_name, "")
     if profile == "mystery":
         return "사실과 해석을 구분해서 읽고 싶고, 기록과 출처를 따라가며 보는 독자"
@@ -701,6 +903,12 @@ def _cloudflare_target_audience(category_slug: str, category_name: str) -> str:
 
 
 def _cloudflare_content_brief(category_slug: str, category_name: str, category_description: str) -> str:
+    if category_slug == "삶을-유용하게":
+        return "복지, 지원금, 생활 정보, 행사 안내를 블로그답게 풀되 대상·준비물·실행 순서를 바로 이해하게 만드는 실용형 글을 만듭니다."
+    if category_slug == "삶의-기름칠":
+        return "명언 모음처럼 흩어지지 않게 문제 장면, 생각 전환, 실천 루틴까지 자연스럽게 이어지는 태도형 블로그 글을 만듭니다."
+    if category_slug == "개발과-프로그래밍":
+        return "AI 코딩, LLM 에이전트, 자동화 워크플로우, 무료 vs 유료 비교를 실사용 셋업과 선택 기준 중심으로 정리하는 개발형 글을 만듭니다."
     profile = _cloudflare_prompt_profile(category_slug, category_name, category_description)
     if profile == "mystery":
         return "다큐멘터리형 미스터리 블로그처럼 기록, 정황, 해석 차이를 분리하고 과장 없이 긴장감을 유지하는 글을 만듭니다."
@@ -717,8 +925,9 @@ def _cloudflare_content_brief(category_slug: str, category_name: str, category_d
 
 def _read_master_prompt_template(file_name: str) -> str:
     resolved = Path(__file__).resolve()
+    app_root = resolved.parents[2] if len(resolved.parents) >= 3 else Path.cwd()
     candidates = (
-        resolved.parents[4] / "prompts" / file_name,
+        app_root / "prompts" / file_name,
         Path.cwd() / "prompts" / file_name,
         Path("/app/prompts") / file_name,
     )
@@ -986,10 +1195,14 @@ Rules:
 - Return plain text only.
 - Write one final prompt for a single 3x3 hero collage with exactly 9 distinct panels.
 - Use visible white gutters and one dominant center panel.
-- No text overlays, no logos, no infographic styling, no generic checklist visuals.
-- Keep the image realistic, editorial, and immediately aligned with the article promise.
+- Keep the visual grounded in realistic Korean context when the topic is Korea-facing.
+- Use realistic editorial photography language, not illustration language.
+- No text overlays, no logos, no infographic styling, and no generic checklist visuals.
+- Avoid generic stock-photo mood. Show the real problem and the real usage scene.
 - Match the category tone of \"{category_name}\" rather than a generic stock-photo mood.
 """
+
+
 def _prompt_storage_keys(category_id: str, stage: str) -> dict[str, str]:
     prefix = f"cloudflare_prompt__{category_id}__{stage}"
     return {
@@ -1043,6 +1256,70 @@ def list_cloudflare_categories(db: Session) -> list[dict]:
     return sorted(items, key=lambda item: item["slug"])
 
 
+def _canonical_cloudflare_leaf_map(categories: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
+    return {
+        str(item.get("slug") or "").strip(): {
+            "slug": str(item.get("slug") or "").strip(),
+            "name": str(item.get("name") or item.get("slug") or "").strip(),
+        }
+        for item in categories
+        if bool(item.get("isLeaf")) and str(item.get("slug") or "").strip()
+    }
+
+
+def _resolve_cloudflare_canonical_category(
+    *,
+    title: str,
+    excerpt: str,
+    raw_category_slug: str,
+    raw_category_name: str,
+    leaf_categories: dict[str, dict[str, str]],
+) -> dict[str, str | None]:
+    if raw_category_slug in leaf_categories:
+        return leaf_categories[raw_category_slug]
+
+    title_text = _cloudflare_category_search_text(title)
+    category_text = _cloudflare_category_search_text(raw_category_slug, raw_category_name)
+    excerpt_text = _cloudflare_category_search_text(excerpt)
+    best_slug = ""
+    best_score = -1
+
+    for slug, keywords in CLOUDFLARE_CANONICAL_CATEGORY_KEYWORDS.items():
+        if slug not in leaf_categories:
+            continue
+        score = 0
+        for keyword in keywords:
+            if keyword in title_text:
+                score += 6
+            if keyword in category_text:
+                score += 3
+            if keyword in excerpt_text:
+                score += 1
+        if score > best_score:
+            best_slug = slug
+            best_score = score
+
+    if best_slug:
+        return leaf_categories[best_slug]
+    if "일상과-메모" in leaf_categories:
+        return leaf_categories["일상과-메모"]
+    return {"slug": raw_category_slug or None, "name": raw_category_name or None}
+
+
+def _fetch_integration_post_detail(db: Session, remote_post_id: str) -> dict[str, Any]:
+    post_id = str(remote_post_id or "").strip()
+    if not post_id:
+        return {}
+    response = _integration_request(
+        db,
+        method="GET",
+        path=f"/api/integrations/posts/{post_id}",
+        timeout=45.0,
+    )
+    data = _integration_data_or_raise(response)
+    return data if isinstance(data, dict) else {}
+
+
 def list_cloudflare_posts(db: Session) -> list[dict]:
     def _optional_float(value: Any) -> float | None:
         if value is None:
@@ -1066,7 +1343,9 @@ def list_cloudflare_posts(db: Session) -> list[dict]:
         return "unknown"
 
     values = get_settings_map(db)
+    leaf_categories = _canonical_cloudflare_leaf_map(list_cloudflare_categories(db))
     posts = _list_remote_posts(values)
+    detail_cache: dict[str, dict[str, Any]] = {}
     remote_urls: set[str] = set()
     for post in posts:
         for raw_url in (
@@ -1136,12 +1415,83 @@ def list_cloudflare_posts(db: Session) -> list[dict]:
             or analytics_payload.get("ctr")
             or analytics_payload.get("clickThroughRate")
         )
+        lighthouse_score = _optional_float(
+            post.get("lighthouse_score")
+            or post.get("lighthouseScore")
+            or analytics_payload.get("lighthouse_score")
+            or analytics_payload.get("lighthouseScore")
+            or quality_payload.get("lighthouse_score")
+            or quality_payload.get("lighthouseScore")
+        )
+        if (seo_score is None or geo_score is None or ctr is None or lighthouse_score is None) and remote_id:
+            detail_post = detail_cache.get(remote_id)
+            if detail_post is None:
+                try:
+                    detail_post = _fetch_integration_post_detail(db, remote_id)
+                except Exception:  # noqa: BLE001
+                    detail_post = {}
+                detail_cache[remote_id] = detail_post
+            if detail_post:
+                detail_quality = detail_post.get("quality") if isinstance(detail_post.get("quality"), dict) else {}
+                detail_analytics = detail_post.get("analytics") if isinstance(detail_post.get("analytics"), dict) else {}
+                seo_score = seo_score or _optional_float(
+                    detail_post.get("seo_score")
+                    or detail_post.get("seoScore")
+                    or detail_quality.get("seo_score")
+                    or detail_quality.get("seoScore")
+                )
+                geo_score = geo_score or _optional_float(
+                    detail_post.get("geo_score")
+                    or detail_post.get("geoScore")
+                    or detail_quality.get("geo_score")
+                    or detail_quality.get("geoScore")
+                )
+                ctr = ctr or _optional_float(
+                    detail_post.get("ctr")
+                    or detail_post.get("clickThroughRate")
+                    or detail_analytics.get("ctr")
+                    or detail_analytics.get("clickThroughRate")
+                )
+                lighthouse_score = lighthouse_score or _optional_float(
+                    detail_post.get("lighthouse_score")
+                    or detail_post.get("lighthouseScore")
+                    or detail_analytics.get("lighthouse_score")
+                    or detail_analytics.get("lighthouseScore")
+                    or detail_quality.get("lighthouse_score")
+                    or detail_quality.get("lighthouseScore")
+                )
+                if seo_score is None or geo_score is None or ctr is None:
+                    detail_title = str(detail_post.get("title") or post.get("title") or slug).strip()
+                    detail_excerpt = str(detail_post.get("excerpt") or post.get("excerpt") or "").strip()
+                    detail_content = str(detail_post.get("content") or detail_post.get("contentMarkdown") or "").strip()
+                    if detail_title and detail_content:
+                        try:
+                            from app.services.content_ops_service import compute_seo_geo_scores
+
+                            fallback_scores = compute_seo_geo_scores(
+                                title=detail_title,
+                                html_body=detail_content,
+                                excerpt=detail_excerpt,
+                                faq_section=[],
+                            )
+                            seo_score = seo_score or _optional_float(fallback_scores.get("seo_score"))
+                            geo_score = geo_score or _optional_float(fallback_scores.get("geo_score"))
+                            ctr = ctr or _optional_float(fallback_scores.get("ctr_score"))
+                        except Exception:  # noqa: BLE001
+                            pass
         quality_status = str(
             post.get("quality_status")
             or post.get("qualityStatus")
             or quality_payload.get("status")
             or "",
         ).strip() or None
+        canonical_category = _resolve_cloudflare_canonical_category(
+            title=str(post.get("title") or slug),
+            excerpt=str(post.get("excerpt") or ""),
+            raw_category_slug=str(category.get("slug") or "").strip(),
+            raw_category_name=str(category.get("name") or "").strip(),
+            leaf_categories=leaf_categories,
+        )
         index_status = str(
             post.get("index_status")
             or post.get("indexStatus")
@@ -1157,6 +1507,8 @@ def list_cloudflare_posts(db: Session) -> list[dict]:
                 "channel_name": channel_name,
                 "category_name": str(category.get("name") or "").strip(),
                 "category_slug": str(category.get("slug") or "").strip(),
+                "canonical_category_name": str(canonical_category.get("name") or "").strip() or None,
+                "canonical_category_slug": str(canonical_category.get("slug") or "").strip() or None,
                 "remote_id": remote_id,
                 "provider_status": provider_status,
                 "title": str(post.get("title") or slug),
@@ -1171,6 +1523,7 @@ def list_cloudflare_posts(db: Session) -> list[dict]:
                 "seo_score": seo_score,
                 "geo_score": geo_score,
                 "ctr": ctr,
+                "lighthouse_score": lighthouse_score,
                 "index_status": index_status,
                 "index_coverage_state": state.index_coverage_state if state else None,
                 "index_last_checked_at": state.last_checked_at.isoformat() if state and state.last_checked_at else None,
@@ -1188,7 +1541,7 @@ def list_cloudflare_posts(db: Session) -> list[dict]:
 
 def get_cloudflare_overview(db: Session) -> dict:
     values = get_settings_map(db)
-    categories = list_cloudflare_categories(db)
+    categories = [item for item in list_cloudflare_categories(db) if bool(item.get("isLeaf"))]
     posts = list_cloudflare_posts(db)
     site_settings = _fetch_remote_site_settings(values)
     base_url = _public_site_base_url(values) or None
@@ -1211,7 +1564,7 @@ def get_cloudflare_overview(db: Session) -> dict:
 
 def get_cloudflare_prompt_bundle(db: Session) -> dict:
     values = get_settings_map(db)
-    categories = list_cloudflare_categories(db)
+    categories = [item for item in list_cloudflare_categories(db) if bool(item.get("isLeaf"))]
     templates: list[dict] = []
     for category in categories:
         for stage in DEFAULT_PROMPT_STAGES:
@@ -1863,9 +2216,12 @@ def _article_output_contract() -> str:
         '  "inline_collage_prompt": "string"\n'
         "}\n"
         "- html_article must be valid Markdown content for a published article.\n"
-        "- Keep structure SEO-friendly and readable.\n"
+        "- Keep structure SEO-friendly, readable, and blog-like rather than report-like.\n"
+        "- Keep html_article body roughly in the 3000 to 4000 Korean character range when writing Korean Cloudflare posts.\n"
         "- Do not include inline markdown/HTML images in html_article body.\n"
         "- The system inserts one inline collage image separately in the middle of the article body.\n"
+        "- meta_description and excerpt must not appear as visible duplicated summary lines inside html_article.\n"
+        "- faq_section is an appendix block and should appear only once at the very end conceptually.\n"
         "- image_collage_prompt must be one final English prompt for one hero 3x3 collage with exactly 9 distinct panels.\n"
         "- The center panel must be visually dominant and the panel borders must remain visible.\n"
         "- inline_collage_prompt must be one final English prompt for one supporting 3x2 collage with exactly 6 distinct panels.\n"
@@ -1886,15 +2242,13 @@ def _append_no_inline_image_rule(prompt: str) -> str:
 def _append_cloudflare_seo_trust_guard(prompt: str, *, category_slug: str, current_date: str) -> str:
     guard_lines = [
         "[SEO trust + source integrity guard]",
-        f"- Include one explicit timestamp line near the top: 湲곗? ?쒓컖: {current_date} (Asia/Seoul).",
-        "- Include one section that clearly separates ?뺤씤???ъ떎 and 誘명솗???뺣낫.",
+        f"- Include one explicit timestamp line near the top: 기준 시각: {current_date} (Asia/Seoul).",
+        "- Include one short section that clearly separates 확인된 사실 and 미확인 또는 변동 가능 정보.",
         "- Include one source/verification section with 2-5 concrete references or official channels.",
-        "- If no verifiable URL exists, explicitly write: ?뺤씤 媛?ν븳 怨듭떇 URL ?놁쓬(?묒꽦 ?쒖젏 湲곗?).",
+        "- If no verifiable URL exists, explicitly say that no confirmed official URL was available at writing time.",
         "- Do not present rumors or repost claims as confirmed facts.",
         "- Avoid exaggerated or absolute claims unless verifiable evidence is provided.",
-        "- Follow a fixed SEO/GEO/CTR-friendly section order.",
-        "- Required section order: ?듭떖 ?붿빟 -> ?뺤씤???ъ떎 -> 誘명솗???뺣낫/媛??-> ?꾧컻 ?쒕굹由ъ삤 -> ?됰룞 泥댄겕由ъ뒪??-> 異쒖쿂/?뺤씤 寃쎈줈 -> FAQ.",
-        "- Keep at least 4 top-level sections and at least 2 sub-sections.",
+        "- Follow a fixed SEO/GEO/CTR-friendly article flow: hook, why now, concept, how-to, use cases, comparison, pros and cons, conclusion, FAQ appendix.",
         "- In the first 220 characters, state target reader and what they can decide after reading.",
         "- Avoid vague prose. Prefer concrete entities, dates, and actionable checkpoints.",
     ]
@@ -1934,6 +2288,12 @@ def _category_hard_gate(category_slug: str, category_name: str) -> str:
         f"- Every output must fit category '{category_name}' ({category_slug}).",
         "- If the output does not clearly fit this category, regenerate internally before returning.",
     ]
+    if category_slug == "삶을-유용하게":
+        lines.append("- This category is for welfare, benefits, event, and practical living information. Do not drift into mindset essays or quote collections.")
+    if category_slug == "삶의-기름칠":
+        lines.append("- This category is for mindset, routine, reflection, and attitude. Do not drift into welfare, subsidy, application, or event bulletin writing.")
+    if category_slug == "개발과-프로그래밍":
+        lines.append("- This category must stay in AI coding, LLM agents, automation workflows, tool comparison, or practical setup. Do not drift into generic IT news.")
     if category_slug != "미스터리-스토리":
         lines.append("- Do not use mystery, murder, unsolved-case, haunting, or conspiracy angles.")
     if category_slug != "축제와현장":
@@ -2245,14 +2605,10 @@ def _resolve_cloudflare_requested_models(*, settings_map: dict[str, str], runtim
         or (settings_map.get("openai_text_model") or runtime.openai_text_model or "").strip()
         or FREE_TIER_DEFAULT_LARGE_TEXT_MODEL
     )
-    small_stage_model = (
-        (settings_map.get("openai_text_model") or runtime.openai_text_model or "").strip()
-        or FREE_TIER_DEFAULT_SMALL_TEXT_MODEL
-    )
     return (
         large_stage_model,  # topic discovery
         large_stage_model,  # article generation
-        small_stage_model,  # image prompt generation
+        large_stage_model,  # image prompt generation
     )
 
 
@@ -2550,7 +2906,7 @@ def _sync_cloudflare_quality_rows(
 def generate_cloudflare_posts(
     db: Session,
     *,
-    per_category: int = 2,
+    per_category: int = 1,
     category_slugs: list[str] | None = None,
     category_plan: dict[str, int] | None = None,
     manual_topic_plan: dict[str, list[dict[str, Any]]] | None = None,
@@ -3060,14 +3416,14 @@ def generate_cloudflare_posts(
                         title=article_output.title,
                         body_markdown=article_output.html_article,
                         excerpt=article_output.excerpt,
-                    faq_section=[
-                        item.model_dump() if hasattr(item, "model_dump") else dict(item)
-                        for item in (article_output.faq_section or [])
-                        if isinstance(item, dict) or hasattr(item, "model_dump")
-                    ],
-                    similarity_corpus=generated_similarity_corpus,
-                    thresholds=effective_quality_thresholds,
-                )
+                        faq_section=[
+                            item.model_dump() if hasattr(item, "model_dump") else dict(item)
+                            for item in (article_output.faq_section or [])
+                            if isinstance(item, dict) or hasattr(item, "model_dump")
+                        ],
+                        similarity_corpus=generated_similarity_corpus,
+                        thresholds=effective_quality_thresholds,
+                    )
                     quality_assessment["attempt"] = quality_attempt
                     quality_attempts.append(quality_assessment)
                     if quality_assessment["passed"] or not bool(quality_thresholds.get("enabled", 1.0)):
@@ -3176,10 +3532,10 @@ def generate_cloudflare_posts(
                     prompt_model = _route_cloudflare_text_model(
                         db,
                         requested_model=prompt_requested_model,
-                        allow_large=False,
+                        allow_large=True,
                         stage_name="image_prompt_generation",
                     )
-                prompt_provider = get_article_provider(db, model_override=prompt_model, allow_large=False)
+                prompt_provider = get_article_provider(db, model_override=prompt_model, allow_large=True)
                 visual_prompt, _visual_raw = prompt_provider.generate_visual_prompt(image_prompt_base)
                 visual_prompt = _append_hero_only_visual_rule(visual_prompt)
 

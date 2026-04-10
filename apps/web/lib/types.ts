@@ -75,6 +75,11 @@ export interface SyncedBloggerPost {
   content_html: string;
   thumbnail_url?: string | null;
   excerpt_text: string;
+  live_image_count?: number | null;
+  live_cover_present?: boolean | null;
+  live_inline_present?: boolean | null;
+  live_image_issue?: string | null;
+  live_image_audited_at?: string | null;
   synced_at?: string | null;
   index_status: string;
   index_coverage_state?: string | null;
@@ -792,9 +797,12 @@ export interface IntegratedArchiveItem {
   published_url?: string | null;
   thumbnail_url?: string | null;
   labels: string[];
+  canonical_category_name?: string | null;
+  canonical_category_slug?: string | null;
   seo_score?: number | null;
   geo_score?: number | null;
   ctr?: number | null;
+  lighthouse_score?: number | null;
   index_status?: string;
   index_coverage_state?: string | null;
   index_last_checked_at?: string | null;

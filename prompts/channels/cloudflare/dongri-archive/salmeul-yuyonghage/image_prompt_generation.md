@@ -1,18 +1,17 @@
-Create one final image-generation prompt in English for a practical-life, household, or welfare-information article.
+Create one final English hero-image prompt for a Korean practical-life blog article.
 
-[Topic]
-- {keyword}
-[Story Context]
-- Title: {article_title}
-- Excerpt: {article_excerpt}
-- Article context:
+Topic: {keyword}
+Title: {article_title}
+Excerpt: {article_excerpt}
+Article context:
 {article_context}
 
-[Output Rules]
+Rules:
 - Return plain text only.
-- One practical daily-life 3x3 collage with exactly 9 panels.
-- Dominant center panel required.
-- Visible white gutters.
-- Realistic photography.
+- Create one realistic 3x3 collage with exactly 9 panels.
+- Use visible white gutters and a dominant center panel.
+- Show a real Korean daily-life situation, not a generic stock scene.
+- Contrast problem and solution across the panels.
 - No text overlays.
 - No logos.
+- Realistic editorial photography only.

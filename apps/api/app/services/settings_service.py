@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.entities import Setting
-from app.services.model_policy_service import DEFAULT_LIGHTWEIGHT_MODEL
 from app.services.secret_service import decrypt_secret_value, encrypt_secret_value, is_encrypted_secret
 
 
@@ -31,7 +30,7 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     "planner_slot_interval_minutes": DefaultSetting("5", "Planner slot interval minutes"),
     "planner_day_start_time": DefaultSetting("09:00", "Planner day start time in HH:MM"),
     "planner_day_end_time": DefaultSetting("21:00", "Planner day end time in HH:MM"),
-    "planner_brief_model": DefaultSetting(DEFAULT_LIGHTWEIGHT_MODEL, "Planner brief generation model"),
+    "planner_brief_model": DefaultSetting(settings.article_generation_model, "Planner brief generation model"),
     "automation_master_enabled": DefaultSetting("false", "Master gate for every automation path"),
     "automation_scheduler_enabled": DefaultSetting("false", "Enable scheduler tick automation"),
     "automation_publish_queue_enabled": DefaultSetting("false", "Enable publish queue automation"),

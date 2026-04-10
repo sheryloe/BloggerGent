@@ -268,10 +268,10 @@ def test_empty_usage_snapshot_sets_input_and_output_to_zero() -> None:
     assert snapshot.small.used_tokens == 0
 
 
-def test_stage_policy_allows_large_for_topic_and_article_only() -> None:
+def test_stage_policy_allows_large_for_prompt_stages() -> None:
     assert _stage_allows_large_text_model(WorkflowStageType.TOPIC_DISCOVERY) is True
     assert _stage_allows_large_text_model(WorkflowStageType.ARTICLE_GENERATION) is True
-    assert _stage_allows_large_text_model(WorkflowStageType.IMAGE_PROMPT_GENERATION) is False
+    assert _stage_allows_large_text_model(WorkflowStageType.IMAGE_PROMPT_GENERATION) is True
 
 
 def test_stage_default_article_model_is_large() -> None:

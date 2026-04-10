@@ -484,12 +484,12 @@ def render_related_cards_html(
             else ""
         )
         cards.append(
-            "<a href='{link}' style='display:block;text-decoration:none;color:#1f2937;'>"
+            f"<a href='{link}' style='display:block;text-decoration:none;color:#1f2937;'>"
             f"<div style='border:1px solid {card_border};border-radius:18px;padding:14px;background:{card_background};backdrop-filter:blur(8px);'>"
             f"{thumbnail}"
             f"<h3 style='font-size:18px;margin:12px 0 8px;color:{heading_color};'>{title}</h3>"
             f"<p style='font-size:14px;line-height:1.7;color:{body_color};'>{excerpt}</p>"
-            "</div></a>".format(link=link)
+            "</div></a>"
         )
 
     return (

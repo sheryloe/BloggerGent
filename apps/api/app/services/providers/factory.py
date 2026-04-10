@@ -17,7 +17,7 @@ def get_runtime_config(db: Session) -> RuntimeProviderConfig:
     return RuntimeProviderConfig(
         provider_mode=values.get("provider_mode", "mock"),
         openai_api_key=values.get("openai_api_key", ""),
-        openai_text_model=values.get("openai_text_model", "gpt-4.1-mini-2025-04-14"),
+        openai_text_model=values.get("openai_text_model", "gpt-4.1-2025-04-14"),
         openai_image_model=values.get("openai_image_model", "gpt-image-1"),
         topic_discovery_provider=values.get("topic_discovery_provider", "openai"),
         topic_discovery_model=values.get("topic_discovery_model", values.get("openai_text_model", "gpt-4.1-2025-04-14")),

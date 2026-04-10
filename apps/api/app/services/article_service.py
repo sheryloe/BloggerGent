@@ -74,23 +74,18 @@ def resolve_r2_blog_group(
     channel_provider: str | None = None,
 ) -> str:
     normalized_profile = (profile_key or "").strip().lower()
-    normalized_language = (primary_language or "").strip().lower()
     normalized_provider = (channel_provider or "").strip().lower()
 
     if normalized_provider == "cloudflare":
-        return "archive"
+        return "cloudflare/dongri-archive"
 
     if normalized_profile == "korea_travel":
-        if normalized_language == "es":
-            return "korea-travel-es"
-        if normalized_language == "ja":
-            return "korea-travel-ja"
-        return "korea-travel-en"
+        return "blogger/korea-travel"
     if normalized_profile == "world_mystery":
-        return "world-mystery"
+        return "blogger/world-mystery"
     if normalized_profile in {"archive", "cloudflare_archive"}:
-        return "archive"
-    return "archive"
+        return "cloudflare/dongri-archive"
+    return "cloudflare/dongri-archive"
 
 
 def _travel_category_alias_map(primary_language: str | None) -> dict[str, str]:

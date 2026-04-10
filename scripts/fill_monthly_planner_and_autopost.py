@@ -13,7 +13,7 @@ from app.db.session import SessionLocal
 from app.models.entities import Blog, ContentPlanDay, ContentPlanSlot, ManagedChannel, WorkflowStageType
 from app.services.blog_service import ensure_all_blog_workflows, enforce_free_tier_model_policy, get_blog, sync_stage_prompts_from_profile_files
 from app.services.cloudflare_channel_service import sync_cloudflare_prompts_from_files
-from app.services.openai_usage_service import FREE_TIER_DEFAULT_SMALL_TEXT_MODEL
+from app.services.openai_usage_service import FREE_TIER_DEFAULT_LARGE_TEXT_MODEL
 from app.services.planner_service import analyze_day_briefs, apply_day_briefs, create_month_plan, get_calendar
 from app.services.settings_service import upsert_settings
 
@@ -40,7 +40,7 @@ class ChannelRunResult:
 def parse_args() -> argparse.Namespace:
     timezone = ZoneInfo("Asia/Seoul")
     now_local = datetime.now(timezone)
-    parser = argparse.ArgumentParser(description="Fill the monthly planner with Korean briefs and enable 11:00 / 5-minute autopost defaults.")
+    parser = argparse.ArgumentParser(description="Fill the monthly planner, sync prompts, and respect the 2026-04-10 special slot overrides.")
     parser.add_argument("--month", default=now_local.strftime("%Y-%m"), help="Target month in YYYY-MM format.")
     parser.add_argument("--timezone", default="Asia/Seoul", help="Planner timezone.")
     parser.add_argument("--start-time", default="11:00", help="First publish time in HH:MM.")
@@ -107,7 +107,7 @@ def ensure_runtime_defaults(db, *, timezone_name: str, start_time: str, slot_int
         "schedule_timezone": timezone_name,
         "planner_publish_start_time": start_time,
         "planner_slot_interval_minutes": str(max(1, slot_interval_minutes)),
-        "planner_brief_model": FREE_TIER_DEFAULT_SMALL_TEXT_MODEL,
+        "planner_brief_model": FREE_TIER_DEFAULT_LARGE_TEXT_MODEL,
         "publish_min_interval_seconds": str(max(300, publish_min_interval_seconds)),
         "automation_master_enabled": "true",
         "automation_scheduler_enabled": "true",
@@ -284,7 +284,7 @@ def main() -> int:
             "planner_start_time": args.start_time,
             "planner_slot_interval_minutes": args.slot_interval_minutes,
             "publish_min_interval_seconds": max(300, args.publish_min_interval_seconds),
-            "brief_model": FREE_TIER_DEFAULT_SMALL_TEXT_MODEL,
+            "brief_model": FREE_TIER_DEFAULT_LARGE_TEXT_MODEL,
             "effective_fill_start_date": start_date.isoformat(),
             "settings_updates": settings_updates,
             "cloudflare_prompt_sync": cloudflare_prompt_sync,

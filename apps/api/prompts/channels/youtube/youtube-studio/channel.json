@@ -1,0 +1,74 @@
+{
+  "channel_id": "youtube:main",
+  "channel_name": "YouTube Studio",
+  "provider": "youtube",
+  "backup_directory": "channels/youtube/youtube-studio",
+  "backup_files": [
+    "channels/youtube/youtube-studio/performance_review.md",
+    "channels/youtube/youtube-studio/platform_publish.md",
+    "channels/youtube/youtube-studio/thumbnail_generation.md",
+    "channels/youtube/youtube-studio/video_metadata_generation.md"
+  ],
+  "steps": [
+    {
+      "id": "youtube:1",
+      "stage_type": "video_metadata_generation",
+      "stage_label": "영상 메타데이터",
+      "name": "유튜브 메타데이터 에이전트",
+      "role_name": "유튜브 메타데이터 에이전트",
+      "objective": "제목, 설명, 태그, 챕터 초안을 생성합니다.",
+      "provider_hint": "claude_cli",
+      "provider_model": "claude-sonnet",
+      "is_enabled": true,
+      "is_required": false,
+      "prompt_enabled": true,
+      "sort_order": 10,
+      "backup_relative_path": "channels/youtube/youtube-studio/video_metadata_generation.md"
+    },
+    {
+      "id": "youtube:2",
+      "stage_type": "thumbnail_generation",
+      "stage_label": "썸네일 전략",
+      "name": "썸네일 전략 에이전트",
+      "role_name": "썸네일 전략 에이전트",
+      "objective": "썸네일 카피와 레이아웃 지시를 만듭니다.",
+      "provider_hint": "gemini_cli",
+      "provider_model": "gemini-2.5-flash",
+      "is_enabled": true,
+      "is_required": false,
+      "prompt_enabled": true,
+      "sort_order": 20,
+      "backup_relative_path": "channels/youtube/youtube-studio/thumbnail_generation.md"
+    },
+    {
+      "id": "youtube:3",
+      "stage_type": "platform_publish",
+      "stage_label": "플랫폼 게시",
+      "name": "유튜브 발행 에이전트",
+      "role_name": "유튜브 발행 에이전트",
+      "objective": "업로드와 게시 상태 전환을 담당합니다.",
+      "provider_hint": "codex_cli",
+      "provider_model": "gpt-5",
+      "is_enabled": true,
+      "is_required": true,
+      "prompt_enabled": true,
+      "sort_order": 30,
+      "backup_relative_path": "channels/youtube/youtube-studio/platform_publish.md"
+    },
+    {
+      "id": "youtube:4",
+      "stage_type": "performance_review",
+      "stage_label": "성과 분석",
+      "name": "유튜브 분석 에이전트",
+      "role_name": "유튜브 분석 에이전트",
+      "objective": "조회수, CTR, retention 기반 피드백을 제공합니다.",
+      "provider_hint": "claude_cli",
+      "provider_model": "claude-sonnet",
+      "is_enabled": true,
+      "is_required": false,
+      "prompt_enabled": true,
+      "sort_order": 40,
+      "backup_relative_path": "channels/youtube/youtube-studio/performance_review.md"
+    }
+  ]
+}

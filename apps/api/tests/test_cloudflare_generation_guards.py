@@ -96,7 +96,7 @@ def test_cloudflare_quality_gate_relaxes_geo_threshold_for_dev_category() -> Non
     assert thresholds["min_geo_score"] == 40.0
 
 
-def test_cloudflare_requested_models_use_small_for_prompt_stage() -> None:
+def test_cloudflare_requested_models_use_large_for_prompt_stage() -> None:
     runtime = RuntimeProviderConfig(
         provider_mode="live",
         openai_api_key="test-openai",
@@ -121,7 +121,7 @@ def test_cloudflare_requested_models_use_small_for_prompt_stage() -> None:
 
     assert topic_model == "gpt-5.4"
     assert article_model == "gpt-5.4"
-    assert prompt_model == "gpt-4.1-mini"
+    assert prompt_model == "gpt-5.4"
 
 
 def test_cloudflare_requested_models_fallback_to_topic_model_when_article_missing() -> None:
@@ -149,7 +149,7 @@ def test_cloudflare_requested_models_fallback_to_topic_model_when_article_missin
 
     assert topic_model == "gpt-4.1"
     assert article_model == "gpt-4.1"
-    assert prompt_model == "gpt-4.1-mini"
+    assert prompt_model == "gpt-4.1"
 
 
 def test_cloudflare_generation_forces_openai_topic_provider_when_openai_available() -> None:
@@ -167,3 +167,71 @@ def test_cloudflare_generation_forces_openai_topic_provider_when_openai_availabl
     )
 
     assert cloudflare_service._resolve_cloudflare_topic_provider_order_for_generation(runtime) == ["openai"]
+
+
+def test_list_cloudflare_posts_computes_fallback_scores_from_detail(monkeypatch) -> None:
+    class _EmptyResult:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return []
+
+    class _FakeDB:
+        def execute(self, _stmt):
+            return _EmptyResult()
+
+    monkeypatch.setattr(cloudflare_service, "get_settings_map", lambda _db: {"cloudflare_blog_api_base_url": "https://api.example.com"})
+    monkeypatch.setattr(
+        cloudflare_service,
+        "list_cloudflare_categories",
+        lambda _db: [{"id": "cat-dev", "slug": "개발과-프로그래밍", "name": "개발과 프로그래밍", "isLeaf": True}],
+    )
+    monkeypatch.setattr(
+        cloudflare_service,
+        "_list_remote_posts",
+        lambda _values: [
+            {
+                "id": "post-1",
+                "slug": "dev-post",
+                "title": "Cursor 자동화 워크플로우 실전 가이드",
+                "excerpt": "개발 자동화 실전 정리",
+                "publicUrl": "https://dongriarchive.com/ko/post/dev-post",
+                "status": "published",
+                "category": {"id": "cat-dev", "slug": "개발과-프로그래밍", "name": "개발과 프로그래밍"},
+                "tags": [],
+            }
+        ],
+    )
+    monkeypatch.setattr(cloudflare_service, "_fetch_remote_site_settings", lambda _values: {"siteTitle": "Dongri Archive"})
+    monkeypatch.setattr(cloudflare_service, "_public_site_base_url", lambda _values: "https://dongriarchive.com")
+    monkeypatch.setattr(cloudflare_service, "_normalize_base_url", lambda value: str(value or "").strip())
+    monkeypatch.setattr(
+        cloudflare_service,
+        "_fetch_integration_post_detail",
+        lambda _db, _remote_id: {
+            "id": "post-1",
+            "title": "Cursor 자동화 워크플로우 실전 가이드",
+            "excerpt": "개발 자동화 실전 정리",
+            "content": "<h2>문제</h2><p>이 글은 Cursor 자동화 워크플로우와 실제 설정 단계를 정리합니다.</p>"
+            "<h2>설정</h2><h3>도구</h3><p>workflow automation guide</p>"
+            "<h2>비교</h2><h3>무료 vs 유료</h3><p>plan checklist source official evidence</p>"
+            "<a href='https://dongriarchive.com/ko/post/other'>내부 링크</a>"
+            "<a href='/ko/post/another'>관련 글</a>",
+        },
+    )
+
+    from app.services import content_ops_service
+
+    monkeypatch.setattr(
+        content_ops_service,
+        "compute_seo_geo_scores",
+        lambda **_kwargs: {"seo_score": 81, "geo_score": 84, "ctr_score": 83},
+    )
+
+    rows = cloudflare_service.list_cloudflare_posts(_FakeDB())
+
+    assert len(rows) == 1
+    assert rows[0]["seo_score"] == 81
+    assert rows[0]["geo_score"] == 84
+    assert rows[0]["ctr"] == 83

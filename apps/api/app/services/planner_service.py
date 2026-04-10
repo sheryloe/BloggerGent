@@ -61,7 +61,7 @@ from app.services.platform_service import (
 from app.services.prompt_service import get_prompt_template, render_prompt_template
 from app.services.providers.base import ProviderRuntimeError
 from app.services.providers.factory import get_runtime_config
-from app.services.openai_usage_service import FREE_TIER_DEFAULT_SMALL_TEXT_MODEL, route_openai_free_tier_text_model
+from app.services.openai_usage_service import FREE_TIER_DEFAULT_LARGE_TEXT_MODEL, route_openai_free_tier_text_model
 from app.services.settings_service import get_settings_map, upsert_settings
 from app.services.workspace_service import get_managed_channel, list_channel_categories
 from app.tasks.pipeline import run_job
@@ -142,6 +142,11 @@ KOREAN_MANAGEMENT_OUTPUT_INSTRUCTION = (
     "채널 언어와 무관하게 모두 자연스러운 한국어로 작성하세요."
 )
 PLANNER_CATEGORY_RULE_MODES = {"auto", "weekly", "weekdays"}
+SPECIAL_PLAN_DATE = date(2026, 4, 10)
+SPECIAL_BLOGGER_SLOT_COUNT = 6
+SPECIAL_BLOGGER_START_TIME = time(2, 0)
+SPECIAL_BLOGGER_INTERVAL_MINUTES = 60
+SPECIAL_CLOUDFLARE_FALLBACK_START_TIME = time(2, 0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +160,8 @@ class PlannerCategoryDefinition:
     planning_mode: str = "auto"
     weekly_target: int | None = None
     weekdays: tuple[int, ...] = ()
+    schedule_time: str | None = None
+    schedule_timezone: str | None = None
 
 
 @dataclass(slots=True)
@@ -339,6 +346,8 @@ def _apply_category_rule_map(
                 planning_mode=str(rule.get("planning_mode") or "auto"),
                 weekly_target=rule.get("weekly_target"),
                 weekdays=tuple(rule.get("weekdays") or ()),
+                schedule_time=category.schedule_time,
+                schedule_timezone=category.schedule_timezone,
             )
         )
     return applied
@@ -365,6 +374,8 @@ def _build_blogger_categories(db: Session, blog: Blog, settings_map: dict[str, s
                 color=color,
                 sort_order=index,
                 is_active=True,
+                schedule_time=None,
+                schedule_timezone=None,
             )
             for index, (key, name, default_weight, color) in enumerate(preset, start=1)
         ]
@@ -379,13 +390,25 @@ def _build_blogger_categories(db: Session, blog: Blog, settings_map: dict[str, s
                 color=item.color,
                 sort_order=int(item.sort_order or 0),
                 is_active=bool(item.is_active),
+                schedule_time=None,
+                schedule_timezone=None,
             )
             for item in legacy_themes
         ]
 
     fallback_key = _normalize_weight_key(blog.content_category or "general") or "general"
     fallback_name = (blog.content_category or "General").replace("-", " ").title()
-    return [PlannerCategoryDefinition(key=fallback_key, name=fallback_name, weight=1, color="#475569", sort_order=1)]
+    return [
+        PlannerCategoryDefinition(
+            key=fallback_key,
+            name=fallback_name,
+            weight=1,
+            color="#475569",
+            sort_order=1,
+            schedule_time=None,
+            schedule_timezone=None,
+        )
+    ]
 
 
 def _sync_legacy_blogger_themes(
@@ -471,6 +494,8 @@ def _build_cloudflare_categories(db: Session) -> list[PlannerCategoryDefinition]
             color=CLOUDFLARE_CATEGORY_COLORS[(index - 1) % len(CLOUDFLARE_CATEGORY_COLORS)],
             sort_order=index,
             is_active=True,
+            schedule_time=str(item.get("scheduleTime") or "").strip() or None,
+            schedule_timezone=str(item.get("scheduleTimezone") or "").strip() or None,
         )
         for index, item in enumerate(leaf_categories, start=1)
         if str(item.get("slug") or "").strip()
@@ -715,7 +740,14 @@ def _normalize_existing_slots(
     ordered_days = sorted(days, key=lambda item: item.plan_date)
     assignment_map = _build_category_assignments(
         day_specs=[
-            (plan_day.plan_date, max(len(plan_day.slots), int(plan_day.target_post_count or 0)))
+            (
+                plan_day.plan_date,
+                _resolve_day_target_post_count(
+                    context=context,
+                    plan_date=plan_day.plan_date,
+                    default_target=max(len(plan_day.slots), int(plan_day.target_post_count or 0)),
+                ),
+            )
             for plan_day in ordered_days
         ],
         categories=context.categories,
@@ -725,8 +757,48 @@ def _normalize_existing_slots(
             plan_day.slots,
             key=lambda item: (item.slot_order, item.id),
         )
-        expected_times = _build_slot_times(plan_day.plan_date, len(ordered_slots), settings_map)
         expected_categories = assignment_map.get(plan_day.plan_date, [])
+        expected_schedule = _build_day_slot_schedule(
+            context=context,
+            plan_date=plan_day.plan_date,
+            day_categories=expected_categories,
+            settings_map=settings_map,
+        )
+        expected_slot_count = len(expected_schedule)
+        if int(plan_day.target_post_count or 0) != expected_slot_count:
+            plan_day.target_post_count = expected_slot_count
+            changed = True
+
+        if len(ordered_slots) != expected_slot_count:
+            mutable_slots = [slot for slot in ordered_slots if slot.status not in ACTIVE_SLOT_STATUSES]
+            if len(mutable_slots) == len(ordered_slots):
+                while len(ordered_slots) > expected_slot_count:
+                    slot = ordered_slots.pop()
+                    if slot in plan_day.slots:
+                        plan_day.slots.remove(slot)
+                    db.delete(slot)
+                    changed = True
+                while len(ordered_slots) < expected_slot_count:
+                    slot = ContentPlanSlot(
+                        plan_day_id=plan_day.id,
+                        scheduled_for=None,
+                        slot_order=len(ordered_slots) + 1,
+                        status="planned",
+                        result_payload={},
+                    )
+                    plan_day.slots.append(slot)
+                    db.add(slot)
+                    ordered_slots.append(slot)
+                    changed = True
+                _resequence_slots(plan_day, sort_by_time=False)
+                ordered_slots = sorted(
+                    plan_day.slots,
+                    key=lambda item: (item.slot_order, item.id),
+                )
+
+        expected_times = [slot_time for _category, slot_time in expected_schedule]
+        if len(expected_times) != len(ordered_slots):
+            expected_times = _build_slot_times(plan_day.plan_date, len(ordered_slots), settings_map)
         for slot_index, slot in enumerate(ordered_slots):
             fallback_category = valid_categories.get(_slot_category_key(slot) or "") or next(iter(valid_categories.values()))
             if slot_index < len(expected_categories):
@@ -857,6 +929,27 @@ def _build_category_assignments(
     return assignments
 
 
+def _is_special_plan_date(plan_date: date) -> bool:
+    return plan_date == SPECIAL_PLAN_DATE
+
+
+def _resolve_day_target_post_count(
+    *,
+    context: PlannerChannelContext,
+    plan_date: date,
+    default_target: int,
+) -> int:
+    resolved_default = max(int(default_target or 0), 1)
+    if not _is_special_plan_date(plan_date):
+        return resolved_default
+    if context.provider == "blogger":
+        return SPECIAL_BLOGGER_SLOT_COUNT
+    if context.provider == "cloudflare":
+        active_categories = [category for category in context.categories if category.is_active]
+        return max(len(active_categories), 1)
+    return resolved_default
+
+
 def _build_slot_times(day: date, count: int, settings_map: dict[str, str]) -> list[datetime]:
     start_clock = _parse_clock(settings_map.get("planner_publish_start_time"), time(11, 0))
     interval_minutes = _parse_positive_int(settings_map.get("planner_slot_interval_minutes"), 5)
@@ -864,6 +957,50 @@ def _build_slot_times(day: date, count: int, settings_map: dict[str, str]) -> li
     if count <= 1:
         return [start_dt]
     return [start_dt + timedelta(minutes=interval_minutes * index) for index in range(count)]
+
+
+def _build_day_slot_schedule(
+    *,
+    context: PlannerChannelContext,
+    plan_date: date,
+    day_categories: list[PlannerCategoryDefinition],
+    settings_map: dict[str, str],
+) -> list[tuple[PlannerCategoryDefinition, datetime]]:
+    if not day_categories:
+        return []
+
+    if _is_special_plan_date(plan_date) and context.provider == "blogger":
+        start_dt = _to_planner_storage_datetime(datetime.combine(plan_date, SPECIAL_BLOGGER_START_TIME), settings_map)
+        return [
+            (
+                category,
+                start_dt + timedelta(minutes=SPECIAL_BLOGGER_INTERVAL_MINUTES * index),
+            )
+            for index, category in enumerate(day_categories)
+        ]
+
+    if _is_special_plan_date(plan_date) and context.provider == "cloudflare":
+        scheduled_pairs: list[tuple[PlannerCategoryDefinition, datetime]] = []
+        fallback_hour = SPECIAL_CLOUDFLARE_FALLBACK_START_TIME.hour
+        fallback_minute = SPECIAL_CLOUDFLARE_FALLBACK_START_TIME.minute
+        for category in sorted(day_categories, key=lambda item: (item.sort_order, item.name.lower(), item.key)):
+            raw_schedule = str(category.schedule_time or "").strip()
+            has_explicit_schedule = bool(raw_schedule and raw_schedule != "00:00")
+            if has_explicit_schedule:
+                slot_clock = _parse_clock(raw_schedule, SPECIAL_CLOUDFLARE_FALLBACK_START_TIME)
+            else:
+                slot_clock = time(min(fallback_hour, 23), fallback_minute)
+                fallback_hour += 1
+            scheduled_pairs.append(
+                (
+                    category,
+                    _to_planner_storage_datetime(datetime.combine(plan_date, slot_clock), settings_map),
+                )
+            )
+        return sorted(scheduled_pairs, key=lambda item: (item[1], item[0].sort_order, item[0].key))
+
+    slot_times = _build_slot_times(plan_date, len(day_categories), settings_map)
+    return list(zip(day_categories, slot_times))
 
 
 def _resequence_slots(plan_day: ContentPlanDay, *, sort_by_time: bool = False) -> None:
@@ -1507,7 +1644,11 @@ def analyze_day_briefs(
     db.refresh(run)
 
     try:
-        requested_model = settings_map.get("planner_brief_model") or FREE_TIER_DEFAULT_SMALL_TEXT_MODEL
+        requested_model = (
+            settings_map.get("planner_brief_model")
+            or settings_map.get("article_generation_model")
+            or FREE_TIER_DEFAULT_LARGE_TEXT_MODEL
+        )
         attempt_log: list[dict[str, Any]] = []
         latest_prompt = prompt
         latest_model: str | None = None
@@ -1815,31 +1956,45 @@ def create_month_plan(
             db.delete(day)
         db.flush()
 
-    assignment_map = _build_category_assignments(
-        day_specs=[
-            (day_cursor, daily_target)
-            for day_cursor in (
-                start_date + timedelta(days=offset)
-                for offset in range((end_date - start_date).days + 1)
-            )
-        ],
-        categories=context.categories,
-    )
+    day_specs = [
+        (
+            day_cursor,
+            _resolve_day_target_post_count(
+                context=context,
+                plan_date=day_cursor,
+                default_target=daily_target,
+            ),
+        )
+        for day_cursor in (
+            start_date + timedelta(days=offset)
+            for offset in range((end_date - start_date).days + 1)
+        )
+    ]
+    assignment_map = _build_category_assignments(day_specs=day_specs, categories=context.categories)
     if not assignment_map:
         raise ValueError("at least one active category is required")
 
     day_cursor = start_date
     while day_cursor <= end_date:
-        plan_day = _ensure_day(db, context=context, plan_date=day_cursor, target_post_count=daily_target)
+        day_target = _resolve_day_target_post_count(
+            context=context,
+            plan_date=day_cursor,
+            default_target=daily_target,
+        )
+        plan_day = _ensure_day(db, context=context, plan_date=day_cursor, target_post_count=day_target)
         if overwrite or not plan_day.slots:
             if overwrite:
                 for slot in list(plan_day.slots):
                     db.delete(slot)
                 db.flush()
-            times = _build_slot_times(day_cursor, daily_target, settings_map)
             day_categories = assignment_map.get(day_cursor, [])
-            for day_slot_order, slot_time in enumerate(times, start=1):
-                category = day_categories[day_slot_order - 1]
+            day_schedule = _build_day_slot_schedule(
+                context=context,
+                plan_date=day_cursor,
+                day_categories=day_categories,
+                settings_map=settings_map,
+            )
+            for day_slot_order, (category, slot_time) in enumerate(day_schedule, start=1):
                 slot = ContentPlanSlot(
                     plan_day_id=plan_day.id,
                     scheduled_for=slot_time,

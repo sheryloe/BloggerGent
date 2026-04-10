@@ -718,7 +718,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
         {statusMessage ? <p className="mt-4 text-sm text-indigo-600">{statusMessage}</p> : null}
       </section>
 
-      <section className="grid gap-3 xl:grid-cols-[minmax(0,1.92fr)_minmax(340px,0.72fr)]">
+      <section className="grid gap-3">
         <div className="rounded-[22px] bg-white p-3.5 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -775,7 +775,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
 
         <div className="space-y-4">
           <div className="rounded-[22px] bg-white p-2.5 shadow-sm">
-            <div className="flex items-center gap-1 rounded-full bg-slate-100 p-1 text-[12px]">
+            <div className="flex flex-wrap items-center gap-1 rounded-full bg-slate-100 p-1 text-[12px]">
               <button type="button" onClick={() => setQuery({ panel: "day" })} className={`rounded-full px-3 py-1.5 font-semibold ${selectedTab === "day" ? "bg-white text-slate-950 shadow-sm" : "text-slate-600"}`}>
                 일간 계획
               </button>
@@ -1038,7 +1038,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
                 </button>
               </div>
 
-              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
+              <div className="grid gap-2">
                 <Field label="카테고리 검색">
                   <input
                     value={categoryRuleFilter}
@@ -1047,7 +1047,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
                     className={inputClass()}
                   />
                 </Field>
-                <div className="rounded-[16px] bg-slate-50 px-3 py-2.5 text-[12px] text-slate-600">
+                <div className="min-w-0 rounded-[16px] bg-slate-50 px-3 py-2.5 text-[12px] text-slate-600 break-words">
                   {selectedChannel ? `${selectedChannel.name} · ${categories.length}개 카테고리` : `${categories.length}개 카테고리`}
                 </div>
               </div>

@@ -182,7 +182,11 @@ def _get_optional_enabled_step(blog, stage_type: WorkflowStageType):
 
 
 def _stage_allows_large_text_model(stage_type: WorkflowStageType) -> bool:
-    return stage_type in {WorkflowStageType.TOPIC_DISCOVERY, WorkflowStageType.ARTICLE_GENERATION}
+    return stage_type in {
+        WorkflowStageType.TOPIC_DISCOVERY,
+        WorkflowStageType.ARTICLE_GENERATION,
+        WorkflowStageType.IMAGE_PROMPT_GENERATION,
+    }
 
 
 def _default_stage_text_model(*, stage_type: WorkflowStageType, runtime) -> str:

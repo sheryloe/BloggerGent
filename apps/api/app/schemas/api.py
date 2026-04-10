@@ -625,7 +625,7 @@ class CloudflarePromptSyncRead(BaseModel):
 
 
 class CloudflareGenerateRequest(BaseModel):
-    per_category: int = Field(default=2, ge=1, le=5)
+    per_category: int = Field(default=1, ge=1, le=5)
     category_slugs: list[str] = Field(default_factory=list)
     status: str = Field(default="published", pattern="^(published|draft)$")
     sync_sheet: bool = True
@@ -679,9 +679,12 @@ class IntegratedArchiveItemRead(BaseModel):
     published_url: str | None = None
     thumbnail_url: str | None = None
     labels: list[str] = Field(default_factory=list)
+    canonical_category_name: str | None = None
+    canonical_category_slug: str | None = None
     seo_score: float | None = None
     geo_score: float | None = None
     ctr: float | None = None
+    lighthouse_score: float | None = None
     index_status: str = "unknown"
     index_coverage_state: str | None = None
     index_last_checked_at: str | None = None
@@ -989,6 +992,11 @@ class SyncedBloggerPostRead(BaseModel):
     content_html: str = ""
     thumbnail_url: str | None = None
     excerpt_text: str = ""
+    live_image_count: int | None = None
+    live_cover_present: bool | None = None
+    live_inline_present: bool | None = None
+    live_image_issue: str | None = None
+    live_image_audited_at: str | None = None
     synced_at: str | None = None
     index_status: str = "unknown"
     index_coverage_state: str | None = None

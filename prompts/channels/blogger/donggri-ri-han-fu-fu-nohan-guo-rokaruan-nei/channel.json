@@ -48,7 +48,7 @@
       "role_name": "Korea Travel Visual Director",
       "objective": "여행 주제에 맞는 3x3 패널 hero 대표 이미지 프롬프트를 더 정교하게 다듬습니다.",
       "provider_hint": "openai_text",
-      "provider_model": "gpt-4.1-mini-2025-04-14",
+      "provider_model": "gpt-4.1-2025-04-14",
       "is_enabled": true,
       "is_required": false,
       "prompt_enabled": true,

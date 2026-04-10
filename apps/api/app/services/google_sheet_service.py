@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
@@ -16,7 +16,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.entities import Article, Blog, BloggerPost
+from app.models.entities import Article, Blog, BloggerPost, SyncedBloggerPost
 from app.services.blogger_oauth_service import BloggerOAuthError, authorized_google_request
 from app.services.settings_service import get_settings_map
 
@@ -36,6 +36,11 @@ BLOGGER_SNAPSHOT_COLUMNS = [
     "status",
     "published_at",
     "updated_at",
+    "live_image_count",
+    "live_cover_present",
+    "live_inline_present",
+    "live_image_issue",
+    "live_image_audited_at",
     "content_category",
     "category_key",
 ]
@@ -46,12 +51,15 @@ CLOUDFLARE_SNAPSHOT_COLUMNS = [
     "updated_at",
     "category",
     "category_slug",
+    "canonical_category",
+    "canonical_category_slug",
     "remote_id",
     "title",
     "url",
     "excerpt",
     "labels",
     "status",
+    "lighthouse_score",
 ]
 
 PRIORITY_COLUMNS = [
@@ -109,8 +117,15 @@ COLUMN_LABELS_KO = {
     "published_at": "발행일시",
     "created_at": "생성일시",
     "updated_at": "수정일시",
+    "live_image_count": "라이브 이미지 수",
+    "live_cover_present": "라이브 커버 여부",
+    "live_inline_present": "라이브 본문 이미지 여부",
+    "live_image_issue": "라이브 이미지 이슈",
+    "live_image_audited_at": "라이브 이미지 점검 시각",
     "category": "카테고리",
     "category_slug": "카테고리 슬러그",
+    "canonical_category": "정규 카테고리",
+    "canonical_category_slug": "정규 카테고리 슬러그",
     "remote_id": "원격 ID",
     "content_category": "콘텐츠 카테고리",
     "category_key": "카테고리 키",
@@ -121,6 +136,7 @@ COLUMN_LABELS_KO = {
     "seo_score": "SEO 점수",
     "geo_score": "GEO 점수",
     "ctr_score": "CTR 점수",
+    "lighthouse_score": "라이트하우스 점수",
     "dbs_score": "DBS 점수",
     "dbs_grade": "DBS 등급",
     "dbs_confidence": "DBS 신뢰도",
@@ -1598,9 +1614,27 @@ def _build_blogger_rows(db: Session, *, profile_key: str) -> tuple[list[list[str
         .order_by(Article.created_at.desc())
     )
     data = db.execute(query).all()
+    blog_ids = sorted({int(blog.id) for _article, blog, _blogger_post in data if blog is not None})
+    synced_by_key: dict[tuple[int, str], SyncedBloggerPost] = {}
+    if blog_ids:
+        synced_rows = (
+            db.execute(select(SyncedBloggerPost).where(SyncedBloggerPost.blog_id.in_(blog_ids)))
+            .scalars()
+            .all()
+        )
+        for synced_post in synced_rows:
+            key = (int(synced_post.blog_id), _safe_str(synced_post.url))
+            if not key[1]:
+                continue
+            current = synced_by_key.get(key)
+            current_ts = current.synced_at.timestamp() if current is not None and current.synced_at is not None else float("-inf")
+            next_ts = synced_post.synced_at.timestamp() if synced_post.synced_at is not None else float("-inf")
+            if current is None or current_ts < next_ts:
+                synced_by_key[key] = synced_post
     updated_articles = 0
     for article, blog, blogger_post in data:
         labels = article.labels if isinstance(article.labels, list) else []
+        synced_post = synced_by_key.get((int(blog.id), _safe_str(blogger_post.published_url if blogger_post else ""))) if blog else None
         category_label = _safe_str(getattr(article, "editorial_category_label", None))
         category_key = _safe_str(getattr(article, "editorial_category_key", None))
         original_category_label = category_label
@@ -1636,6 +1670,11 @@ def _build_blogger_rows(db: Session, *, profile_key: str) -> tuple[list[list[str
                 _safe_str(blogger_post.post_status.value if blogger_post else "draft"),
                 _format_datetime(blogger_post.published_at if blogger_post else None),
                 _format_datetime(article.updated_at),
+                str(synced_post.live_image_count) if synced_post and synced_post.live_image_count is not None else "",
+                "yes" if synced_post and synced_post.live_cover_present else "no" if synced_post and synced_post.live_cover_present is not None else "",
+                "yes" if synced_post and synced_post.live_inline_present else "no" if synced_post and synced_post.live_inline_present is not None else "",
+                _safe_str(synced_post.live_image_issue if synced_post else ""),
+                _format_datetime(synced_post.live_image_audited_at if synced_post else None),
                 category_label,
                 category_key,
             ]
@@ -1671,12 +1710,15 @@ def _build_cloudflare_rows(db: Session) -> tuple[list[list[str]], int]:
             "due_at": published_at or updated_at or created_at,
             "category": category_cell,
             "category_slug": category_slug,
+            "canonical_category": _safe_str(post.get("canonical_category_name")),
+            "canonical_category_slug": _safe_str(post.get("canonical_category_slug")),
             "remote_id": _safe_str(post.get("remote_id")),
             "title": _safe_str(post.get("title")),
             "url": _safe_str(post.get("published_url")),
             "excerpt": _safe_str(post.get("excerpt")),
             "labels": ", ".join(_safe_str(label) for label in (post.get("labels") or []) if _safe_str(label)),
             "status": status_value,
+            "lighthouse_score": _safe_str(post.get("lighthouse_score")),
             "topic_cluster": category_slug or category_cell or "cloudflare",
             "topic_angle": "channel_post",
             "similarity_score": "",
@@ -1863,3 +1905,4 @@ def sync_google_sheet_snapshot(db: Session, *, initial: bool = False) -> dict:
         "cloudflare_tab": cloudflare_tab,
         "tab_results": tab_results,
     }
+

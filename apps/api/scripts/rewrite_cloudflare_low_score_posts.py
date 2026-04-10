@@ -23,9 +23,9 @@ from app.services.content_ops_service import compute_seo_geo_scores
 from app.services.settings_service import get_settings_map
 
 
-MIN_BODY_CHARS = 2000
-MAX_BODY_CHARS = 3000
-DEFAULT_SCORE_THRESHOLD = 70
+MIN_BODY_CHARS = 3500
+MAX_BODY_CHARS = 4000
+DEFAULT_SCORE_THRESHOLD = 80
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_REPORT_PREFIX = "cloudflare-low-score-rewrite"
 IMAGE_SNIPPET_RE = re.compile(r"!\[[^\]]*]\([^)]+\)|<img\b[^>]*>", re.IGNORECASE)
@@ -40,7 +40,7 @@ HREF_RE = re.compile(r"<a\b[^>]*\bhref=['\"][^'\"]+['\"][^>]*>", re.IGNORECASE)
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Rewrite Cloudflare low-score posts: keep images, rewrite text (2k~3k chars), update tags/meta."
+        description="Rewrite Cloudflare low-score posts: keep images, rewrite text (3.5k~4k chars), update tags/meta."
     )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true", help="Do not send update requests; create plan/report only")
@@ -297,12 +297,14 @@ def _build_prompt(
 - 이미지 마커([[IMG_001]] 형태)는 개수/순서/텍스트를 절대 변경하지 말고 그대로 유지
 - 본문은 공백 포함 {min_chars}~{max_chars}자
 - 문단 수는 최소 14개, 문단당 120자 이상을 목표로 작성
-- 최종 본문 목표 길이: 2200~2800자
+- 최종 본문 목표 길이: 3500~4000자
 - "요약", "summary", "핵심 요약" 섹션 금지
 - 최소 <h2> 4개, 최소 <h3> 2개
 - 본문 안에 <a href="..."> 형태 링크 최소 2개 포함
 - 본문에 "timeline", "checklist", "source", "official", "evidence", "plan" 키워드를 자연스럽게 포함
-- FAQ는 허용되지만 요약 섹션은 금지
+- FAQ는 선택 사항이지만 반드시 마지막 부록 1회만 허용
+- excerpt와 seo_description 문장을 본문 첫 문단이나 중간 문단에 그대로 복붙하지 말 것
+- meta/excerpt 설명 문장은 JSON 필드로만 반환하고, 본문에는 메타 설명용 문장을 따로 쓰지 말 것
 - 근거 없는 사실 추가 금지, 기존 주제/맥락 유지
 - 문체는 단문 요약체 금지, 실제 본문형 설명으로 작성
 - 링크가 있다면 유지하고, 가능하면 문맥상 필요한 href 링크를 2개 이상 포함

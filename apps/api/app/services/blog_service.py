@@ -141,7 +141,7 @@ STAGE_DEFINITIONS: dict[WorkflowStageType, WorkflowStageDefinition] = {
         is_required=False,
         removable=True,
         provider_hint="openai_text",
-        provider_model="gpt-4.1-mini-2025-04-14",
+        provider_model=FREE_TIER_DEFAULT_LARGE_TEXT_MODEL,
         default_name="이미지 프롬프트 정교화 에이전트",
         default_role_name="Image Prompt Refinement Agent",
         default_objective="글쓰기 패키지 결과에 포함된 기본 이미지 프롬프트를 더 세밀한 장면 지시로 다듬습니다.",
@@ -340,7 +340,7 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="여행 주제에 맞는 3x3 패널 hero 대표 이미지 프롬프트를 더 정교하게 다듬습니다.",
                 prompt_file="travel_collage_prompt.md",
                 provider_hint="openai_text",
-                provider_model="gpt-4.1-mini-2025-04-14",
+                provider_model=FREE_TIER_DEFAULT_LARGE_TEXT_MODEL,
                 is_enabled=True,
                 sort_order=30,
             ),
@@ -432,7 +432,7 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="사건 분위기에 맞는 3x3 다큐 스타일 hero 이미지 프롬프트를 더 정교하게 다듬습니다.",
                 prompt_file="mystery_collage_prompt.md",
                 provider_hint="openai_text",
-                provider_model="gpt-4.1-mini-2025-04-14",
+                provider_model=FREE_TIER_DEFAULT_LARGE_TEXT_MODEL,
                 is_enabled=True,
                 sort_order=30,
             ),
@@ -521,7 +521,7 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 objective="본문 기반 대표 이미지 프롬프트를 추가로 정교화합니다.",
                 prompt_file="collage_prompt.md",
                 provider_hint="openai_text",
-                provider_model="gpt-4.1-mini-2025-04-14",
+                provider_model=FREE_TIER_DEFAULT_LARGE_TEXT_MODEL,
                 is_enabled=False,
                 sort_order=30,
             ),
@@ -987,7 +987,7 @@ def ensure_all_blog_workflows(db: Session) -> None:
 def enforce_free_tier_model_policy(db: Session) -> dict[str, object]:
     settings_map = get_settings_map(db)
     desired_settings = {
-        "openai_text_model": FREE_TIER_DEFAULT_SMALL_TEXT_MODEL,
+        "openai_text_model": FREE_TIER_DEFAULT_LARGE_TEXT_MODEL,
         "topic_discovery_model": FREE_TIER_DEFAULT_LARGE_TEXT_MODEL,
         "article_generation_model": FREE_TIER_DEFAULT_LARGE_TEXT_MODEL,
     }
@@ -1012,7 +1012,7 @@ def enforce_free_tier_model_policy(db: Session) -> dict[str, object]:
             elif step.stage_type == WorkflowStageType.IMAGE_PROMPT_GENERATION:
                 if provider_hint not in openai_hints:
                     continue
-                expected_model = FREE_TIER_DEFAULT_SMALL_TEXT_MODEL
+                expected_model = FREE_TIER_DEFAULT_LARGE_TEXT_MODEL
             else:
                 continue
 
@@ -1044,7 +1044,7 @@ def enforce_free_tier_model_policy(db: Session) -> dict[str, object]:
                 "settings_updates": settings_updates,
                 "workflow_updates": workflow_updates,
                 "large_model": FREE_TIER_DEFAULT_LARGE_TEXT_MODEL,
-                "small_model": FREE_TIER_DEFAULT_SMALL_TEXT_MODEL,
+                "fallback_small_model": FREE_TIER_DEFAULT_SMALL_TEXT_MODEL,
             },
         )
     return {

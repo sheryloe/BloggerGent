@@ -6,9 +6,9 @@ from app.services.article_service import (
 
 
 def test_resolve_r2_blog_group_for_korea_travel_languages() -> None:
-    assert resolve_r2_blog_group(profile_key="korea_travel", primary_language="en") == "korea-travel-en"
-    assert resolve_r2_blog_group(profile_key="korea_travel", primary_language="es") == "korea-travel-es"
-    assert resolve_r2_blog_group(profile_key="korea_travel", primary_language="ja") == "korea-travel-ja"
+    assert resolve_r2_blog_group(profile_key="korea_travel", primary_language="en") == "blogger/korea-travel"
+    assert resolve_r2_blog_group(profile_key="korea_travel", primary_language="es") == "blogger/korea-travel"
+    assert resolve_r2_blog_group(profile_key="korea_travel", primary_language="ja") == "blogger/korea-travel"
 
 
 def test_resolve_r2_category_key_for_localized_travel_labels() -> None:
@@ -37,6 +37,6 @@ def test_build_r2_asset_object_key_uses_required_layout() -> None:
         asset_role="cover",
         content=b"test-bytes",
     )
-    assert object_key.startswith("assets/media/world-mystery/mystery/")
+    assert object_key.startswith("assets/media/blogger/world-mystery/mystery/")
     assert "/dyatlov-revisited/" in object_key
     assert object_key.endswith(".webp")

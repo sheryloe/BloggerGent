@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     publish_min_interval_seconds: int = 300
     openai_api_key: str = ""
     openai_admin_api_key: str = ""
-    openai_text_model: str = "gpt-4.1-mini-2025-04-14"
+    openai_text_model: str = "gpt-4.1-2025-04-14"
     article_generation_model: str = "gpt-4.1-2025-04-14"
     openai_image_model: str = "gpt-image-1"
     openai_request_saver_mode: bool = True

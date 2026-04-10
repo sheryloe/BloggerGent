@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import create_engine
@@ -98,6 +99,121 @@ def test_month_plan_accepts_legacy_blog_id_alias(db: Session) -> None:
     assert calendar.channel_id == f"blogger:{blog.id}"
     assert calendar.blog_id == blog.id
     assert calendar.days
+
+
+def test_special_blogger_day_uses_six_hourly_slots(db: Session) -> None:
+    blog = _seed_blog(db, blog_id=34, name="Travel", slug="travel", profile_key="korea_travel")
+
+    calendar = planner_service.create_month_plan(db, channel_id=f"blogger:{blog.id}", month="2026-04", overwrite=True)
+    target_day = next(day for day in calendar.days if str(day.plan_date) == "2026-04-10")
+
+    assert target_day.target_post_count == 6
+    assert len(target_day.slots) == 6
+
+    hours = [
+        datetime.fromisoformat(slot.scheduled_for).astimezone(ZoneInfo("Asia/Seoul")).hour
+        for slot in target_day.slots
+        if slot.scheduled_for
+    ]
+    assert hours == [2, 3, 4, 5, 6, 7]
+
+
+def test_get_calendar_upgrades_existing_special_blogger_day_to_six_slots(db: Session) -> None:
+    blog = _seed_blog(db, blog_id=34, name="Travel", slug="travel", profile_key="korea_travel")
+    plan_day = ContentPlanDay(
+        channel_id=f"blogger:{blog.id}",
+        blog_id=blog.id,
+        plan_date=date(2026, 4, 10),
+        target_post_count=3,
+        status="planned",
+    )
+    db.add(plan_day)
+    db.flush()
+
+    for index, minute in enumerate((0, 5, 10), start=1):
+        db.add(
+            ContentPlanSlot(
+                plan_day_id=plan_day.id,
+                category_key="travel",
+                category_name="Travel",
+                category_color="#0f766e",
+                scheduled_for=datetime(2026, 4, 10, 2, minute, tzinfo=ZoneInfo("UTC")),
+                slot_order=index,
+                status="brief_ready",
+                brief_topic=f"topic-{index}",
+                brief_audience="audience",
+                brief_information_level="basic",
+                brief_extra_context="context",
+                result_payload={},
+            )
+        )
+    db.commit()
+
+    calendar = planner_service.get_calendar(db, channel_id=f"blogger:{blog.id}", month="2026-04")
+    target_day = next(day for day in calendar.days if str(day.plan_date) == "2026-04-10")
+
+    assert target_day.target_post_count == 6
+    assert len(target_day.slots) == 6
+    hours = [
+        datetime.fromisoformat(slot.scheduled_for).astimezone(ZoneInfo("Asia/Seoul")).hour
+        for slot in target_day.slots
+        if slot.scheduled_for
+    ]
+    assert hours == [2, 3, 4, 5, 6, 7]
+
+
+def test_special_cloudflare_day_uses_each_leaf_category_once(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        planner_service,
+        "get_cloudflare_overview",
+        lambda _db: {"channel_id": "dongriarchive", "channel_name": "Dongri Archive"},
+    )
+    monkeypatch.setattr(
+        planner_service,
+        "list_cloudflare_categories",
+        lambda _db: [
+            {
+                "id": "dev",
+                "slug": "개발과-프로그래밍",
+                "name": "개발과 프로그래밍",
+                "isLeaf": True,
+                "scheduleTime": "06:00",
+                "scheduleTimezone": "Asia/Seoul",
+            },
+            {
+                "id": "useful",
+                "slug": "삶을-유용하게",
+                "name": "삶을 유용하게",
+                "isLeaf": True,
+                "scheduleTime": "03:00",
+                "scheduleTimezone": "Asia/Seoul",
+            },
+            {
+                "id": "memo",
+                "slug": "일상과-메모",
+                "name": "일상과 메모",
+                "isLeaf": True,
+                "scheduleTime": "00:00",
+                "scheduleTimezone": "Asia/Seoul",
+            },
+        ],
+    )
+
+    calendar = planner_service.create_month_plan(db, channel_id="cloudflare:dongriarchive", month="2026-04", overwrite=True)
+    target_day = next(day for day in calendar.days if str(day.plan_date) == "2026-04-10")
+
+    assert target_day.target_post_count == 3
+    assert len(target_day.slots) == 3
+    assert {slot.category_key for slot in target_day.slots} == {"개발과-프로그래밍", "삶을-유용하게", "일상과-메모"}
+
+    schedule_map = {
+        slot.category_key: datetime.fromisoformat(slot.scheduled_for).astimezone(ZoneInfo("Asia/Seoul")).strftime("%H:%M")
+        for slot in target_day.slots
+        if slot.scheduled_for
+    }
+    assert schedule_map["삶을-유용하게"] == "03:00"
+    assert schedule_map["개발과-프로그래밍"] == "06:00"
+    assert schedule_map["일상과-메모"] == "02:00"
 
 
 def test_get_calendar_normalizes_legacy_theme_slots(db: Session) -> None:

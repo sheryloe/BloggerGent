@@ -31,6 +31,7 @@ from sqlalchemy.orm import selectinload  # noqa: E402
 
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.entities import Article, Blog, BloggerPost, Image, PostStatus  # noqa: E402
+from app.services.blogger_live_audit_service import fetch_and_audit_blogger_post  # noqa: E402
 from app.services.providers.factory import get_blogger_provider, get_image_provider  # noqa: E402
 from app.services.publishing_service import rebuild_article_html, refresh_article_public_image, upsert_article_blogger_post  # noqa: E402
 from app.services.storage_service import save_public_binary  # noqa: E402
@@ -111,7 +112,22 @@ def _audit_article(article: Article) -> dict[str, Any]:
     image_urls = _extract_image_urls(html_value)
     unique_image_urls = sorted(set(image_urls))
     repeated_single_url = len(image_urls) >= 2 and len(unique_image_urls) == 1
-    image_missing = not hero_image_url or not image_urls
+    post_url = article.blogger_post.published_url if article.blogger_post else ""
+    live_audit = fetch_and_audit_blogger_post(post_url, probe_images=False) if post_url else None
+    live_issue_codes = (
+        [code for code in str(live_audit.live_image_issue or "").split(",") if code]
+        if live_audit is not None
+        else []
+    )
+    live_image_count = live_audit.live_image_count if live_audit is not None else None
+    image_missing = (
+        live_audit is not None
+        and (
+            live_image_count != 2
+            or live_audit.live_cover_present is not True
+            or live_audit.live_inline_present is not True
+        )
+    ) or (not hero_image_url or not image_urls)
     issue_type: list[str] = []
     if placeholder_detected:
         issue_type.append("placeholder")
@@ -119,8 +135,11 @@ def _audit_article(article: Article) -> dict[str, Any]:
         issue_type.append("image_missing")
     if repeated_single_url:
         issue_type.append("repeated_single_url")
+    for code in live_issue_codes:
+        if code not in issue_type:
+            issue_type.append(code)
     return {
-        "post_url": article.blogger_post.published_url if article.blogger_post else "",
+        "post_url": post_url,
         "article_id": article.id,
         "title": article.title,
         "profile_key": article.blog.profile_key if article.blog else "",
@@ -134,6 +153,10 @@ def _audit_article(article: Article) -> dict[str, Any]:
         "inline_image_url": inline_image_url,
         "image_url_count": len(image_urls),
         "unique_image_url_count": len(unique_image_urls),
+        "live_image_count": live_image_count,
+        "live_cover_present": live_audit.live_cover_present if live_audit is not None else None,
+        "live_inline_present": live_audit.live_inline_present if live_audit is not None else None,
+        "live_image_issue": live_audit.live_image_issue if live_audit is not None else "",
     }
 
 
