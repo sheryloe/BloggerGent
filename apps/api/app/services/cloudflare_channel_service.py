@@ -22,6 +22,12 @@ from sqlalchemy.orm import Session
 
 from app.models.entities import Blog, GoogleIndexUrlState, SyncedBloggerPost
 from app.services.audit_service import add_log
+from app.services.dedupe_utils import (
+    dedupe_key as build_dedupe_key,
+    pick_best_status as pick_best_dedupe_status,
+    pick_preferred_url as pick_preferred_dedupe_url,
+    status_priority as dedupe_status_priority,
+)
 from app.services.openai_usage_service import (
     FREE_TIER_DEFAULT_LARGE_TEXT_MODEL,
     route_openai_free_tier_text_model,
@@ -1320,6 +1326,104 @@ def _fetch_integration_post_detail(db: Session, remote_post_id: str) -> dict[str
     return data if isinstance(data, dict) else {}
 
 
+def _cloudflare_item_timestamp(row: dict[str, Any]) -> datetime:
+    for field in ("updated_at", "published_at", "created_at"):
+        parsed = _parse_cloudflare_datetime(row.get(field))
+        if parsed is not None:
+            return parsed
+    return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _cloudflare_item_priority(row: dict[str, Any]) -> tuple[int, datetime, int, str]:
+    status_rank = dedupe_status_priority(str(row.get("status") or "").strip().lower())
+    timestamp = _cloudflare_item_timestamp(row)
+    has_remote_id = 1 if str(row.get("remote_id") or "").strip() else 0
+    remote_id = str(row.get("remote_id") or "").strip()
+    return (status_rank, timestamp, has_remote_id, remote_id)
+
+
+def _pick_first_non_empty(rows: list[dict[str, Any]], field: str):
+    for row in rows:
+        value = row.get(field)
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value
+    return None
+
+
+def _merge_cloudflare_item_group(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    ordered = sorted(rows, key=_cloudflare_item_priority, reverse=True)
+    keeper = dict(ordered[0])
+
+    keeper["status"] = pick_best_dedupe_status(*[str(row.get("status") or "").strip().lower() for row in ordered]) or keeper.get("status")
+    keeper["published_url"] = pick_preferred_dedupe_url(*[row.get("published_url") for row in ordered]) or keeper.get("published_url")
+
+    for score_field in ("seo_score", "geo_score", "ctr", "lighthouse_score"):
+        keeper[score_field] = _pick_first_non_empty(ordered, score_field)
+
+    keeper["index_status"] = _pick_first_non_empty(
+        [row for row in ordered if str(row.get("index_status") or "").strip().lower() not in {"", "unknown"}]
+        or ordered,
+        "index_status",
+    ) or "unknown"
+    keeper["quality_status"] = _pick_first_non_empty(ordered, "quality_status")
+    keeper["thumbnail_url"] = pick_preferred_dedupe_url(*[row.get("thumbnail_url") for row in ordered]) or keeper.get("thumbnail_url")
+    keeper["excerpt"] = _pick_first_non_empty(ordered, "excerpt")
+    keeper["canonical_category_slug"] = _pick_first_non_empty(ordered, "canonical_category_slug")
+    keeper["canonical_category_name"] = _pick_first_non_empty(ordered, "canonical_category_name")
+    keeper["category_slug"] = _pick_first_non_empty(ordered, "category_slug")
+    keeper["category_name"] = _pick_first_non_empty(ordered, "category_name")
+    keeper["published_at"] = _pick_first_non_empty(ordered, "published_at")
+    keeper["updated_at"] = _pick_first_non_empty(ordered, "updated_at")
+    keeper["created_at"] = _pick_first_non_empty(ordered, "created_at")
+
+    labels: list[str] = []
+    seen_labels: set[str] = set()
+    for row in ordered:
+        for raw in row.get("labels") or []:
+            label = str(raw or "").strip()
+            if not label:
+                continue
+            key = label.casefold()
+            if key in seen_labels:
+                continue
+            seen_labels.add(key)
+            labels.append(label)
+    keeper["labels"] = labels
+    return keeper
+
+
+def _dedupe_cloudflare_items(rows: list[dict[str, Any]]) -> list[dict]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        channel_id = str(row.get("channel_id") or "dongriarchive").strip() or "dongriarchive"
+        dedupe_id = build_dedupe_key(
+            scope=f"cloudflare:{channel_id}",
+            url=str(row.get("published_url") or "").strip() or None,
+            title=str(row.get("title") or "").strip() or None,
+            published_at=_parse_cloudflare_datetime(row.get("published_at")),
+        )
+        grouped.setdefault(dedupe_id, []).append(row)
+
+    ordered_unique: list[dict] = []
+    emitted_keys: set[str] = set()
+    for row in rows:
+        channel_id = str(row.get("channel_id") or "dongriarchive").strip() or "dongriarchive"
+        dedupe_id = build_dedupe_key(
+            scope=f"cloudflare:{channel_id}",
+            url=str(row.get("published_url") or "").strip() or None,
+            title=str(row.get("title") or "").strip() or None,
+            published_at=_parse_cloudflare_datetime(row.get("published_at")),
+        )
+        if dedupe_id in emitted_keys:
+            continue
+        emitted_keys.add(dedupe_id)
+        ordered_unique.append(_merge_cloudflare_item_group(grouped[dedupe_id]))
+    return ordered_unique
+
+
 def list_cloudflare_posts(db: Session) -> list[dict]:
     def _optional_float(value: Any) -> float | None:
         if value is None:
@@ -1536,7 +1640,7 @@ def list_cloudflare_posts(db: Session) -> list[dict]:
                 "status": status_value,
             }
         )
-    return items
+    return _dedupe_cloudflare_items(items)
 
 
 def get_cloudflare_overview(db: Session) -> dict:

@@ -7,11 +7,17 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from statistics import mean
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
-
 from sqlalchemy import and_, delete, func, select, tuple_
 from sqlalchemy.orm import Session, selectinload
 
+from app.services.dedupe_utils import (
+    canonicalize_url as canonicalize_dedupe_url,
+    normalize_title as normalize_dedupe_title,
+    pick_best_status as pick_best_dedupe_status,
+    pick_preferred_url as pick_preferred_dedupe_url,
+    status_priority as dedupe_status_priority,
+    url_identity_key as dedupe_url_identity_key,
+)
 from app.models.entities import (
     AIUsageEvent,
     AuditLog,
@@ -114,8 +120,14 @@ def _find_single_fact(db: Session, *, article_id: int | None = None, synced_post
     items = db.execute(query.order_by(AnalyticsArticleFact.id.asc())).scalars().all()
     if not items:
         return None
-    primary = items[0]
-    for extra in items[1:]:
+    if len(items) == 1:
+        return items[0]
+    merged = _merge_fact_group(items).fact
+    primary = next((item for item in items if item.id == merged.id), items[0])
+    _apply_merged_fact_values(primary, merged)
+    for extra in items:
+        if extra.id == primary.id:
+            continue
         db.delete(extra)
     return primary
 
@@ -138,8 +150,42 @@ def _status_filter_values(status: str | None) -> list[str]:
     return [normalized]
 
 
-_TRACKING_QUERY_KEYS = {"amp", "fbclid", "gclid", "m"}
-_TRACKING_QUERY_PREFIXES = ("utm_",)
+_STATUS_PRIORITY: dict[str, int] = {
+    "published": 500,
+    "live": 400,
+    "scheduled": 300,
+    "draft": 200,
+    "failed": 100,
+    "error": 100,
+    "error_deleted": 100,
+}
+
+
+def _status_priority(value: str | None) -> int:
+    return dedupe_status_priority(value, priorities=_STATUS_PRIORITY)
+
+
+def _pick_preferred_status(facts: list[AnalyticsArticleFact]) -> str | None:
+    winner_status: str | None = None
+    winner_rank = -1
+    winner_source_rank = -1
+    winner_id = -1
+
+    for fact in facts:
+        raw_status = str(getattr(fact, "status", "") or "").strip().lower()
+        if not raw_status:
+            continue
+        status_rank = _status_priority(raw_status)
+        source_rank = 2 if str(fact.source_type or "").strip().lower() == "generated" else 1
+        fact_id = int(getattr(fact, "id", 0) or 0)
+        if (status_rank, source_rank, fact_id) > (winner_rank, winner_source_rank, winner_id):
+            winner_status = raw_status
+            winner_rank = status_rank
+            winner_source_rank = source_rank
+            winner_id = fact_id
+    return winner_status
+
+
 _WHITESPACE_RE = re.compile(r"\s+")
 
 
@@ -206,7 +252,11 @@ def _load_fact_enrichment_maps(
     if not pairs:
         return {}, {}
 
-    normalized_pairs = {(blog_id, str(url or "").strip()) for blog_id, url in pairs if str(url or "").strip()}
+    normalized_pairs = {
+        (blog_id, str(url or "").strip())
+        for blog_id, url in pairs
+        if str(url or "").strip() and not str(url or "").strip().startswith("noscheme:")
+    }
     if not normalized_pairs:
         return {}, {}
 
@@ -217,46 +267,40 @@ def _load_fact_enrichment_maps(
         select(SearchConsolePageMetric).where(tuple_(SearchConsolePageMetric.blog_id, SearchConsolePageMetric.url).in_(list(normalized_pairs)))
     ).scalars().all()
 
-    state_map = {(item.blog_id, item.url): item for item in states}
-    ctr_map = {(item.blog_id, item.url): item for item in ctr_rows}
+    state_map: dict[tuple[int, str], GoogleIndexUrlState] = {}
+    ctr_map: dict[tuple[int, str], SearchConsolePageMetric] = {}
+    for item in states:
+        direct_key = (item.blog_id, item.url)
+        state_map[direct_key] = item
+        no_scheme_key = _fact_url_identity_key(item.url)
+        if no_scheme_key:
+            state_map[(item.blog_id, f"noscheme:{no_scheme_key}")] = item
+
+    for item in ctr_rows:
+        direct_key = (item.blog_id, item.url)
+        ctr_map[direct_key] = item
+        no_scheme_key = _fact_url_identity_key(item.url)
+        if no_scheme_key:
+            ctr_map[(item.blog_id, f"noscheme:{no_scheme_key}")] = item
+
     return state_map, ctr_map
 
 
 def _canonicalize_fact_url(url: str | None) -> str | None:
-    normalized = str(url or "").strip()
-    if not normalized:
-        return None
-    try:
-        parsed = urlsplit(normalized)
-    except ValueError:
-        trimmed = normalized[:-1] if normalized.endswith("/") else normalized
-        return trimmed or normalized
+    return canonicalize_dedupe_url(url)
 
-    if not parsed.scheme or not parsed.netloc:
-        trimmed = normalized[:-1] if normalized.endswith("/") else normalized
-        return trimmed or normalized
 
-    filtered_query = [
-        (key, value)
-        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
-        if key and key.lower() not in _TRACKING_QUERY_KEYS and not key.lower().startswith(_TRACKING_QUERY_PREFIXES)
-    ]
-    path = (parsed.path or "").rstrip("/")
-    canonical = urlunsplit(
-        (
-            parsed.scheme.lower(),
-            parsed.netloc.lower(),
-            path,
-            urlencode(filtered_query, doseq=True),
-            "",
-        )
-    )
-    return canonical or normalized
+def _fact_url_identity_key(url: str | None) -> str | None:
+    return dedupe_url_identity_key(url)
+
+
+def _pick_preferred_actual_url(facts: list[AnalyticsArticleFact]) -> str | None:
+    return pick_preferred_dedupe_url(*[str(getattr(fact, "actual_url", "") or "").strip() for fact in facts])
 
 
 def _normalize_title_for_merge(title: str | None) -> str | None:
-    normalized = _WHITESPACE_RE.sub(" ", str(title or "").strip())
-    return normalized.casefold() if normalized else None
+    normalized = normalize_dedupe_title(title)
+    return normalized or None
 
 
 def _fact_match_signature(fact: AnalyticsArticleFact) -> tuple[int, str, str] | None:
@@ -300,10 +344,10 @@ def _group_fact_rows(facts: list[AnalyticsArticleFact]) -> list[list[AnalyticsAr
     fallback_to_url_groups: dict[tuple[int, str, str], set[tuple[int, str]]] = defaultdict(set)
 
     for fact in facts:
-        canonical_url = _canonicalize_fact_url(fact.actual_url)
-        if canonical_url is None:
+        url_identity = _fact_url_identity_key(fact.actual_url)
+        if url_identity is None:
             continue
-        group_key = (fact.blog_id, canonical_url)
+        group_key = (fact.blog_id, url_identity)
         url_groups.setdefault(group_key, []).append(fact)
 
     for group_key, grouped_facts in url_groups.items():
@@ -317,8 +361,8 @@ def _group_fact_rows(facts: list[AnalyticsArticleFact]) -> list[list[AnalyticsAr
 
     fallback_groups: dict[tuple[int, str], list[AnalyticsArticleFact]] = {}
     for fact in facts:
-        canonical_url = _canonicalize_fact_url(fact.actual_url)
-        if canonical_url is not None:
+        url_identity = _fact_url_identity_key(fact.actual_url)
+        if url_identity is not None:
             continue
         signature = _fact_match_signature(fact)
         if signature is not None:
@@ -337,9 +381,9 @@ def _group_fact_rows(facts: list[AnalyticsArticleFact]) -> list[list[AnalyticsAr
     seen_fallback_keys: set[tuple[int, str]] = set()
 
     for fact in facts:
-        canonical_url = _canonicalize_fact_url(fact.actual_url)
-        if canonical_url is not None:
-            group_key = (fact.blog_id, canonical_url)
+        url_identity = _fact_url_identity_key(fact.actual_url)
+        if url_identity is not None:
+            group_key = (fact.blog_id, url_identity)
             if group_key in seen_group_keys:
                 continue
             seen_group_keys.add(group_key)
@@ -368,16 +412,19 @@ def _group_fact_rows(facts: list[AnalyticsArticleFact]) -> list[list[AnalyticsAr
 
 
 def _preferred_canonical_url(facts: list[AnalyticsArticleFact]) -> str | None:
-    ordered = _prefer_generated_facts(facts)
-    for fact in ordered:
-        canonical_url = _canonicalize_fact_url(fact.actual_url)
-        if canonical_url:
-            return canonical_url
-    return None
+    return _pick_preferred_actual_url(facts)
+
+
+def _fact_keeper_priority(fact: AnalyticsArticleFact) -> tuple[int, int, datetime, int]:
+    status_rank = _status_priority(getattr(fact, "status", None))
+    source_rank = 2 if str(getattr(fact, "source_type", "") or "").strip().lower() == "generated" else 1
+    updated_at = _ensure_utc(getattr(fact, "updated_at", None)) or _ensure_utc(getattr(fact, "created_at", None)) or datetime.min.replace(tzinfo=timezone.utc)
+    fact_id = int(getattr(fact, "id", 0) or 0)
+    return (status_rank, source_rank, updated_at, fact_id)
 
 
 def _merge_fact_group(facts: list[AnalyticsArticleFact]) -> MergedAnalyticsFactRow:
-    primary = _prefer_generated_facts(facts)[0]
+    primary = sorted(facts, key=_fact_keeper_priority, reverse=True)[0]
     merged = AnalyticsArticleFact()
     merged.id = primary.id
     merged.blog_id = primary.blog_id
@@ -394,9 +441,9 @@ def _merge_fact_group(facts: list[AnalyticsArticleFact]) -> MergedAnalyticsFactR
     merged.lighthouse_score = _pick_fact_value(facts, "lighthouse_score", prefer_generated=True)
     merged.similarity_score = _pick_fact_value(facts, "similarity_score", prefer_generated=True)
     merged.most_similar_url = _pick_fact_value(facts, "most_similar_url", prefer_generated=True)
-    merged.status = _pick_fact_value(facts, "status", prefer_generated=True)
-    merged.actual_url = _pick_fact_value(facts, "actual_url", prefer_generated=True) or primary.actual_url
-    merged.source_type = "generated" if any(str(fact.source_type or "").strip().lower() == "generated" for fact in facts) else "synced"
+    merged.status = _pick_preferred_status(facts) or _pick_fact_value(facts, "status", prefer_generated=True)
+    merged.actual_url = _pick_preferred_actual_url(facts) or _pick_fact_value(facts, "actual_url", prefer_generated=True) or primary.actual_url
+    merged.source_type = "generated" if any((fact.article_id is not None) or (str(fact.source_type or "").strip().lower() == "generated") for fact in facts) else "synced"
     return MergedAnalyticsFactRow(
         fact=merged,
         source_facts=list(facts),
@@ -456,6 +503,9 @@ def _fact_lookup_keys(*, blog_id: int, url: str | None, canonical_url: str | Non
     preferred_canonical = canonical_url or _canonicalize_fact_url(url)
     if preferred_canonical and (blog_id, preferred_canonical) not in keys:
         keys.append((blog_id, preferred_canonical))
+    no_scheme_key = _fact_url_identity_key(preferred_canonical or normalized)
+    if no_scheme_key and (blog_id, f"noscheme:{no_scheme_key}") not in keys:
+        keys.append((blog_id, f"noscheme:{no_scheme_key}"))
     return keys
 
 
@@ -476,9 +526,9 @@ def _build_merged_fact_context(db: Session, rows: list[MergedAnalyticsFactRow]) 
     synced_post_map = {post.id: post for post in synced_posts}
     live_urls_by_blog: dict[int, set[str]] = defaultdict(set)
     for post in synced_posts:
-        canonical_url = _canonicalize_fact_url(post.url)
-        if canonical_url:
-            live_urls_by_blog[post.blog_id].add(canonical_url)
+        url_identity = _fact_url_identity_key(post.url)
+        if url_identity:
+            live_urls_by_blog[post.blog_id].add(url_identity)
 
     pairs = {
         key
@@ -520,10 +570,13 @@ def _resolve_row_ctr_score(row: MergedAnalyticsFactRow, context: MergedAnalytics
 
 
 def _resolve_row_status_variant(row: MergedAnalyticsFactRow, context: MergedAnalyticsFactContext) -> str:
+    if row.fact.synced_post_id is not None:
+        return "live"
     if any(str(fact.source_type or "").strip().lower() == "synced" for fact in row.source_facts):
         return "live"
     live_urls = context.live_urls_by_blog.get(row.fact.blog_id, set())
-    if row.canonical_url and row.canonical_url in live_urls:
+    row_url_identity = _fact_url_identity_key(row.fact.actual_url)
+    if row_url_identity and row_url_identity in live_urls:
         return "live"
     if not live_urls:
         return "unknown"
@@ -658,29 +711,97 @@ def _report_summary(report: AnalyticsBlogMonthlyReport, stats: list[AnalyticsThe
     )
 
 
+def _pick_best_status(*statuses: str | None) -> str | None:
+    return pick_best_dedupe_status(*statuses, priorities=_STATUS_PRIORITY)
+
+
+def _pick_preferred_url_value(*urls: str | None) -> str | None:
+    return pick_preferred_dedupe_url(*urls)
+
+
+def _apply_merged_fact_values(target: AnalyticsArticleFact, merged: AnalyticsArticleFact) -> None:
+    attrs = (
+        "blog_id",
+        "month",
+        "article_id",
+        "synced_post_id",
+        "published_at",
+        "title",
+        "theme_key",
+        "theme_name",
+        "category",
+        "seo_score",
+        "geo_score",
+        "lighthouse_score",
+        "similarity_score",
+        "most_similar_url",
+        "status",
+        "actual_url",
+        "source_type",
+    )
+    for attr in attrs:
+        setattr(target, attr, getattr(merged, attr))
+    if target.article_id is not None:
+        target.source_type = "generated"
+
+
+def _dedupe_fact_rows_for_blog_month(db: Session, *, blog_id: int, month: str) -> int:
+    facts = db.execute(
+        select(AnalyticsArticleFact)
+        .where(AnalyticsArticleFact.blog_id == blog_id, AnalyticsArticleFact.month == month)
+        .order_by(AnalyticsArticleFact.published_at.desc(), AnalyticsArticleFact.id.desc())
+    ).scalars().all()
+    groups = _group_fact_rows(facts)
+    merged_row_deleted_count = 0
+    for group in groups:
+        if len(group) <= 1:
+            continue
+        merged = _merge_fact_group(group).fact
+        keeper = next((item for item in group if item.id == merged.id), group[0])
+        _apply_merged_fact_values(keeper, merged)
+        for row in group:
+            if row.id == keeper.id:
+                continue
+            db.delete(row)
+            merged_row_deleted_count += 1
+    return merged_row_deleted_count
+
+
 def _apply_article_fact_payload(fact: AnalyticsArticleFact, article: Article, month: str) -> None:
     published_at = getattr(getattr(article, "blogger_post", None), "published_at", None) or article.created_at
+    post_url = getattr(getattr(article, "blogger_post", None), "published_url", None)
     fact.blog_id = article.blog_id
     fact.month = month
     fact.article_id = article.id
-    fact.synced_post_id = None
-    fact.published_at = published_at
-    fact.title = article.title
+    if published_at is not None:
+        if fact.published_at is None:
+            fact.published_at = published_at
+        else:
+            current_published = _ensure_utc(fact.published_at)
+            incoming_published = _ensure_utc(published_at)
+            if incoming_published and (current_published is None or incoming_published >= current_published):
+                fact.published_at = published_at
+    fact.title = article.title or fact.title
     fact.theme_key = article.editorial_category_key or "unassigned"
     fact.theme_name = article.editorial_category_label or "Unassigned"
     fact.category = article.editorial_category_label or "Unassigned"
-    fact.seo_score = _coerce_score(article.quality_seo_score)
-    fact.geo_score = _coerce_score(article.quality_geo_score)
-    fact.lighthouse_score = _coerce_score(article.quality_lighthouse_score)
-    fact.similarity_score = _coerce_score(article.quality_similarity_score)
-    fact.most_similar_url = article.quality_most_similar_url
+    fact.seo_score = _coerce_score(article.quality_seo_score) if article.quality_seo_score is not None else fact.seo_score
+    fact.geo_score = _coerce_score(article.quality_geo_score) if article.quality_geo_score is not None else fact.geo_score
+    fact.lighthouse_score = (
+        _coerce_score(article.quality_lighthouse_score) if article.quality_lighthouse_score is not None else fact.lighthouse_score
+    )
+    fact.similarity_score = (
+        _coerce_score(article.quality_similarity_score) if article.quality_similarity_score is not None else fact.similarity_score
+    )
+    fact.most_similar_url = article.quality_most_similar_url or fact.most_similar_url
     raw_status = (
         getattr(getattr(article, "blogger_post", None), "post_status", None).value
         if getattr(article, "blogger_post", None) and getattr(article.blogger_post, "post_status", None)
         else "draft"
     )
-    fact.status = _normalize_fact_status(raw_status) or str(raw_status or "").strip().lower() or "draft"
-    fact.actual_url = getattr(getattr(article, "blogger_post", None), "published_url", None)
+    incoming_status = _normalize_fact_status(raw_status) or str(raw_status or "").strip().lower() or "draft"
+    fact.status = _pick_best_status(fact.status, incoming_status) or incoming_status
+    fact.actual_url = _pick_preferred_url_value(post_url, fact.actual_url) or fact.actual_url or post_url
     fact.source_type = "generated"
 
 
@@ -688,25 +809,29 @@ def _apply_synced_fact_payload(fact: AnalyticsArticleFact, post: SyncedBloggerPo
     theme_name = _theme_name_from_synced(post)
     fact.blog_id = post.blog_id
     fact.month = month
-    fact.article_id = None
     fact.synced_post_id = post.id
-    fact.published_at = post.published_at
-    fact.title = post.title
-    fact.theme_key = theme_name.lower().replace(" ", "-")
-    fact.theme_name = theme_name
-    fact.category = theme_name
-    fact.seo_score = None
-    fact.geo_score = None
-    fact.lighthouse_score = None
-    fact.similarity_score = None
-    fact.most_similar_url = None
-    fact.status = _normalize_fact_status(post.status) or str(post.status or "").strip().lower() or None
-    fact.actual_url = post.url
-    fact.source_type = "synced"
+    if post.published_at is not None:
+        if fact.published_at is None:
+            fact.published_at = post.published_at
+        else:
+            current_published = _ensure_utc(fact.published_at)
+            incoming_published = _ensure_utc(post.published_at)
+            if incoming_published and (current_published is None or incoming_published >= current_published):
+                fact.published_at = post.published_at
+    if fact.article_id is None:
+        fact.title = post.title
+        fact.theme_key = theme_name.lower().replace(" ", "-")
+        fact.theme_name = theme_name
+        fact.category = theme_name
+    incoming_status = _normalize_fact_status(post.status) or str(post.status or "").strip().lower() or None
+    fact.status = _pick_best_status(fact.status, incoming_status) or incoming_status
+    fact.actual_url = _pick_preferred_url_value(post.url, fact.actual_url) or fact.actual_url or post.url
+    fact.source_type = "generated" if fact.article_id is not None else "synced"
 
 
 def rebuild_blog_month_rollup(db: Session, blog_id: int, month: str, *, commit: bool = True) -> None:
     start_date, end_date = _month_bounds(month)
+    _dedupe_fact_rows_for_blog_month(db, blog_id=blog_id, month=month)
     facts = db.execute(
         select(AnalyticsArticleFact)
         .where(AnalyticsArticleFact.blog_id == blog_id, AnalyticsArticleFact.month == month)
@@ -822,6 +947,8 @@ def upsert_article_fact(db: Session, article_id: int, *, commit: bool = True) ->
         previous_months.add(fact.month)
     _apply_article_fact_payload(fact, article, month)
     touched_months = {month, *previous_months}
+    for month_key in sorted(item for item in touched_months if item):
+        _dedupe_fact_rows_for_blog_month(db, blog_id=article.blog_id, month=month_key)
     if commit:
         db.commit()
         for month_key in sorted(item for item in touched_months if item):
@@ -846,6 +973,8 @@ def upsert_synced_post_fact(db: Session, synced_post_id: int, *, commit: bool = 
         previous_months.add(fact.month)
     _apply_synced_fact_payload(fact, post, month)
     touched_months = {month, *previous_months}
+    for month_key in sorted(item for item in touched_months if item):
+        _dedupe_fact_rows_for_blog_month(db, blog_id=post.blog_id, month=month_key)
     if commit:
         db.commit()
         for month_key in sorted(item for item in touched_months if item):
@@ -881,6 +1010,9 @@ def sync_synced_post_facts_for_blog(db: Session, blog_id: int, *, commit: bool =
         if month:
             touched_months.add(month)
             _apply_synced_fact_payload(fact, post, month)
+
+    for month_key in sorted(item for item in touched_months if item):
+        _dedupe_fact_rows_for_blog_month(db, blog_id=blog_id, month=month_key)
 
     if commit:
         db.commit()

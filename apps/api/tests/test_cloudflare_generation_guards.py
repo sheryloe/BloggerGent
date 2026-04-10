@@ -235,3 +235,72 @@ def test_list_cloudflare_posts_computes_fallback_scores_from_detail(monkeypatch)
     assert rows[0]["seo_score"] == 81
     assert rows[0]["geo_score"] == 84
     assert rows[0]["ctr"] == 83
+
+
+def test_list_cloudflare_posts_merges_scheme_variant_duplicates(monkeypatch) -> None:
+    class _EmptyResult:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return []
+
+    class _FakeDB:
+        def execute(self, _stmt):
+            return _EmptyResult()
+
+    monkeypatch.setattr(cloudflare_service, "get_settings_map", lambda _db: {"cloudflare_blog_api_base_url": "https://api.example.com"})
+    monkeypatch.setattr(
+        cloudflare_service,
+        "list_cloudflare_categories",
+        lambda _db: [{"id": "cat-dev", "slug": "dev-tools", "name": "Dev Tools", "isLeaf": True}],
+    )
+    monkeypatch.setattr(
+        cloudflare_service,
+        "_list_remote_posts",
+        lambda _values: [
+            {
+                "id": "post-a",
+                "slug": "busan-sand-festival-guide",
+                "title": "2026 Busan Haeundae Sand Festival Guide",
+                "excerpt": "Error payload with missing quality",
+                "publicUrl": "http://dongriarchive.com/ko/post/busan-sand-festival-guide?utm_source=x",
+                "status": "error",
+                "seoScore": 88,
+                "geoScore": 77,
+                "category": {"id": "cat-dev", "slug": "dev-tools", "name": "Dev Tools"},
+                "tags": [{"name": "festival"}],
+                "createdAt": "2026-04-07T01:00:00Z",
+                "updatedAt": "2026-04-07T02:00:00Z",
+                "publishedAt": "2026-04-07T02:00:00Z",
+            },
+            {
+                "id": "post-b",
+                "slug": "busan-sand-festival-guide",
+                "title": "2026 Busan Haeundae Sand Festival Guide",
+                "excerpt": "Published payload",
+                "publicUrl": "https://dongriarchive.com/ko/post/busan-sand-festival-guide",
+                "status": "published",
+                "lighthouseScore": 82,
+                "category": {"id": "cat-dev", "slug": "dev-tools", "name": "Dev Tools"},
+                "tags": [{"name": "travel"}],
+                "createdAt": "2026-04-07T01:30:00Z",
+                "updatedAt": "2026-04-07T03:00:00Z",
+                "publishedAt": "2026-04-07T03:00:00Z",
+            },
+        ],
+    )
+    monkeypatch.setattr(cloudflare_service, "_fetch_remote_site_settings", lambda _values: {"siteTitle": "Dongri Archive"})
+    monkeypatch.setattr(cloudflare_service, "_public_site_base_url", lambda _values: "https://dongriarchive.com")
+    monkeypatch.setattr(cloudflare_service, "_normalize_base_url", lambda value: str(value or "").strip())
+
+    rows = cloudflare_service.list_cloudflare_posts(_FakeDB())
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["status"] == "published"
+    assert row["published_url"] == "https://dongriarchive.com/ko/post/busan-sand-festival-guide"
+    assert row["seo_score"] == 88
+    assert row["geo_score"] == 77
+    assert row["lighthouse_score"] == 82
+    assert row["labels"] == ["travel", "festival"]

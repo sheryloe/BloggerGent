@@ -8,6 +8,12 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.models.entities import ManagedChannel, SyncedCloudflarePost
+from app.services.dedupe_utils import (
+    dedupe_key as build_dedupe_key,
+    pick_best_status as pick_best_dedupe_status,
+    pick_preferred_url as pick_preferred_dedupe_url,
+    status_priority as dedupe_status_priority,
+)
 from app.services.cloudflare_channel_service import list_cloudflare_posts
 from app.services.platform_service import ensure_managed_channels
 
@@ -60,6 +66,139 @@ def _extract_slug_from_url(value: str | None) -> str | None:
     return path.split("/")[-1] or None
 
 
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _cloudflare_row_priority(row: SyncedCloudflarePost) -> tuple[int, datetime, int]:
+    status_rank = dedupe_status_priority(str(row.status or "").strip().lower())
+    timestamp = (
+        _as_utc(row.updated_at_remote)
+        or _as_utc(row.published_at)
+        or _as_utc(row.created_at_remote)
+        or _as_utc(row.synced_at)
+        or _as_utc(row.updated_at)
+        or _as_utc(row.created_at)
+        or datetime.min.replace(tzinfo=timezone.utc)
+    )
+    row_id = int(row.id or 0)
+    return (status_rank, timestamp, row_id)
+
+
+def _pick_first_row_value(rows: list[SyncedCloudflarePost], field: str, *, allow_empty_string: bool = False):
+    for row in rows:
+        value = getattr(row, field)
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip() and not allow_empty_string:
+            continue
+        return value
+    return None
+
+
+def _merge_synced_cloudflare_group(rows: list[SyncedCloudflarePost]) -> SyncedCloudflarePost:
+    ordered = sorted(rows, key=_cloudflare_row_priority, reverse=True)
+    keeper = ordered[0]
+    keeper.status = pick_best_dedupe_status(*[row.status for row in ordered]) or keeper.status or "published"
+    keeper.url = pick_preferred_dedupe_url(*[row.url for row in ordered]) or keeper.url
+    keeper.thumbnail_url = pick_preferred_dedupe_url(*[row.thumbnail_url for row in ordered]) or keeper.thumbnail_url
+
+    field_specs = (
+        "slug",
+        "title",
+        "published_at",
+        "created_at_remote",
+        "updated_at_remote",
+        "category_name",
+        "category_slug",
+        "canonical_category_name",
+        "canonical_category_slug",
+        "excerpt_text",
+        "seo_score",
+        "geo_score",
+        "ctr",
+        "lighthouse_score",
+        "index_status",
+        "quality_status",
+    )
+    for field in field_specs:
+        merged_value = _pick_first_row_value(
+            ordered,
+            field,
+            allow_empty_string=field in {"excerpt_text"},
+        )
+        if merged_value is not None:
+            setattr(keeper, field, merged_value)
+
+    labels: list[str] = []
+    seen_labels: set[str] = set()
+    for row in ordered:
+        for raw_label in row.labels or []:
+            label = str(raw_label or "").strip()
+            if not label:
+                continue
+            key = label.casefold()
+            if key in seen_labels:
+                continue
+            seen_labels.add(key)
+            labels.append(label)
+    keeper.labels = labels
+    normalized_synced_at = []
+    for row in ordered:
+        normalized = _as_utc(row.synced_at)
+        if normalized is not None:
+            normalized_synced_at.append(normalized)
+    keeper.synced_at = max(normalized_synced_at or [datetime.now(timezone.utc)])
+    return keeper
+
+
+def _dedupe_synced_cloudflare_rows(db: Session, *, managed_channel_id: int) -> dict[str, Any]:
+    rows = (
+        db.execute(
+            select(SyncedCloudflarePost)
+            .where(SyncedCloudflarePost.managed_channel_id == managed_channel_id)
+            .order_by(SyncedCloudflarePost.id.asc())
+        )
+        .scalars()
+        .all()
+    )
+    grouped: dict[str, list[SyncedCloudflarePost]] = {}
+    for row in rows:
+        key = build_dedupe_key(
+            scope=f"cloudflare:{managed_channel_id}",
+            url=row.url,
+            title=row.title,
+            published_at=row.published_at,
+        )
+        grouped.setdefault(key, []).append(row)
+
+    merged_group_count = 0
+    merged_row_deleted_count = 0
+    sample_merged_keys: list[str] = []
+    for key, items in grouped.items():
+        if len(items) <= 1:
+            continue
+        merged_group_count += 1
+        keeper = _merge_synced_cloudflare_group(items)
+        for row in items:
+            if row.id == keeper.id:
+                continue
+            db.delete(row)
+            merged_row_deleted_count += 1
+        if len(sample_merged_keys) < 20:
+            sample_merged_keys.append(f"{key} -> keep:{keeper.id}")
+
+    return {
+        "merged_group_count": merged_group_count,
+        "merged_row_deleted_count": merged_row_deleted_count,
+        "sample_merged_keys": sample_merged_keys,
+    }
+
+
 def sync_cloudflare_posts(db: Session, *, include_non_published: bool = False) -> dict:
     ensure_managed_channels(db)
     channel = db.execute(
@@ -77,7 +216,7 @@ def sync_cloudflare_posts(db: Session, *, include_non_published: bool = False) -
         .all()
     )
     existing_by_remote_id = {post.remote_post_id: post for post in existing_posts}
-    remote_ids: list[str] = []
+    remote_ids: set[str] = set()
     now = datetime.now(timezone.utc)
 
     for payload in remote_posts:
@@ -88,7 +227,7 @@ def sync_cloudflare_posts(db: Session, *, include_non_published: bool = False) -
         if not include_non_published and not _is_published(status_value):
             continue
 
-        remote_ids.append(remote_post_id)
+        remote_ids.add(remote_post_id)
         post = existing_by_remote_id.get(remote_post_id)
         if post is None:
             post = SyncedCloudflarePost(managed_channel_id=channel.id, remote_post_id=remote_post_id)
@@ -121,15 +260,18 @@ def sync_cloudflare_posts(db: Session, *, include_non_published: bool = False) -
         db.execute(
             delete(SyncedCloudflarePost).where(
                 SyncedCloudflarePost.managed_channel_id == channel.id,
-                SyncedCloudflarePost.remote_post_id.not_in(remote_ids),
+                SyncedCloudflarePost.remote_post_id.not_in(list(remote_ids)),
             )
         )
     else:
         db.execute(delete(SyncedCloudflarePost).where(SyncedCloudflarePost.managed_channel_id == channel.id))
 
+    db.flush()
+    dedupe_report = _dedupe_synced_cloudflare_rows(db, managed_channel_id=channel.id)
     db.commit()
     return {
         "channel_id": channel.channel_id,
         "count": len(remote_ids),
         "last_synced_at": now,
+        "dedupe": dedupe_report,
     }
