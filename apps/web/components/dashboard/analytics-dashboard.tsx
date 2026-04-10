@@ -900,16 +900,16 @@ export function AnalyticsDashboard({ blogs, channels }: AnalyticsDashboardProps)
                     설정 열기
                   </a>
                   <a
-                    href="/google"
+                    href="/analytics"
                     className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-200"
                   >
-                    연동 상태 확인
+                    분석 화면 열기
                   </a>
                 </div>
               ) : null}
               {!indexingScopeGranted ? (
                 <p className="mt-2 text-[11px] leading-5 text-slate-500">
-                  해결 순서: 1) 설정에서 Client ID/Secret/Redirect URI 저장 2) OAuth2 재인증 3) `/google` 화면에서 승인 Scope에 indexing 포함 확인.
+                  해결 순서: 1) 설정에서 Client ID/Secret/Redirect URI 저장 2) OAuth2 재인증 3) 분석 화면에서 승인 Scope에 indexing 포함 여부 확인.
                 </p>
               ) : null}
             </div>

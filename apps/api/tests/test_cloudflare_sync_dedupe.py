@@ -55,6 +55,9 @@ def test_sync_cloudflare_posts_physically_dedupes_scheme_variants(db: Session, m
                 "updated_at": "2026-04-07T02:00:00Z",
                 "labels": ["festival"],
                 "seo_score": 88,
+                "live_image_count": 1,
+                "live_image_issue": "single_image",
+                "live_image_audited_at": "2026-04-07T02:10:00Z",
             },
             {
                 "remote_id": "remote-https",
@@ -66,6 +69,8 @@ def test_sync_cloudflare_posts_physically_dedupes_scheme_variants(db: Session, m
                 "updated_at": "2026-04-07T03:00:00Z",
                 "labels": ["travel"],
                 "lighthouse_score": 82,
+                "live_image_count": 2,
+                "live_image_audited_at": "2026-04-07T03:10:00Z",
             },
         ],
     )
@@ -84,4 +89,48 @@ def test_sync_cloudflare_posts_physically_dedupes_scheme_variants(db: Session, m
     assert row.url == "https://dongriarchive.com/ko/post/busan-sand-festival-guide"
     assert row.seo_score == 88
     assert row.lighthouse_score == 82
+    assert row.live_image_count == 2
+    assert row.live_image_issue is None
+    assert row.live_image_audited_at is not None
     assert row.labels == ["travel", "festival"]
+
+
+def test_sync_cloudflare_posts_does_not_delete_on_remote_fetch_failure(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    channel = ManagedChannel(
+        provider="cloudflare",
+        channel_id="dongri-archive",
+        display_name="Dongri Archive",
+        status="active",
+    )
+    db.add(channel)
+    db.commit()
+    db.refresh(channel)
+
+    existing = SyncedCloudflarePost(
+        managed_channel_id=channel.id,
+        remote_post_id="remote-existing",
+        title="Existing Post",
+        status="published",
+        url="https://dongriarchive.com/ko/post/existing-post",
+    )
+    db.add(existing)
+    db.commit()
+
+    monkeypatch.setattr(cloudflare_sync_service, "ensure_managed_channels", lambda _db: None)
+
+    from app.services.cloudflare_channel_service import CloudflareRemoteFetchError
+
+    def _raise_fetch_error(_db):
+        raise CloudflareRemoteFetchError("simulated_remote_error")
+
+    monkeypatch.setattr(cloudflare_sync_service, "list_cloudflare_posts", _raise_fetch_error)
+
+    result = cloudflare_sync_service.sync_cloudflare_posts(db, include_non_published=True)
+
+    rows = db.execute(
+        select(SyncedCloudflarePost).where(SyncedCloudflarePost.managed_channel_id == channel.id)
+    ).scalars().all()
+    assert result["status"] == "fetch_failed"
+    assert result["count"] == 1
+    assert len(rows) == 1
+    assert rows[0].remote_post_id == "remote-existing"

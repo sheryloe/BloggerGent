@@ -125,6 +125,7 @@ def update_settings(payload: SettingUpdate, db: Session = Depends(get_db)):
     _parse_int_setting(payload.values, "cloudflare_daily_publish_sunday_quota", minimum=0, maximum=24)
     _parse_int_setting(payload.values, "google_indexing_daily_quota", minimum=1, maximum=10000)
     _parse_int_setting(payload.values, "google_indexing_cooldown_days", minimum=1, maximum=60)
+    _parse_int_setting(payload.values, "same_topic_cooldown_days", minimum=1, maximum=30)
     _parse_int_setting(payload.values, "workspace_metrics_sync_interval_hours", minimum=1, maximum=168)
     _parse_int_setting(payload.values, "workspace_metrics_lookback_days", minimum=1, maximum=365)
     _parse_json_object_setting(payload.values, "google_indexing_blog_quota_map")

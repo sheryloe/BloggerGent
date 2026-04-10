@@ -503,6 +503,9 @@ class SyncedCloudflarePost(TimestampMixin, Base):
     geo_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
     ctr: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
     lighthouse_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    live_image_count: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    live_image_issue: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    live_image_audited_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
     index_status: Mapped[str | None] = mapped_column(sa.String(50), nullable=True)
     quality_status: Mapped[str | None] = mapped_column(sa.String(50), nullable=True)
     synced_at: Mapped[datetime] = mapped_column(

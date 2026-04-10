@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 import hashlib
+from html.parser import HTMLParser
 import io
 import json
 import math
@@ -259,6 +260,12 @@ CLOUDFLARE_CANONICAL_CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
 CATEGORY_TOPIC_GUIDANCE: dict[str, str] = {}
 CATEGORY_MODULE_GUIDANCE: dict[str, tuple[str, ...]] = {}
 CATEGORY_IMAGE_GUIDANCE: dict[str, str] = {}
+
+
+class CloudflareRemoteFetchError(RuntimeError):
+    """Raised when Cloudflare public API fetch fails and results are unreliable."""
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -774,8 +781,8 @@ def _list_remote_posts(values: dict[str, str]) -> list[dict]:
         return []
     try:
         payload = _fetch_json(url)
-    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError):
-        return []
+    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise CloudflareRemoteFetchError(f"failed_to_fetch_remote_posts: {exc}") from exc
     return [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
 
 
@@ -1353,6 +1360,80 @@ def _pick_first_non_empty(rows: list[dict[str, Any]], field: str):
     return None
 
 
+def _cloudflare_srcset_first_url(value: str) -> str:
+    for token in str(value or "").split(","):
+        candidate = str(token).strip().split(" ")[0].strip()
+        if candidate:
+            return candidate
+    return ""
+
+
+def _is_renderable_image_candidate(raw_url: str) -> bool:
+    candidate = str(raw_url or "").strip().lower()
+    if not candidate:
+        return False
+    if candidate.startswith("data:") or candidate.startswith("javascript:"):
+        return False
+    return True
+
+
+class _CloudflareImageCountParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.urls: set[str] = set()
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._handle_tag(tag, attrs)
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._handle_tag(tag, attrs)
+
+    def _handle_tag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if str(tag or "").strip().lower() != "img":
+            return
+        attr_map = {str(key or "").strip().lower(): str(value or "").strip() for key, value in attrs}
+        candidate = attr_map.get("src") or _cloudflare_srcset_first_url(attr_map.get("srcset", ""))
+        if not _is_renderable_image_candidate(candidate):
+            return
+        self.urls.add(str(candidate).strip())
+
+
+def _count_renderable_cloudflare_images(html: str | None) -> int:
+    parser = _CloudflareImageCountParser()
+    parser.feed(str(html or ""))
+    parser.close()
+    return len(parser.urls)
+
+
+def _extract_cloudflare_content_html(post_payload: dict[str, Any], detail_payload: dict[str, Any] | None) -> str:
+    detail = detail_payload if isinstance(detail_payload, dict) else {}
+    candidates = (
+        post_payload.get("content_html"),
+        post_payload.get("contentHtml"),
+        post_payload.get("content"),
+        post_payload.get("html"),
+        detail.get("content_html"),
+        detail.get("contentHtml"),
+        detail.get("content"),
+        detail.get("html"),
+        detail.get("contentMarkdown"),
+        detail.get("markdown"),
+    )
+    for item in candidates:
+        value = str(item or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _cloudflare_live_image_issue(image_count: int) -> str | None:
+    if image_count <= 0:
+        return "missing_images"
+    if image_count == 1:
+        return "single_image"
+    return None
+
+
 def _merge_cloudflare_item_group(rows: list[dict[str, Any]]) -> dict[str, Any]:
     ordered = sorted(rows, key=_cloudflare_item_priority, reverse=True)
     keeper = dict(ordered[0])
@@ -1369,6 +1450,32 @@ def _merge_cloudflare_item_group(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "index_status",
     ) or "unknown"
     keeper["quality_status"] = _pick_first_non_empty(ordered, "quality_status")
+
+    live_source = next((row for row in ordered if row.get("live_image_count") is not None), None)
+    if live_source is None:
+        live_source = next(
+            (
+                row
+                for row in ordered
+                if row.get("live_image_issue") is not None or row.get("live_image_audited_at") is not None
+            ),
+            None,
+        )
+    live_count_raw = live_source.get("live_image_count") if live_source else None
+    live_count: int | None
+    try:
+        if live_count_raw is None or (isinstance(live_count_raw, str) and not live_count_raw.strip()):
+            live_count = None
+        else:
+            live_count = int(live_count_raw)
+    except (TypeError, ValueError):
+        live_count = None
+    keeper["live_image_count"] = live_count
+    keeper["live_image_audited_at"] = live_source.get("live_image_audited_at") if live_source else None
+    if live_count is None:
+        keeper["live_image_issue"] = live_source.get("live_image_issue") if live_source else None
+    else:
+        keeper["live_image_issue"] = _cloudflare_live_image_issue(live_count)
     keeper["thumbnail_url"] = pick_preferred_dedupe_url(*[row.get("thumbnail_url") for row in ordered]) or keeper.get("thumbnail_url")
     keeper["excerpt"] = _pick_first_non_empty(ordered, "excerpt")
     keeper["canonical_category_slug"] = _pick_first_non_empty(ordered, "canonical_category_slug")
@@ -1483,6 +1590,7 @@ def list_cloudflare_posts(db: Session) -> list[dict]:
     provider_status = "connected" if _normalize_base_url(values.get("cloudflare_blog_api_base_url")) else "disconnected"
     site_settings = _fetch_remote_site_settings(values)
     channel_name = str(site_settings.get("siteTitle") or "Dongri Archive")
+    audit_timestamp = _utc_now_iso()
     items: list[dict] = []
     for post in posts:
         slug = str(post.get("slug") or "").strip()
@@ -1507,6 +1615,17 @@ def list_cloudflare_posts(db: Session) -> list[dict]:
             or quality_payload.get("seo_score")
             or quality_payload.get("seoScore")
         )
+        detail_post = detail_cache.get(remote_id)
+        content_html = _extract_cloudflare_content_html(post, detail_post)
+        if not content_html and remote_id:
+            if detail_post is None:
+                try:
+                    detail_post = _fetch_integration_post_detail(db, remote_id)
+                except Exception:  # noqa: BLE001
+                    detail_post = {}
+                detail_cache[remote_id] = detail_post
+            content_html = _extract_cloudflare_content_html(post, detail_post)
+
         geo_score = _optional_float(
             post.get("geo_score")
             or post.get("geoScore")
@@ -1528,7 +1647,6 @@ def list_cloudflare_posts(db: Session) -> list[dict]:
             or quality_payload.get("lighthouseScore")
         )
         if (seo_score is None or geo_score is None or ctr is None or lighthouse_score is None) and remote_id:
-            detail_post = detail_cache.get(remote_id)
             if detail_post is None:
                 try:
                     detail_post = _fetch_integration_post_detail(db, remote_id)
@@ -1604,6 +1722,8 @@ def list_cloudflare_posts(db: Session) -> list[dict]:
         ).strip() or "unknown"
         if state and str(state.index_status or "").strip():
             index_status = str(state.index_status).strip()
+        live_image_count = _count_renderable_cloudflare_images(content_html)
+        live_image_issue = _cloudflare_live_image_issue(live_image_count)
         items.append(
             {
                 "provider": "cloudflare",
@@ -1628,6 +1748,9 @@ def list_cloudflare_posts(db: Session) -> list[dict]:
                 "geo_score": geo_score,
                 "ctr": ctr,
                 "lighthouse_score": lighthouse_score,
+                "live_image_count": live_image_count,
+                "live_image_issue": live_image_issue,
+                "live_image_audited_at": audit_timestamp,
                 "index_status": index_status,
                 "index_coverage_state": state.index_coverage_state if state else None,
                 "index_last_checked_at": state.last_checked_at.isoformat() if state and state.last_checked_at else None,

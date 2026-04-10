@@ -832,11 +832,13 @@ def evaluate_topic_guard(
 
     daily_limit = _int_setting(settings_map.get("publish_daily_limit_per_blog"), default=3)
     cluster_hours = _int_setting(settings_map.get("same_cluster_cooldown_hours"), default=24)
+    topic_days = _int_setting(settings_map.get("same_topic_cooldown_days"), default=3)
     angle_days = _int_setting(settings_map.get("same_angle_cooldown_days"), default=7)
     target = target_datetime if target_datetime.tzinfo else target_datetime.replace(tzinfo=timezone.utc)
 
     items = list_effective_topic_memories(db, blog_id)
     cluster_conflicts: list[TopicGuardConflict] = []
+    topic_conflicts: list[TopicGuardConflict] = []
     angle_conflicts: list[TopicGuardConflict] = []
     same_day_count = 0
     target_local_date = _local_date(target, tz)
@@ -855,6 +857,8 @@ def evaluate_topic_guard(
         )
         if item.topic_cluster_key == descriptor.topic_cluster_key and delta < timedelta(hours=cluster_hours):
             cluster_conflicts.append(conflict)
+        elif item.topic_cluster_key == descriptor.topic_cluster_key and delta < timedelta(days=topic_days):
+            topic_conflicts.append(conflict)
         elif (
             item.topic_cluster_key == descriptor.topic_cluster_key
             and item.topic_angle_key == descriptor.topic_angle_key
@@ -867,6 +871,12 @@ def evaluate_topic_guard(
             reason_code="cluster_recently_published",
             message="같은 메인 주제의 글이 최근 24시간 안에 이미 공개 또는 예약되어 있습니다.",
             conflicts=cluster_conflicts[:3],
+        )
+    if topic_conflicts:
+        return TopicGuardViolation(
+            reason_code="same_topic_cooldown",
+            message="같은 주제가 최근 3일 내 이미 게시되었거나 예약되어 있습니다.",
+            conflicts=topic_conflicts[:3],
         )
     if angle_conflicts:
         return TopicGuardViolation(

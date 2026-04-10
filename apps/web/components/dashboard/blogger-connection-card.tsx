@@ -149,7 +149,7 @@ export function BloggerConnectionCard({
             <a href="/guide">Google 설정 가이드</a>
           </Button>
           <Button asChild variant="outline">
-            <a href="/google">Google 데이터 보기</a>
+            <a href="/analytics">분석 보기</a>
           </Button>
         </div>
 

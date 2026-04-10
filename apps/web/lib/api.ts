@@ -19,6 +19,7 @@ import {
   GooglePlaywrightIndexingRequestRead,
   GoogleIntegrationConfig,
   GoogleIndexingActionResult,
+  IntegratedArchiveCategoryGroup,
   IntegratedArchiveItem,
   IntegratedChannelSummary,
   IntegratedRunItem,
@@ -71,6 +72,7 @@ import {
   TrainingControlPayload,
   TrainingSchedule,
   TrainingStatus,
+  SyncedBloggerPostGroupPage,
   SyncedBloggerPostPage,
   HelpTopicRead,
   TelegramPollNowRead,
@@ -411,6 +413,16 @@ export async function getCloudflarePosts() {
   return apiFetch<IntegratedArchiveItem[]>("/cloudflare/posts");
 }
 
+export async function getCloudflarePostsGroupedByCategory() {
+  return apiFetch<IntegratedArchiveCategoryGroup[]>("/cloudflare/posts/grouped-by-category");
+}
+
+export async function refreshCloudflarePosts() {
+  return apiFetch<{ status?: string; channel_id?: string; count: number; last_synced_at?: string | null; dedupe?: Record<string, unknown>; error?: string | null }>("/cloudflare/posts/refresh", {
+    method: "POST",
+  });
+}
+
 export async function getCloudflareRuns() {
   return apiFetch<IntegratedRunItem[]>("/cloudflare/runs");
 }
@@ -436,6 +448,16 @@ export async function getGoogleBlogOverview(blogId: number, days = 28) {
 
 export async function getSyncedBloggerPosts(blogId: number, page = 1, pageSize = 20) {
   return apiFetch<SyncedBloggerPostPage>(`/google/blogs/${blogId}/synced-posts?page=${page}&page_size=${pageSize}`);
+}
+
+export async function getSyncedBloggerPostsGroupedByBlog() {
+  return apiFetch<SyncedBloggerPostGroupPage>("/google/synced-posts/grouped-by-blog");
+}
+
+export async function refreshAllSyncedBloggerPosts() {
+  return apiFetch<{ status: string; refreshed_blog_count: number; refreshed_blog_ids?: number[]; skipped_blog_ids?: number[]; warnings: string[] }>("/google/synced-posts/refresh-all", {
+    method: "POST",
+  });
 }
 
 export async function getGoogleBlogIndexingQuota(blogId: number) {

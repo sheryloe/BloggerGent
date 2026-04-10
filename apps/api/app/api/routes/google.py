@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.models.entities import AnalyticsArticleFact, Blog, SyncedBloggerPost
 from app.schemas.api import (
     BloggerRemotePostRead,
     GoogleBlogIndexingRequest,
@@ -13,6 +17,7 @@ from app.schemas.api import (
     GooglePlaywrightIndexingRequest,
     GoogleBlogOverviewRead,
     GoogleIntegrationConfigRead,
+    SyncedBloggerPostGroupPageRead,
     SyncedBloggerPostPageRead,
 )
 from app.services.blog_service import get_blog
@@ -20,6 +25,7 @@ from app.services.blogger_oauth_service import BloggerOAuthError, get_google_oau
 from app.services.blogger_sync_service import (
     list_recent_synced_blogger_posts,
     list_synced_blogger_posts_page,
+    sync_connected_blogger_posts,
     sync_blogger_posts_for_blog,
 )
 from app.services.google_reporting_service import (
@@ -36,12 +42,76 @@ from app.services.google_indexing_service import (
     request_playwright_indexing,
     request_indexing_for_blog,
 )
+from app.services.dedupe_utils import status_priority as dedupe_status_priority, url_identity_key
 from app.services.settings_service import get_settings_map
 
 router = APIRouter()
 
 
-def _serialize_synced_post(post, state=None) -> dict:
+def _to_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _score_priority(fact: AnalyticsArticleFact) -> tuple[int, int, datetime]:
+    status_rank = dedupe_status_priority(str(fact.status or "").strip().lower())
+    source_rank = 1 if str(fact.source_type or "").strip().lower() == "generated" else 0
+    updated_at = _to_utc(fact.updated_at) or _to_utc(fact.created_at) or _to_utc(fact.published_at) or datetime.min.replace(tzinfo=timezone.utc)
+    return (status_rank, source_rank, updated_at)
+
+
+def _load_score_map_for_blog(db: Session, *, blog_id: int, urls: set[str]) -> dict[str, dict]:
+    identities = {
+        url_identity_key(url)
+        for url in urls
+        if isinstance(url, str) and str(url).strip()
+    }
+    identities = {key for key in identities if key}
+    if not identities:
+        return {}
+
+    rows = (
+        db.execute(
+            select(AnalyticsArticleFact)
+            .where(
+                AnalyticsArticleFact.blog_id == blog_id,
+                AnalyticsArticleFact.actual_url.is_not(None),
+                AnalyticsArticleFact.actual_url != "",
+            )
+            .order_by(AnalyticsArticleFact.id.desc())
+        )
+        .scalars()
+        .all()
+    )
+
+    selected: dict[str, dict] = {}
+    for row in sorted(rows, key=_score_priority, reverse=True):
+        key = url_identity_key(row.actual_url)
+        if not key or key not in identities:
+            continue
+        entry = selected.setdefault(
+            key,
+            {
+                "seo_score": None,
+                "geo_score": None,
+                "lighthouse_score": None,
+            },
+        )
+        if entry["seo_score"] is None and row.seo_score is not None:
+            entry["seo_score"] = row.seo_score
+        if entry["geo_score"] is None and row.geo_score is not None:
+            entry["geo_score"] = row.geo_score
+        if entry["lighthouse_score"] is None and row.lighthouse_score is not None:
+            entry["lighthouse_score"] = row.lighthouse_score
+
+    return selected
+
+
+def _serialize_synced_post(post, state=None, score: dict | None = None, ctr_value: float | None = None) -> dict:
+    score_payload = score or {}
     return {
         "id": post.remote_post_id,
         "title": post.title,
@@ -61,12 +131,29 @@ def _serialize_synced_post(post, state=None) -> dict:
         "live_image_issue": post.live_image_issue,
         "live_image_audited_at": post.live_image_audited_at.isoformat() if post.live_image_audited_at else None,
         "synced_at": post.synced_at.isoformat() if post.synced_at else None,
+        "seo_score": score_payload.get("seo_score"),
+        "geo_score": score_payload.get("geo_score"),
+        "lighthouse_score": score_payload.get("lighthouse_score"),
+        "ctr": ctr_value,
         "index_status": state.index_status if state else "unknown",
         "index_coverage_state": state.index_coverage_state if state else None,
         "index_last_checked_at": state.last_checked_at.isoformat() if state and state.last_checked_at else None,
         "next_eligible_at": state.next_eligible_at.isoformat() if state and state.next_eligible_at else None,
         "last_error": state.last_error if state else None,
     }
+
+
+def _lookup_enrichment_row(enrichment_map: dict, *, blog_id: int, url: str):
+    normalized_url = str(url or "").strip()
+    if not normalized_url:
+        return None
+    direct = enrichment_map.get((blog_id, normalized_url))
+    if direct is not None:
+        return direct
+    identity = url_identity_key(normalized_url)
+    if identity:
+        return enrichment_map.get((blog_id, f"noscheme:{identity}"))
+    return None
 
 
 @router.get("/integrations", response_model=GoogleIntegrationConfigRead)
@@ -145,19 +232,106 @@ def get_google_blog_synced_posts(
         for post in payload["items"]
         if isinstance(post.url, str) and post.url.strip()
     }
-    state_map, _ = load_fact_enrichment_maps(db, pairs=pairs)
+    state_map, ctr_map = load_fact_enrichment_maps(db, pairs=pairs)
+    urls = {post.url.strip() for post in payload["items"] if isinstance(post.url, str) and post.url.strip()}
+    score_map = _load_score_map_for_blog(db, blog_id=blog.id, urls=urls)
+    items: list[dict] = []
+    for post in payload["items"]:
+        if isinstance(post.url, str) and post.url.strip():
+            url_value = post.url.strip()
+            state = _lookup_enrichment_row(state_map, blog_id=blog.id, url=url_value)
+            score = score_map.get(url_identity_key(url_value) or "")
+            ctr_row = _lookup_enrichment_row(ctr_map, blog_id=blog.id, url=url_value)
+            ctr_value = ctr_row.ctr if ctr_row is not None else None
+        else:
+            state = None
+            score = None
+            ctr_value = None
+        items.append(_serialize_synced_post(post, state, score, ctr_value))
+
     return {
-        "items": [
-            _serialize_synced_post(
-                post,
-                state_map.get((blog.id, post.url.strip())) if isinstance(post.url, str) and post.url.strip() else None,
-            )
-            for post in payload["items"]
-        ],
+        "items": items,
         "total": payload["total"],
         "page": payload["page"],
         "page_size": payload["page_size"],
         "last_synced_at": payload["last_synced_at"].isoformat() if payload["last_synced_at"] else None,
+    }
+
+
+@router.get("/synced-posts/grouped-by-blog", response_model=SyncedBloggerPostGroupPageRead)
+def get_google_synced_posts_grouped_by_blog(
+    db: Session = Depends(get_db),
+) -> dict:
+    blogs = (
+        db.execute(
+            select(Blog)
+            .where(
+                or_(
+                    Blog.blogger_blog_id.is_not(None),
+                    Blog.blogger_url.is_not(None),
+                )
+            )
+            .order_by(Blog.id.asc())
+        )
+        .scalars()
+        .all()
+    )
+
+    groups: list[dict] = []
+    for blog in blogs:
+        rows = (
+            db.execute(
+                select(SyncedBloggerPost)
+                .where(SyncedBloggerPost.blog_id == blog.id)
+                .order_by(
+                    SyncedBloggerPost.published_at.desc().nullslast(),
+                    SyncedBloggerPost.updated_at_remote.desc().nullslast(),
+                    SyncedBloggerPost.id.desc(),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        pairs = {
+            (blog.id, row.url.strip())
+            for row in rows
+            if isinstance(row.url, str) and row.url.strip()
+        }
+        state_map, ctr_map = load_fact_enrichment_maps(db, pairs=pairs)
+        score_map = _load_score_map_for_blog(
+            db,
+            blog_id=blog.id,
+            urls={row.url.strip() for row in rows if isinstance(row.url, str) and row.url.strip()},
+        )
+        items = []
+        for row in rows:
+            if isinstance(row.url, str) and row.url.strip():
+                url_value = row.url.strip()
+                state = _lookup_enrichment_row(state_map, blog_id=blog.id, url=url_value)
+                score = score_map.get(url_identity_key(url_value) or "")
+                ctr_row = _lookup_enrichment_row(ctr_map, blog_id=blog.id, url=url_value)
+                ctr_value = ctr_row.ctr if ctr_row is not None else None
+            else:
+                state = None
+                score = None
+                ctr_value = None
+            items.append(_serialize_synced_post(row, state, score, ctr_value))
+
+        last_synced_at = max([item.synced_at for item in rows if item.synced_at is not None], default=None)
+        groups.append(
+            {
+                "blog_id": blog.id,
+                "blog_name": blog.name,
+                "blog_url": blog.blogger_url,
+                "total": len(items),
+                "last_synced_at": last_synced_at.isoformat() if last_synced_at else None,
+                "items": items,
+            }
+        )
+
+    return {
+        "groups": groups,
+        "total_groups": len(groups),
     }
 
 
@@ -181,6 +355,23 @@ def refresh_google_blog_synced_posts(
         "blog_id": result["blog_id"],
         "count": result["count"],
         "last_synced_at": result["last_synced_at"].isoformat() if result["last_synced_at"] else None,
+    }
+
+
+@router.post("/synced-posts/refresh-all")
+def refresh_all_google_blog_synced_posts(
+    db: Session = Depends(get_db),
+) -> dict:
+    sync_result = sync_connected_blogger_posts(db)
+    warnings = list(sync_result.get("warnings") or [])
+    refreshed_blog_ids = [int(item) for item in (sync_result.get("refreshed_blog_ids") or [])]
+    skipped_blog_ids = [int(item) for item in (sync_result.get("skipped_blog_ids") or [])]
+    return {
+        "status": "ok" if not warnings else "partial",
+        "refreshed_blog_count": len(refreshed_blog_ids),
+        "refreshed_blog_ids": refreshed_blog_ids,
+        "skipped_blog_ids": skipped_blog_ids,
+        "warnings": warnings,
     }
 
 

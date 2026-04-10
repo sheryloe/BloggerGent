@@ -685,6 +685,9 @@ class IntegratedArchiveItemRead(BaseModel):
     geo_score: float | None = None
     ctr: float | None = None
     lighthouse_score: float | None = None
+    live_image_count: int | None = None
+    live_image_issue: str | None = None
+    live_image_audited_at: str | None = None
     index_status: str = "unknown"
     index_coverage_state: str | None = None
     index_last_checked_at: str | None = None
@@ -1042,6 +1045,10 @@ class SyncedBloggerPostRead(BaseModel):
     live_image_issue: str | None = None
     live_image_audited_at: str | None = None
     synced_at: str | None = None
+    seo_score: float | None = None
+    geo_score: float | None = None
+    lighthouse_score: float | None = None
+    ctr: float | None = None
     index_status: str = "unknown"
     index_coverage_state: str | None = None
     index_last_checked_at: str | None = None
@@ -1055,6 +1062,28 @@ class SyncedBloggerPostPageRead(BaseModel):
     page: int = 1
     page_size: int = 50
     last_synced_at: str | None = None
+
+
+class SyncedBloggerPostGroupRead(BaseModel):
+    blog_id: int
+    blog_name: str
+    blog_url: str | None = None
+    total: int
+    last_synced_at: str | None = None
+    items: list[SyncedBloggerPostRead] = Field(default_factory=list)
+
+
+class SyncedBloggerPostGroupPageRead(BaseModel):
+    groups: list[SyncedBloggerPostGroupRead] = Field(default_factory=list)
+    total_groups: int = 0
+
+
+class IntegratedArchiveCategoryGroupRead(BaseModel):
+    category_slug: str
+    category_name: str
+    total: int
+    last_synced_at: str | None = None
+    items: list[IntegratedArchiveItemRead] = Field(default_factory=list)
 
 
 class BlogArchiveItemRead(BaseModel):

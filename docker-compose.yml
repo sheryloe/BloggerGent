@@ -3,7 +3,7 @@ name: ${COMPOSE_PROJECT_NAME:-bloggent}
 x-api-common: &api-common
   image: bloggent-api:local
   env_file:
-    - ${SERVICE_ENV_FILE:-.env}
+    - ${SERVICE_ENV_FILE:-env/runtime.settings.env}
   environment:
     DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://bloggent:bloggent@postgres:5432/bloggent}
     REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
@@ -70,6 +70,12 @@ services:
         condition: service_healthy
     ports:
       - "${API_PORT:-8000}:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=3).read()\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     command: >
       sh -c "python -m app.prestart &&
       alembic upgrade heads &&
@@ -81,7 +87,7 @@ services:
       context: .
       dockerfile: infra/docker/web.Dockerfile
     env_file:
-      - ${SERVICE_ENV_FILE:-.env}
+      - ${SERVICE_ENV_FILE:-env/runtime.settings.env}
     environment:
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000/api/v1}
       API_INTERNAL_URL: ${API_INTERNAL_URL:-http://api:8000/api/v1}
@@ -89,13 +95,14 @@ services:
       WATCHPACK_POLLING: "true"
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - ./apps/web:/app
       - web_node_modules:/app/node_modules
       - web_next_cache:/app/.next
     ports:
       - "${WEB_PORT:-3001}:3000"
+    restart: unless-stopped
     command: >
       sh -c "mkdir -p /app/.next &&
       npm run dev -- --hostname 0.0.0.0 --port 3000"
@@ -123,7 +130,8 @@ services:
       redis:
         condition: service_healthy
       api:
-        condition: service_started
+        condition: service_healthy
+    restart: unless-stopped
     command: >
       sh -c "python -m app.prestart &&
       alembic upgrade heads &&
@@ -138,7 +146,8 @@ services:
       redis:
         condition: service_healthy
       api:
-        condition: service_started
+        condition: service_healthy
+    restart: unless-stopped
     command: >
       sh -c "python -m app.prestart &&
       alembic upgrade heads &&

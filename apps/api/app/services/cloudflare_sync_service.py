@@ -14,7 +14,7 @@ from app.services.dedupe_utils import (
     pick_preferred_url as pick_preferred_dedupe_url,
     status_priority as dedupe_status_priority,
 )
-from app.services.cloudflare_channel_service import list_cloudflare_posts
+from app.services.cloudflare_channel_service import CloudflareRemoteFetchError, list_cloudflare_posts
 from app.services.platform_service import ensure_managed_channels
 
 
@@ -39,6 +39,17 @@ def _optional_float(value: Any) -> float | None:
         return None
     try:
         return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    try:
+        return int(value)
     except (TypeError, ValueError):
         return None
 
@@ -134,6 +145,28 @@ def _merge_synced_cloudflare_group(rows: list[SyncedCloudflarePost]) -> SyncedCl
         if merged_value is not None:
             setattr(keeper, field, merged_value)
 
+    live_source = next((row for row in ordered if row.live_image_count is not None), None)
+    if live_source is None:
+        live_source = next(
+            (
+                row
+                for row in ordered
+                if row.live_image_issue is not None or row.live_image_audited_at is not None
+            ),
+            None,
+        )
+    if live_source is not None:
+        keeper.live_image_count = live_source.live_image_count
+        keeper.live_image_audited_at = live_source.live_image_audited_at
+        if live_source.live_image_count is None:
+            keeper.live_image_issue = live_source.live_image_issue
+        elif live_source.live_image_count <= 0:
+            keeper.live_image_issue = "missing_images"
+        elif live_source.live_image_count == 1:
+            keeper.live_image_issue = "single_image"
+        else:
+            keeper.live_image_issue = None
+
     labels: list[str] = []
     seen_labels: set[str] = set()
     for row in ordered:
@@ -207,7 +240,6 @@ def sync_cloudflare_posts(db: Session, *, include_non_published: bool = False) -
     if channel is None:
         raise ValueError("Cloudflare channel is not configured.")
 
-    remote_posts = list_cloudflare_posts(db)
     existing_posts = (
         db.execute(
             select(SyncedCloudflarePost).where(SyncedCloudflarePost.managed_channel_id == channel.id)
@@ -215,6 +247,18 @@ def sync_cloudflare_posts(db: Session, *, include_non_published: bool = False) -
         .scalars()
         .all()
     )
+    try:
+        remote_posts = list_cloudflare_posts(db)
+    except CloudflareRemoteFetchError as exc:
+        db.rollback()
+        return {
+            "channel_id": channel.channel_id,
+            "count": len(existing_posts),
+            "last_synced_at": None,
+            "dedupe": {},
+            "status": "fetch_failed",
+            "error": str(exc),
+        }
     existing_by_remote_id = {post.remote_post_id: post for post in existing_posts}
     remote_ids: set[str] = set()
     now = datetime.now(timezone.utc)
@@ -252,6 +296,9 @@ def sync_cloudflare_posts(db: Session, *, include_non_published: bool = False) -
         post.geo_score = _optional_float(payload.get("geo_score"))
         post.ctr = _optional_float(payload.get("ctr"))
         post.lighthouse_score = _optional_float(payload.get("lighthouse_score"))
+        post.live_image_count = _optional_int(payload.get("live_image_count"))
+        post.live_image_issue = _truncate(payload.get("live_image_issue"), 255)
+        post.live_image_audited_at = _parse_cloudflare_datetime(payload.get("live_image_audited_at"))
         post.index_status = _truncate(payload.get("index_status"), 50)
         post.quality_status = _truncate(payload.get("quality_status"), 50)
         post.synced_at = now
@@ -275,3 +322,61 @@ def sync_cloudflare_posts(db: Session, *, include_non_published: bool = False) -
         "last_synced_at": now,
         "dedupe": dedupe_report,
     }
+
+
+def list_synced_cloudflare_posts(db: Session, *, include_non_published: bool = False) -> list[dict]:
+    channel = db.execute(
+        select(ManagedChannel).where(ManagedChannel.provider == "cloudflare").order_by(ManagedChannel.id.desc())
+    ).scalar_one_or_none()
+    if channel is None:
+        return []
+
+    query = select(SyncedCloudflarePost).where(SyncedCloudflarePost.managed_channel_id == channel.id)
+    if not include_non_published:
+        query = query.where(SyncedCloudflarePost.status.in_(("published", "live")))
+
+    rows = db.execute(
+        query.order_by(
+            SyncedCloudflarePost.published_at.desc().nullslast(),
+            SyncedCloudflarePost.updated_at_remote.desc().nullslast(),
+            SyncedCloudflarePost.id.desc(),
+        )
+    ).scalars().all()
+
+    items: list[dict] = []
+    for row in rows:
+        items.append(
+            {
+                "provider": "cloudflare",
+                "channel_id": channel.channel_id,
+                "channel_name": channel.display_name or channel.channel_id,
+                "category_name": row.category_name,
+                "category_slug": row.category_slug,
+                "canonical_category_name": row.canonical_category_name,
+                "canonical_category_slug": row.canonical_category_slug,
+                "remote_id": row.remote_post_id,
+                "provider_status": "connected",
+                "title": row.title,
+                "excerpt": row.excerpt_text,
+                "published_url": row.url,
+                "thumbnail_url": row.thumbnail_url,
+                "labels": list(row.labels or []),
+                "seo_score": row.seo_score,
+                "geo_score": row.geo_score,
+                "ctr": row.ctr,
+                "lighthouse_score": row.lighthouse_score,
+                "live_image_count": row.live_image_count,
+                "live_image_issue": row.live_image_issue,
+                "live_image_audited_at": row.live_image_audited_at.isoformat() if row.live_image_audited_at else None,
+                "index_status": row.index_status or "unknown",
+                "index_coverage_state": None,
+                "index_last_checked_at": None,
+                "next_eligible_at": None,
+                "last_error": None,
+                "quality_status": row.quality_status,
+                "published_at": row.published_at.isoformat() if row.published_at else None,
+                "updated_at": row.updated_at_remote.isoformat() if row.updated_at_remote else None,
+                "status": row.status,
+            }
+        )
+    return items

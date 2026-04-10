@@ -15,6 +15,7 @@ API_ROOT = REPO_ROOT / "apps" / "api"
 REPORT_ROOT = REPO_ROOT / "storage" / "reports"
 KST = ZoneInfo("Asia/Seoul")
 
+DATABASE_URL_WAS_EXPLICIT = bool(os.environ.get("DATABASE_URL") or os.environ.get("BLOGGENT_DATABASE_URL"))
 if "DATABASE_URL" not in os.environ:
     os.environ["DATABASE_URL"] = os.environ.get(
         "BLOGGENT_DATABASE_URL",
@@ -260,6 +261,9 @@ def _merge_cloudflare_group(rows: list[SyncedCloudflarePost]) -> SyncedCloudflar
         "geo_score",
         "ctr",
         "lighthouse_score",
+        "live_image_count",
+        "live_image_issue",
+        "live_image_audited_at",
         "index_status",
         "quality_status",
     ):
@@ -432,6 +436,8 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.dry_run and args.execute:
         parser.error("--dry-run and --execute cannot be used together.")
+    if args.execute and not DATABASE_URL_WAS_EXPLICIT:
+        parser.error("--execute requires DATABASE_URL or BLOGGENT_DATABASE_URL to be explicitly set.")
     return args
 
 

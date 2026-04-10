@@ -81,6 +81,10 @@ export interface SyncedBloggerPost {
   live_image_issue?: string | null;
   live_image_audited_at?: string | null;
   synced_at?: string | null;
+  seo_score?: number | null;
+  geo_score?: number | null;
+  lighthouse_score?: number | null;
+  ctr?: number | null;
   index_status: string;
   index_coverage_state?: string | null;
   index_last_checked_at?: string | null;
@@ -94,6 +98,20 @@ export interface SyncedBloggerPostPage {
   page: number;
   page_size: number;
   last_synced_at?: string | null;
+}
+
+export interface SyncedBloggerPostGroup {
+  blog_id: number;
+  blog_name: string;
+  blog_url?: string | null;
+  total: number;
+  last_synced_at?: string | null;
+  items: SyncedBloggerPost[];
+}
+
+export interface SyncedBloggerPostGroupPage {
+  groups: SyncedBloggerPostGroup[];
+  total_groups: number;
 }
 
 export interface SearchConsoleSite {
@@ -842,6 +860,9 @@ export interface IntegratedArchiveItem {
   geo_score?: number | null;
   ctr?: number | null;
   lighthouse_score?: number | null;
+  live_image_count?: number | null;
+  live_image_issue?: string | null;
+  live_image_audited_at?: string | null;
   index_status?: string;
   index_coverage_state?: string | null;
   index_last_checked_at?: string | null;
@@ -851,6 +872,14 @@ export interface IntegratedArchiveItem {
   published_at?: string | null;
   updated_at?: string | null;
   status: string;
+}
+
+export interface IntegratedArchiveCategoryGroup {
+  category_slug: string;
+  category_name: string;
+  total: number;
+  last_synced_at?: string | null;
+  items: IntegratedArchiveItem[];
 }
 
 export interface IntegratedRunItem {

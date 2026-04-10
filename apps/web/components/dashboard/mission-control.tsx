@@ -135,7 +135,7 @@ function roomHref(room: ManagedChannelRead) {
   if (room.provider === "blogger") return "/planner";
   if (room.provider === "youtube") return `/content-ops?type=youtube&channel=${encodeURIComponent(room.channelId)}`;
   if (room.provider === "instagram") return `/content-ops?type=instagram&channel=${encodeURIComponent(room.channelId)}`;
-  if (room.provider === "cloudflare") return "/google";
+  if (room.provider === "cloudflare") return "/analytics/cloudflare";
   return "/dashboard";
 }
 
@@ -335,7 +335,7 @@ export function MissionControl({ mission }: MissionControlProps) {
           </div>
           <ActionRow href="/settings" title="연동 설정" description="OAuth, API 키, 플랫폼 연결을 먼저 정리합니다." />
           <ActionRow href="/admin" title="관리자 설정" description="게시 플래너 운영, 자동화, 품질 / 발행 기준을 조정합니다." />
-          <ActionRow href="/google" title="SEO / 색인" description="연결된 블로그별 Search Console, GA4, 색인 상태를 봅니다." />
+          <ActionRow href="/analytics" title="분석" description="연결된 블로그별 게시 품질, 성과, 운영 상태를 확인합니다." />
           <ActionRow href="/ops-health" title="Ops Monitor" description="실시간 동기화와 장애 징후, 수동 복구 경로를 확인합니다." />
         </article>
       </section>

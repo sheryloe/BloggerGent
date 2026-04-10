@@ -19,8 +19,8 @@ HELP_TOPICS: tuple[HelpTopic, ...] = (
     HelpTopic(
         topic_id="ops-overview",
         title="운영 제어 개요",
-        summary="실시간 운영 점검, 수동 동기화, 자동화 게이트를 한 번에 확인하는 기본 운영 토픽입니다.",
-        tags=("ops", "운영", "모니터링"),
+        summary="대시보드에서 운영 상태, 대기열, 동기화 상태를 빠르게 확인하는 기본 운영 토픽입니다.",
+        tags=("ops", "운영", "모니터"),
         related_screens=("/dashboard", "/ops-health", "/admin"),
         commands=("/ops status", "/ops queue", "/ops sync-now"),
         deep_links=("/dashboard", "/ops-health", "/admin"),
@@ -29,8 +29,8 @@ HELP_TOPICS: tuple[HelpTopic, ...] = (
     HelpTopic(
         topic_id="ops-commands",
         title="Telegram 운영 명령",
-        summary="텔레그램에서 콘텐츠 운영 큐와 리뷰 승인/적용을 제어하는 명령 모음입니다.",
-        tags=("telegram", "ops", "명령어"),
+        summary="텔레그램에서 콘텐츠 운영 제어, 리뷰 확인/적용을 수행하는 명령 모음입니다.",
+        tags=("telegram", "ops", "명령"),
         related_screens=("/settings", "/help"),
         commands=(
             "/ops status",
@@ -47,8 +47,8 @@ HELP_TOPICS: tuple[HelpTopic, ...] = (
     ),
     HelpTopic(
         topic_id="settings-telegram",
-        title="Telegram 연결 점검",
-        summary="봇 토큰/채팅 ID 설정, 테스트 발송, 수동 poll 실행 순서를 정리한 토픽입니다.",
+        title="Telegram 연결 설정",
+        summary="봇 토큰, 채팅 ID 설정과 테스트 발송/수동 poll 실행 순서를 정리한 토픽입니다.",
         tags=("telegram", "settings", "runbook"),
         related_screens=("/settings", "/help"),
         commands=(
@@ -63,7 +63,7 @@ HELP_TOPICS: tuple[HelpTopic, ...] = (
     HelpTopic(
         topic_id="planner-monthly",
         title="월간 플래너 운영",
-        summary="선택 채널 기준 월간 슬롯 생성, 브리프 분석, 일괄 생성 실행 절차를 정리합니다.",
+        summary="채널 기준 월간 슬롯 생성, 브리프 분석, 실행 상태 점검 절차를 정리합니다.",
         tags=("planner", "월간", "콘텐츠"),
         related_screens=("/planner", "/content-ops"),
         commands=(
@@ -77,15 +77,15 @@ HELP_TOPICS: tuple[HelpTopic, ...] = (
     HelpTopic(
         topic_id="analytics-lighthouse-indexing",
         title="Lighthouse + 색인 동기화",
-        summary="LIVE(published) 게시글 기준 Lighthouse 점수와 색인 상태를 동기화하는 운영 절차입니다.",
+        summary="LIVE(published) 게시글 기준 Lighthouse 점수와 색인 상태를 동기화하는 운영 점검 토픽입니다.",
         tags=("analytics", "lighthouse", "indexing"),
-        related_screens=("/analytics/blogger", "/google"),
+        related_screens=("/analytics/blogger", "/analytics"),
         commands=(
             "python scripts/sync_lighthouse_scores.py --published-only --form-factor mobile",
             "POST /api/v1/analytics/indexing/refresh",
             "POST /api/v1/google/indexing/status-refresh",
         ),
-        deep_links=("/analytics/blogger", "/google", "/help?topic=analytics-lighthouse-indexing"),
+        deep_links=("/analytics/blogger", "/analytics", "/help?topic=analytics-lighthouse-indexing"),
         runbook="live-published-lighthouse-indexing-sync",
     ),
 )

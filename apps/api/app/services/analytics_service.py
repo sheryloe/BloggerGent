@@ -827,6 +827,22 @@ def _apply_synced_fact_payload(fact: AnalyticsArticleFact, post: SyncedBloggerPo
     fact.status = _pick_best_status(fact.status, incoming_status) or incoming_status
     fact.actual_url = _pick_preferred_url_value(post.url, fact.actual_url) or fact.actual_url or post.url
     fact.source_type = "generated" if fact.article_id is not None else "synced"
+    if fact.seo_score is None or fact.geo_score is None:
+        try:
+            from app.services.content_ops_service import compute_seo_geo_scores
+
+            score_payload = compute_seo_geo_scores(
+                title=post.title,
+                html_body=post.content_html,
+                excerpt=post.excerpt_text,
+                faq_section=[],
+            )
+            if fact.seo_score is None:
+                fact.seo_score = _coerce_score(score_payload.get("seo_score"))
+            if fact.geo_score is None:
+                fact.geo_score = _coerce_score(score_payload.get("geo_score"))
+        except Exception:
+            pass
 
 
 def rebuild_blog_month_rollup(db: Session, blog_id: int, month: str, *, commit: bool = True) -> None:

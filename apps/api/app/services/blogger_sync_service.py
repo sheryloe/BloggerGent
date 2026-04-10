@@ -5,9 +5,10 @@ import httpx
 import logging
 import re
 from datetime import datetime, timezone
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.entities import Blog, SyncedBloggerPost
@@ -361,24 +362,39 @@ def sync_blogger_posts_for_blog(db: Session, blog: Blog) -> dict:
         raise
 
 
-def sync_connected_blogger_posts(db: Session) -> list[str]:
+def sync_connected_blogger_posts(db: Session) -> dict[str, Any]:
     warnings: list[str] = []
+    refreshed_blog_ids: list[int] = []
+    skipped_blog_ids: list[int] = []
     blogs = db.execute(
-        select(Blog).where(Blog.blogger_blog_id.is_not(None)).order_by(Blog.id.asc())
+        select(Blog)
+        .where(
+            or_(
+                Blog.blogger_blog_id.is_not(None),
+                Blog.blogger_url.is_not(None),
+            )
+        )
+        .order_by(Blog.id.asc())
     ).scalars().all()
 
     for blog in blogs:
-        if not (blog.blogger_blog_id or "").strip():
+        if not ((blog.blogger_blog_id or "").strip() or (blog.blogger_url or "").strip()):
+            skipped_blog_ids.append(blog.id)
             continue
         try:
             sync_blogger_posts_for_blog(db, blog)
+            refreshed_blog_ids.append(blog.id)
         except Exception as exc:  # noqa: BLE001
             db.rollback()
             message = f"{blog.name}: {exc}"
             warnings.append(message)
             logger.warning("Failed to sync Blogger posts for connected blog '%s': %s", blog.name, exc)
 
-    return warnings
+    return {
+        "warnings": warnings,
+        "refreshed_blog_ids": refreshed_blog_ids,
+        "skipped_blog_ids": skipped_blog_ids,
+    }
 
 
 def list_synced_blogger_posts_page(db: Session, blog: Blog, *, page: int = 1, page_size: int = 50) -> dict:
