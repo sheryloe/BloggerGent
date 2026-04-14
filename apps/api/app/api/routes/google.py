@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.entities import AnalyticsArticleFact, Blog, SyncedBloggerPost
 from app.schemas.api import (
+    BloggerRefactorRead,
+    BloggerRefactorRequest,
     BloggerRemotePostRead,
     GoogleBlogIndexingRequest,
     GoogleBlogIndexingQuotaRead,
@@ -20,21 +22,22 @@ from app.schemas.api import (
     SyncedBloggerPostGroupPageRead,
     SyncedBloggerPostPageRead,
 )
-from app.services.blog_service import get_blog
-from app.services.blogger_oauth_service import BloggerOAuthError, get_google_oauth_scopes, get_granted_google_scopes
-from app.services.blogger_sync_service import (
+from app.services.platform.blog_service import get_blog
+from app.services.blogger.blogger_refactor_service import refactor_blogger_low_score_posts
+from app.services.blogger.blogger_oauth_service import BloggerOAuthError, get_google_oauth_scopes, get_granted_google_scopes
+from app.services.blogger.blogger_sync_service import (
     list_recent_synced_blogger_posts,
     list_synced_blogger_posts_page,
     sync_connected_blogger_posts,
     sync_blogger_posts_for_blog,
 )
-from app.services.google_reporting_service import (
+from app.services.integrations.google_reporting_service import (
     build_google_blog_overview,
     list_analytics_properties,
     list_blogger_posts,
     list_search_console_sites,
 )
-from app.services.google_indexing_service import (
+from app.services.integrations.google_indexing_service import (
     get_google_blog_indexing_quota,
     load_fact_enrichment_maps,
     refresh_indexing_for_blog,
@@ -42,8 +45,9 @@ from app.services.google_indexing_service import (
     request_playwright_indexing,
     request_indexing_for_blog,
 )
-from app.services.dedupe_utils import status_priority as dedupe_status_priority, url_identity_key
-from app.services.settings_service import get_settings_map
+from app.services.ops.dedupe_utils import status_priority as dedupe_status_priority, url_identity_key
+from app.services.integrations.settings_service import get_settings_map
+from app.tasks.admin import run_blogger_low_score_refactor
 
 router = APIRouter()
 
@@ -126,6 +130,11 @@ def _serialize_synced_post(post, state=None, score: dict | None = None, ctr_valu
         "thumbnail_url": post.thumbnail_url,
         "excerpt_text": post.excerpt_text,
         "live_image_count": post.live_image_count,
+        "live_unique_image_count": getattr(post, "live_unique_image_count", None),
+        "live_duplicate_image_count": getattr(post, "live_duplicate_image_count", None),
+        "live_webp_count": post.live_webp_count,
+        "live_png_count": post.live_png_count,
+        "live_other_image_count": post.live_other_image_count,
         "live_cover_present": post.live_cover_present,
         "live_inline_present": post.live_inline_present,
         "live_image_issue": post.live_image_issue,
@@ -356,6 +365,67 @@ def refresh_google_blog_synced_posts(
         "count": result["count"],
         "last_synced_at": result["last_synced_at"].isoformat() if result["last_synced_at"] else None,
     }
+
+
+@router.post("/blogs/{blog_id}/refactor-low-score", response_model=BloggerRefactorRead)
+def refactor_google_blog_low_score_posts(
+    blog_id: int,
+    payload: BloggerRefactorRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    blog = get_blog(db, blog_id)
+    if not blog:
+        raise HTTPException(status_code=404, detail="Blog not found")
+
+    if payload.queue and payload.execute:
+        task = run_blogger_low_score_refactor.apply_async(
+            kwargs={
+                "blog_id": blog_id,
+                "threshold": payload.threshold,
+                "month": payload.month,
+                "limit": payload.limit,
+                "sync_before": payload.sync_before,
+                "run_lighthouse": payload.run_lighthouse,
+                "parallel_workers": payload.parallel_workers,
+            },
+            queue="default",
+        )
+        return {
+            "status": "queued",
+            "execute": True,
+            "blog_id": blog.id,
+            "blog_name": blog.name,
+            "threshold": payload.threshold,
+            "month": payload.month or "",
+            "parallel_workers": payload.parallel_workers,
+            "task_id": task.id,
+            "total_candidates": 0,
+            "processed_count": 0,
+            "updated_count": 0,
+            "failed_count": 0,
+            "skipped_count": 0,
+            "sync_before_result": None,
+            "sync_after_result": None,
+            "summary_after": None,
+            "items": [],
+        }
+
+    try:
+        return refactor_blogger_low_score_posts(
+            db,
+            blog_id=blog_id,
+            execute=payload.execute,
+            threshold=payload.threshold,
+            month=payload.month,
+            limit=payload.limit,
+            sync_before=payload.sync_before,
+            run_lighthouse=payload.run_lighthouse,
+            parallel_workers=payload.parallel_workers,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/synced-posts/refresh-all")

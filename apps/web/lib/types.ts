@@ -76,6 +76,11 @@ export interface SyncedBloggerPost {
   thumbnail_url?: string | null;
   excerpt_text: string;
   live_image_count?: number | null;
+  live_unique_image_count?: number | null;
+  live_duplicate_image_count?: number | null;
+  live_webp_count?: number | null;
+  live_png_count?: number | null;
+  live_other_image_count?: number | null;
   live_cover_present?: boolean | null;
   live_inline_present?: boolean | null;
   live_image_issue?: string | null;
@@ -393,6 +398,8 @@ export interface ArticleListItem {
   slug: string;
   excerpt: string;
   reading_time_minutes: number;
+  article_pattern_id?: string | null;
+  article_pattern_version?: number | null;
   editorial_category_key?: string | null;
   editorial_category_label?: string | null;
   created_at: string;
@@ -861,6 +868,11 @@ export interface IntegratedArchiveItem {
   ctr?: number | null;
   lighthouse_score?: number | null;
   live_image_count?: number | null;
+  live_unique_image_count?: number | null;
+  live_duplicate_image_count?: number | null;
+  live_webp_count?: number | null;
+  live_png_count?: number | null;
+  live_other_image_count?: number | null;
   live_image_issue?: string | null;
   live_image_audited_at?: string | null;
   index_status?: string;
@@ -956,6 +968,12 @@ export interface OpenAIFreeUsage {
   large: OpenAIFreeUsageBucket;
   small: OpenAIFreeUsageBucket;
   warning?: string | null;
+  hard_cap_enabled: boolean;
+  blocked_due_to_usage_unavailable: boolean;
+  blocked_due_to_usage_cap: boolean;
+  warning_threshold_percent: number;
+  hard_cap_threshold_percent: number;
+  unexpected_text_api_call_count: number;
 }
 
 export interface PromptTemplate {
@@ -1169,6 +1187,13 @@ export interface ModelPolicyRead {
   small: string[];
   deprecated: string[];
   defaults: Record<string, string>;
+  text_runtime_kind: string;
+  text_runtime_model: string;
+  image_runtime_kind: string;
+  image_runtime_model: string;
+  openai_usage_hard_cap_enabled: boolean;
+  unexpected_openai_text_calls: number;
+  banned_text_model_prefixes: string[];
 }
 
 export interface PlannerCategoryRead {
@@ -1619,13 +1644,26 @@ export interface AnalyticsArticleFactRead {
   seoScore: number | null;
   geoScore: number | null;
   lighthouseScore: number | null;
+  lighthouseAccessibilityScore: number | null;
+  lighthouseBestPracticesScore: number | null;
+  lighthouseSeoScore: number | null;
   similarityScore: number | null;
   mostSimilarUrl: string | null;
+  articlePatternId: string | null;
+  articlePatternVersion: number | null;
   status: string | null;
   actualUrl: string | null;
   sourceType: string;
   ctr: number | null;
   ctrScore: number | null;
+  liveImageCount: number | null;
+  liveUniqueImageCount: number | null;
+  liveDuplicateImageCount: number | null;
+  liveWebpCount: number | null;
+  livePngCount: number | null;
+  liveOtherImageCount: number | null;
+  liveImageIssue: string | null;
+  refactorCandidate: boolean;
   indexStatus: "indexed" | "submitted" | "pending" | "blocked" | "failed" | "unknown" | string;
   indexCoverageState: string | null;
   lastCrawlTime: string | null;
@@ -1753,4 +1791,64 @@ export interface AnalyticsIntegratedRead {
   status: string | null;
   availableThemes: AnalyticsThemeFilterOptionRead[];
   availableCategories: string[];
+}
+
+export interface CloudflarePerformanceCategoryOptionRead {
+  slug: string;
+  name: string;
+  count: number;
+}
+
+export interface CloudflarePerformanceRowRead {
+  channelId: string;
+  channelName: string;
+  categorySlug: string | null;
+  categoryName: string | null;
+  canonicalCategorySlug: string | null;
+  canonicalCategoryName: string | null;
+  title: string;
+  url: string | null;
+  publishedAt: string | null;
+  seoScore: number | null;
+  geoScore: number | null;
+  ctr: number | null;
+  lighthouseScore: number | null;
+  indexStatus: string;
+  liveImageCount: number | null;
+  liveUniqueImageCount: number | null;
+  liveDuplicateImageCount: number | null;
+  liveWebpCount: number | null;
+  livePngCount: number | null;
+  liveOtherImageCount: number | null;
+  liveImageIssue: string | null;
+  liveImageAuditedAt: string | null;
+  lighthouseAccessibilityScore: number | null;
+  lighthouseBestPracticesScore: number | null;
+  lighthouseSeoScore: number | null;
+  articlePatternId: string | null;
+  articlePatternVersion: number | null;
+  refactorCandidate: boolean;
+  status: string;
+  qualityStatus: string | null;
+}
+
+export interface CloudflarePerformanceSummaryRead {
+  month: string;
+  channelId: string;
+  channelName: string;
+  total: number;
+  lowScoreCount: number;
+  refactorCandidateCount: number;
+  lighthouseBelow70Count: number;
+  availableCategories: CloudflarePerformanceCategoryOptionRead[];
+  availableStatuses: string[];
+}
+
+export interface CloudflarePerformancePageRead {
+  month: string;
+  total: number;
+  page: number;
+  pageSize: number;
+  summary: CloudflarePerformanceSummaryRead;
+  items: CloudflarePerformanceRowRead[];
 }

@@ -7,14 +7,14 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.entities import Article, BloggerPost, Image, Job, JobStatus, PostStatus, PublishMode, Topic
-from app.services.article_service import save_article
-from app.services.blog_service import ensure_all_blog_workflows, ensure_default_blogs, get_blog_by_slug, purge_legacy_demo_blogs
-from app.services.html_assembler import assemble_article_html
-from app.services.job_service import create_job, set_status
+from app.services.content.article_service import save_article
+from app.services.platform.blog_service import ensure_all_blog_workflows, ensure_default_blogs, get_blog_by_slug, purge_legacy_demo_blogs
+from app.services.content.html_assembler import assemble_article_html
+from app.services.ops.job_service import create_job, set_status
 from app.services.providers.mock import MockArticleProvider, MockBloggerProvider, MockImageProvider
-from app.services.related_posts import find_related_articles
-from app.services.settings_service import ensure_default_settings, get_settings_map
-from app.services.storage_service import save_html, save_public_binary
+from app.services.content.related_posts import find_related_articles
+from app.services.integrations.settings_service import ensure_default_settings, get_settings_map
+from app.services.integrations.storage_service import save_html, save_public_binary
 
 
 def _seed_completed_post(db, *, blog_slug: str, keyword: str, publish_mode: PublishMode, offset_days: int) -> None:

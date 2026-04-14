@@ -33,19 +33,19 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from app.db.session import SessionLocal  # noqa: E402
-from app.models.entities import Blog, SyncedBloggerPost  # noqa: E402
-from app.services.blogger_sync_service import sync_blogger_posts_for_blog  # noqa: E402
-from app.services.cloudflare_channel_service import (  # noqa: E402
+from app.models.entities import Blog, R2AssetRelayoutMapping, SyncedBloggerPost  # noqa: E402
+from app.services.blogger.blogger_sync_service import sync_blogger_posts_for_blog  # noqa: E402
+from app.services.cloudflare.cloudflare_channel_service import (  # noqa: E402
     _integration_data_or_raise,
     _integration_request,
     _list_integration_posts,
     _safe_fallback_image_prompt,
     _upload_integration_asset,
 )
-from app.services.cloudflare_sync_service import sync_cloudflare_posts  # noqa: E402
+from app.services.cloudflare.cloudflare_sync_service import sync_cloudflare_posts  # noqa: E402
 from app.services.providers.factory import get_blogger_provider, get_image_provider  # noqa: E402
-from app.services.settings_service import get_settings_map  # noqa: E402
-from app.services.storage_service import _resolve_cloudflare_r2_configuration  # noqa: E402
+from app.services.integrations.settings_service import get_settings_map  # noqa: E402
+from app.services.integrations.storage_service import _resolve_cloudflare_r2_configuration  # noqa: E402
 
 LIVE_STATUSES = {"live", "published"}
 HTML_IMG_RE = re.compile(r"<img\b[^>]*\bsrc=['\"]([^'\"]+)['\"]", re.IGNORECASE)
@@ -77,6 +77,7 @@ class TargetPost:
     slug_seed: str
     group_name: str
     category_hint: str
+    category_key: str
     cover_alt: str
     blog_id: int | None = None
     cloudflare_slug: str = ""
@@ -91,10 +92,14 @@ class MatchDecision:
     reason: str
     cover_url: str = ""
     inline1_url: str = ""
-    inline2_url: str = ""
     folder: str = ""
     score: float = 0.0
     candidates: list[dict[str, Any]] | None = None
+
+
+def _normalize_slug_token(value: Any, fallback: str = "") -> str:
+    token = slugify(_safe_str(value), separator="-")
+    return token or fallback
 
 
 def parse_args() -> argparse.Namespace:
@@ -104,7 +109,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mode", choices=("dry-run", "canary", "full"), default="dry-run")
     parser.add_argument("--scope", choices=("none-only",), default="none-only")
     parser.add_argument("--match-policy", choices=("strict",), default="strict")
-    parser.add_argument("--generate-slots", type=int, default=2)
+    parser.add_argument("--generate-slots", type=int, default=1)
+    parser.add_argument("--generation-policy", choices=("existing-only", "generate"), default="existing-only")
     parser.add_argument("--model", default="gpt-image-1")
     parser.add_argument("--canary-count", type=int, default=10)
     parser.add_argument("--timeout", type=float, default=30.0)
@@ -476,13 +482,182 @@ def _strict_match_existing_urls(
         reason="strict_matched",
         cover_url=cover_url,
         inline1_url=inline1_url,
-        inline2_url=inline1_url,
         folder=top_folder,
         score=round(float(top_score), 4),
         candidates=[
             {"folder": folder, "score": round(score, 4), "prefix": bool(prefix)}
             for score, prefix, folder in scored[:5]
         ],
+    )
+
+
+def _month_from_migrated_key(key: str) -> str:
+    canonical = _strip_assets_prefix(_safe_str(key))
+    month_key, _folder = _extract_month_and_folder(canonical)
+    return month_key
+
+
+def _target_group_candidates(target: TargetPost) -> list[str]:
+    candidates: list[str] = []
+    if target.source == "cloudflare":
+        candidates.extend(["cloudflare/dongri-archive", "archive", "dongri-archive"])
+    else:
+        profile_key = ""
+        if ":" in _safe_str(target.category_hint):
+            profile_key = _safe_str(target.category_hint.split(":", 1)[1])
+        normalized_profile = _normalize_slug_token(profile_key, fallback="")
+        normalized_group = _normalize_slug_token(target.group_name, fallback="")
+        for item in (
+            profile_key,
+            normalized_profile,
+            f"google-blogger/{profile_key}" if profile_key else "",
+            f"google-blogger/{normalized_profile}" if normalized_profile else "",
+            target.group_name,
+            normalized_group,
+        ):
+            value = _safe_str(item)
+            if value and value not in candidates:
+                candidates.append(value)
+    return candidates
+
+
+def _target_category_candidates(target: TargetPost) -> list[str]:
+    candidates: list[str] = []
+    explicit = _safe_str(target.category_key)
+    if explicit:
+        candidates.append(explicit)
+    inferred = _normalize_slug_token(target.category_hint, fallback="")
+    if inferred and inferred not in candidates:
+        candidates.append(inferred)
+    if target.source == "blogger":
+        profile_key = ""
+        if ":" in _safe_str(target.category_hint):
+            profile_key = _safe_str(target.category_hint.split(":", 1)[1])
+        if "midnight" in profile_key or "mystery" in profile_key:
+            if "mystery" not in candidates:
+                candidates.append("mystery")
+        for label in list(target.labels or []):
+            normalized = _normalize_slug_token(label, fallback="")
+            if normalized in {"travel", "culture", "food", "mystery"} and normalized not in candidates:
+                candidates.append(normalized)
+    return candidates
+
+
+def _rank_mapping_keys(keys: list[str], *, desired_role: str) -> str:
+    def ext_rank(path: str) -> int:
+        lower = path.lower()
+        if lower.endswith(".webp"):
+            return 0
+        if lower.endswith(".png"):
+            return 1
+        if lower.endswith(".jpg") or lower.endswith(".jpeg"):
+            return 2
+        return 3
+
+    def role_rank(path: str) -> int:
+        name = Path(path).name.lower()
+        if desired_role == "cover":
+            return 0 if "cover" in name or "hero" in name else 1
+        if "inline-1" in name:
+            return 0
+        if "inline" in name or "body" in name:
+            return 1
+        return 2
+
+    unique = sorted({_strip_assets_prefix(_safe_str(item)) for item in keys if _safe_str(item)})
+    if not unique:
+        return ""
+    return sorted(unique, key=lambda item: (role_rank(item), ext_rank(item), item))[0]
+
+
+def _mapping_family_from_key(key: str) -> str:
+    canonical = _strip_assets_prefix(_safe_str(key))
+    parts = canonical.split("/")
+    if len(parts) < 5:
+        return ""
+    folder = parts[4]
+    family = re.sub(r"-(cover|hero|inline-\d+|inline)$", "", folder)
+    return family or folder
+
+
+def _fallback_match_existing_urls(
+    *,
+    target: TargetPost,
+    mapping_rows: list[R2AssetRelayoutMapping],
+    public_origin: str,
+) -> MatchDecision:
+    month_key = _safe_str(target.month_key)
+    if not month_key:
+        return MatchDecision(matched=False, reason="fallback_month_missing")
+
+    group_candidates = set(_target_group_candidates(target))
+    category_candidates = set(_target_category_candidates(target))
+    if not group_candidates or not category_candidates:
+        return MatchDecision(matched=False, reason="fallback_target_metadata_missing")
+
+    family_buckets: dict[str, dict[str, list[str]]] = {}
+    candidate_meta: list[dict[str, Any]] = []
+    for row in mapping_rows:
+        if _safe_str(row.source_type) != target.source:
+            continue
+        if _safe_str(row.blog_group) not in group_candidates:
+            continue
+        if _safe_str(row.category_key) not in category_candidates:
+            continue
+        migrated_key = _safe_str(row.migrated_key)
+        if not migrated_key:
+            continue
+        if _month_from_migrated_key(migrated_key) != month_key:
+            continue
+        asset_role = _safe_str(row.asset_role)
+        candidate_meta.append(
+            {
+                "blog_group": _safe_str(row.blog_group),
+                "category_key": _safe_str(row.category_key),
+                "asset_role": asset_role,
+                "migrated_key": migrated_key,
+            }
+        )
+        family = _mapping_family_from_key(migrated_key)
+        bucket = family_buckets.setdefault(family, {"cover": [], "inline": []})
+        if asset_role == "cover":
+            bucket["cover"].append(migrated_key)
+        elif asset_role.startswith("inline"):
+            bucket["inline"].append(migrated_key)
+
+    ranked_families: list[tuple[float, str]] = []
+    for family, bucket in family_buckets.items():
+        if not bucket["cover"] or not bucket["inline"]:
+            continue
+        score, is_prefix = _score_folder_match(slug_seed=target.slug_seed, folder=family)
+        ranked_families.append((1.0 if is_prefix else score, family))
+    ranked_families.sort(key=lambda item: (-item[0], item[1]))
+    if not ranked_families:
+        return MatchDecision(
+            matched=False,
+            reason="fallback_insufficient_assets",
+            candidates=candidate_meta[:10],
+        )
+
+    selected_family = ranked_families[0][1]
+    selected_bucket = family_buckets[selected_family]
+    cover_key = _rank_mapping_keys(selected_bucket["cover"], desired_role="cover")
+    inline1_key = _rank_mapping_keys(selected_bucket["inline"], desired_role="inline")
+    if not cover_key or not inline1_key:
+        return MatchDecision(
+            matched=False,
+            reason="fallback_insufficient_assets",
+            candidates=candidate_meta[:10],
+        )
+
+    return MatchDecision(
+        matched=True,
+        reason="category_fallback_matched",
+        cover_url=_build_public_url_from_canonical_key(origin=public_origin, canonical_key=cover_key),
+        inline1_url=_build_public_url_from_canonical_key(origin=public_origin, canonical_key=inline1_key),
+        folder=selected_family,
+        score=ranked_families[0][0],
+        candidates=candidate_meta[:10],
     )
 
 
@@ -549,7 +724,6 @@ def _apply_restore_markers(
     original_content: str,
     cover_url: str,
     inline1_url: str,
-    inline2_url: str,
     title: str,
     cover_alt: str,
 ) -> str:
@@ -566,17 +740,9 @@ def _apply_restore_markers(
         title=title,
         alt_suffix="supporting collage",
     )
-    inline2_block = _make_inline_block(
-        marker=BLOGGENT_RESTORE_INLINE_2,
-        slot="inline-2",
-        url=inline2_url,
-        title=title,
-        alt_suffix="supporting collage",
-    )
 
     content = _insert_cover_block(content, cover_block)
     content = _insert_inline_after_ratio(content, inline1_block, 1 / 3)
-    content = _insert_inline_after_ratio(content, inline2_block, 2 / 3)
     return content
 
 
@@ -683,6 +849,7 @@ def _collect_targets(db, *, scope: str) -> list[TargetPost]:
                 slug_seed=_slug_seed_from_blogger(_safe_str(post.url), _safe_str(post.title)),
                 group_name=_safe_str(blog.name),
                 category_hint=f"{_safe_str(blog.primary_language)}:{_safe_str(blog.profile_key)}",
+                category_key=_normalize_slug_token((list(post.labels or [])[:1] or [""])[0], fallback="travel"),
                 cover_alt=_safe_str(post.title) or "cover image",
                 labels=list(post.labels or []),
                 excerpt=_safe_str(post.excerpt_text),
@@ -711,6 +878,7 @@ def _collect_targets(db, *, scope: str) -> list[TargetPost]:
         cloudflare_slug = _safe_str(detail.get("slug"))
         category = detail.get("category") if isinstance(detail.get("category"), dict) else {}
         category_name = _safe_str(category.get("name")) or _safe_str(category.get("slug")) or "Cloudflare"
+        category_slug = _safe_str(category.get("slug")) or _normalize_slug_token(category_name, fallback="")
         targets.append(
             TargetPost(
                 source="cloudflare",
@@ -723,6 +891,7 @@ def _collect_targets(db, *, scope: str) -> list[TargetPost]:
                 slug_seed=_slug_seed_from_cloudflare(cloudflare_slug, _safe_str(detail.get("title"))),
                 group_name="Dongri Archive",
                 category_hint=category_name,
+                category_key=category_slug,
                 cover_alt=_safe_str(detail.get("coverAlt") or detail.get("coverImageAlt") or detail.get("title")),
                 cloudflare_slug=cloudflare_slug,
                 excerpt=_safe_str(detail.get("excerpt")),
@@ -808,8 +977,8 @@ def _generate_and_upload_urls(
     model: str,
     generate_slots: int,
 ) -> tuple[bool, dict[str, str], str]:
-    if generate_slots != 2:
-        return False, {}, "generate_slots_must_be_2"
+    if generate_slots != 1:
+        return False, {}, "generate_slots_must_be_1"
     slug_for_upload = _safe_str(target.cloudflare_slug) or target.slug_seed or slugify(target.title, separator="-") or target.post_id
     image_provider = get_image_provider(db, model_override=model)
 
@@ -846,7 +1015,7 @@ def _generate_and_upload_urls(
     except Exception as exc:  # noqa: BLE001
         return False, {}, f"generation_or_upload_failed:{exc}"
 
-    return True, {"cover": cover_url, "inline1": inline1_url, "inline2": inline1_url}, "ok"
+    return True, {"cover": cover_url, "inline1": inline1_url}, "ok"
 
 
 def _build_report_base(args: argparse.Namespace) -> dict[str, Any]:
@@ -856,6 +1025,7 @@ def _build_report_base(args: argparse.Namespace) -> dict[str, Any]:
         "scope": args.scope,
         "match_policy": args.match_policy,
         "generate_slots": int(args.generate_slots),
+        "generation_policy": _safe_str(getattr(args, "generation_policy", "existing-only")) or "existing-only",
         "model": args.model,
         "canary_count": int(args.canary_count),
         "summary": {
@@ -866,6 +1036,7 @@ def _build_report_base(args: argparse.Namespace) -> dict[str, Any]:
             "updated": 0,
             "failed": 0,
             "skipped": 0,
+            "manual_review_required": 0,
         },
         "items": [],
     }
@@ -874,6 +1045,7 @@ def _build_report_base(args: argparse.Namespace) -> dict[str, Any]:
 def main() -> int:
     args = parse_args()
     apply_mode = args.mode in {"canary", "full"}
+    generation_policy = _safe_str(getattr(args, "generation_policy", "existing-only")) or "existing-only"
     report = _build_report_base(args)
 
     with SessionLocal() as db:
@@ -889,6 +1061,7 @@ def main() -> int:
 
         targets = _collect_targets(db, scope=args.scope)
         report["summary"]["targets"] = len(targets)
+        mapping_rows = db.execute(select(R2AssetRelayoutMapping)).scalars().all()
 
         if args.mode == "canary":
             targets = targets[: max(int(args.canary_count or 1), 1)]
@@ -934,14 +1107,32 @@ def main() -> int:
             }
 
             resolved_urls: dict[str, str] = {}
+            if not decision.matched:
+                decision = _fallback_match_existing_urls(
+                    target=target,
+                    mapping_rows=mapping_rows,
+                    public_origin=public_origin,
+                )
+                row["fallback_match"] = {
+                    "matched": decision.matched,
+                    "reason": decision.reason,
+                    "folder": decision.folder,
+                    "score": decision.score,
+                    "candidates": decision.candidates or [],
+                }
             if decision.matched:
                 resolved_urls = {
                     "cover": decision.cover_url,
                     "inline1": decision.inline1_url,
-                    "inline2": decision.inline2_url,
                 }
                 report["summary"]["matched_existing"] += 1
             else:
+                if generation_policy == "existing-only":
+                    row["status"] = "manual_review_required" if apply_mode else "planned_manual_review_required"
+                    row["reason"] = "existing_asset_match_missing"
+                    report["summary"]["manual_review_required"] += 1
+                    report["items"].append(row)
+                    continue
                 if not apply_mode:
                     report["summary"]["generated"] += 1
                     row["status"] = "planned_generate"
@@ -966,7 +1157,6 @@ def main() -> int:
                 original_content=target.content,
                 cover_url=resolved_urls["cover"],
                 inline1_url=resolved_urls["inline1"],
-                inline2_url=resolved_urls["inline2"],
                 title=target.title,
                 cover_alt=target.cover_alt or target.title,
             )
@@ -974,7 +1164,6 @@ def main() -> int:
             row["health"] = [
                 _check_url_health(resolved_urls["cover"], timeout=args.timeout),
                 _check_url_health(resolved_urls["inline1"], timeout=args.timeout),
-                _check_url_health(resolved_urls["inline2"], timeout=args.timeout),
             ]
 
             if not apply_mode:

@@ -28,13 +28,13 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.entities import Blog, SyncedBloggerPost  # noqa: E402
-from app.services.blogger_sync_service import sync_blogger_posts_for_blog  # noqa: E402
-from app.services.cloudflare_channel_service import (  # noqa: E402
+from app.services.blogger.blogger_sync_service import sync_blogger_posts_for_blog  # noqa: E402
+from app.services.cloudflare.cloudflare_channel_service import (  # noqa: E402
     _integration_data_or_raise,
     _integration_request,
     _list_integration_posts,
 )
-from app.services.cloudflare_sync_service import sync_cloudflare_posts  # noqa: E402
+from app.services.cloudflare.cloudflare_sync_service import sync_cloudflare_posts  # noqa: E402
 from app.services.providers.factory import get_blogger_provider  # noqa: E402
 
 LIVE_STATUSES = {"live", "published"}

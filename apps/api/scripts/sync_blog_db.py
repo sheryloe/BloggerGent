@@ -5,8 +5,8 @@ import sys
 from datetime import datetime, timezone
 
 from app.db.session import SessionLocal
-from app.services.blogger_sync_service import sync_connected_blogger_posts
-from app.services.cloudflare_sync_service import sync_cloudflare_posts
+from app.services.blogger.blogger_sync_service import sync_connected_blogger_posts
+from app.services.cloudflare.cloudflare_sync_service import sync_cloudflare_posts
 
 
 def _iso(dt: datetime | None) -> str | None:

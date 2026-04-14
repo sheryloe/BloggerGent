@@ -36,21 +36,21 @@ from sqlalchemy import select  # noqa: E402
 
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.entities import ManagedChannel, WorkflowStageType  # noqa: E402
-from app.services.blogger_live_audit_service import fetch_and_audit_blogger_post  # noqa: E402
-from app.services.blogger_sync_service import sync_connected_blogger_posts  # noqa: E402
-from app.services.blog_service import (  # noqa: E402
+from app.services.blogger.blogger_live_audit_service import fetch_and_audit_blogger_post  # noqa: E402
+from app.services.blogger.blogger_sync_service import sync_connected_blogger_posts  # noqa: E402
+from app.services.platform.blog_service import (  # noqa: E402
     ensure_all_blog_workflows,
     enforce_free_tier_model_policy,
     get_blog,
     sync_stage_prompts_from_profile_files,
 )
-from app.services.channel_prompt_service import sync_all_channel_prompt_backups  # noqa: E402
-from app.services.cloudflare_channel_service import sync_cloudflare_prompts_from_files  # noqa: E402
-from app.services.cloudflare_channel_service import generate_cloudflare_posts, list_cloudflare_categories, list_cloudflare_posts  # noqa: E402
-from app.services.cloudflare_sync_service import sync_cloudflare_posts  # noqa: E402
-from app.services.google_sheet_service import sync_google_sheet_snapshot  # noqa: E402
-from app.services.planner_service import create_month_plan, get_calendar  # noqa: E402
-from app.services.platform_service import ensure_managed_channels  # noqa: E402
+from app.services.content.channel_prompt_service import sync_all_channel_prompt_backups  # noqa: E402
+from app.services.cloudflare.cloudflare_channel_service import sync_cloudflare_prompts_from_files  # noqa: E402
+from app.services.cloudflare.cloudflare_channel_service import generate_cloudflare_posts, list_cloudflare_categories, list_cloudflare_posts  # noqa: E402
+from app.services.cloudflare.cloudflare_sync_service import sync_cloudflare_posts  # noqa: E402
+from app.services.integrations.google_sheet_service import sync_google_sheet_snapshot  # noqa: E402
+from app.services.ops.planner_service import create_month_plan, get_calendar  # noqa: E402
+from app.services.platform.platform_service import ensure_managed_channels  # noqa: E402
 
 
 @dataclass(slots=True)

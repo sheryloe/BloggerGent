@@ -51,7 +51,7 @@ const sections: SectionConfig[] = [
       {
         key: "openai_api_key",
         label: "OpenAI API 키",
-        help: "실제 본문 생성과 이미지 생성에 필요합니다.",
+        help: "기존 OpenAI live 생성 경로와 이미지 생성에 사용합니다. 리팩토링/개선 배치는 별도로 Codex CLI / GPT-5.4를 우선 사용합니다.",
         type: "password",
       },
       {
@@ -61,10 +61,26 @@ const sections: SectionConfig[] = [
         type: "password",
       },
       {
-        key: "openai_text_model",
-        label: "OpenAI 텍스트 모델",
-        help: "블로그 단계별로 따로 지정하지 않았을 때 기본 글쓰기 모델로 사용합니다.",
+        key: "text_runtime_kind",
+        label: "텍스트 런타임",
+        help: "표준 생성 파이프라인의 기본 텍스트 런타임입니다. 리팩토링 전용 단계는 Codex CLI / GPT-5.4를 우선 사용합니다.",
+        options: [
+          { value: "openai", label: "OpenAI" },
+          { value: "codex_cli", label: "Codex CLI" },
+          { value: "gemini_cli", label: "Gemini CLI" },
+        ],
+      },
+      {
+        key: "text_runtime_model",
+        label: "텍스트 런타임 모델",
+        help: "표준 생성 경로에서 사용하는 기본 텍스트 모델입니다. 리팩토링 단계는 Codex CLI / GPT-5.4를 별도로 사용합니다.",
         suggestions: OPENAI_TEXT_MODEL_SUGGESTIONS,
+      },
+      {
+        key: "image_runtime_kind",
+        label: "이미지 런타임",
+        help: "이미지 생성만 OpenAI Image API를 사용합니다.",
+        options: [{ value: "openai_image", label: "OpenAI Image API" }],
       },
       {
         key: "openai_image_model",
@@ -82,11 +98,18 @@ const sections: SectionConfig[] = [
         ],
       },
       {
+        key: "openai_usage_hard_cap_enabled",
+        label: "OpenAI 사용량 하드캡",
+        help: "호환성 필드입니다. 실제 운영에서는 API 경로 하드캡이 항상 강제되며 100% 도달 또는 사용량 조회 실패 시 즉시 차단됩니다.",
+        options: [{ value: "true", label: "항상 사용" }],
+      },
+      {
         key: "topic_discovery_provider",
         label: "토픽 발굴 공급자",
-        help: "작업 큐에 넣기 전에 매일 토픽을 누가 찾을지 정합니다.",
+        help: "표준 생성 경로의 토픽 발굴 공급자입니다. 리팩토링/재작성 배치는 별도 Codex 우선 라우팅을 사용합니다.",
         options: [
           { value: "openai", label: "OpenAI" },
+          { value: "codex_cli", label: "Codex CLI" },
           { value: "gemini", label: "Gemini" },
         ],
       },
@@ -95,13 +118,6 @@ const sections: SectionConfig[] = [
         label: "1회 토픽 발굴 최대 개수",
         help: "모델이 토픽을 돌려준 직후 적용되는 상한입니다. 0은 무제한이며, 과도한 큐 적재 방지를 위해 기본값 3을 권장합니다.",
         type: "number",
-      },
-      {
-        key: "topic_discovery_model",
-        label: "토픽 발굴 모델",
-        help: "토픽 발굴 공급자가 OpenAI일 때 사용할 기본 모델입니다.",
-        suggestions: OPENAI_TEXT_MODEL_SUGGESTIONS,
-        showWhen: (values) => (values.topic_discovery_provider || "openai") === "openai",
       },
       {
         key: "gemini_api_key",
@@ -394,6 +410,10 @@ function sharingGroupLabel(groupId: string) {
   return "공유 무료 풀";
 }
 
+function resolveApiBaseUrl() {
+  return process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
+}
+
 export function SettingsForm({ settings }: { settings: SettingItem[] }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -405,7 +425,7 @@ export function SettingsForm({ settings }: { settings: SettingItem[] }) {
     event.preventDefault();
     setStatus("");
 
-    const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/settings`, {
+    const response = await fetch(`${resolveApiBaseUrl()}/settings`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ values }),
@@ -448,7 +468,7 @@ export function SettingsForm({ settings }: { settings: SettingItem[] }) {
         <CardHeader>
           <CardDescription>OpenAI 공유 무료 풀</CardDescription>
           <CardTitle>무료 사용량 참고</CardTitle>
-          <p className="text-sm leading-6 text-slate-600">이 수치는 일일 공유 토큰 풀 기준입니다. 여기서는 텍스트 사용량이 핵심이고, 이미지 과금은 별도로 추적됩니다.</p>
+          <p className="text-sm leading-6 text-slate-600">이 수치는 OpenAI API 감시용 참고값입니다. 기본 텍스트 생성은 Codex CLI가 담당하고, 여기서는 이미지 API와 예외적인 OpenAI 텍스트 호출만 추적합니다.</p>
         </CardHeader>
         <CardContent className="grid gap-4 lg:grid-cols-2">
           {OPENAI_DATA_SHARING_FREE_TIERS.map((group) => (
@@ -523,4 +543,3 @@ export function SettingsForm({ settings }: { settings: SettingItem[] }) {
     </form>
   );
 }
-

@@ -69,6 +69,8 @@ import {
   AnalyticsBlogMonthlyListResponse,
   AnalyticsBlogMonthlyReportRead,
   AnalyticsThemeWeightApplyResponse,
+  CloudflarePerformancePageRead,
+  CloudflarePerformanceSummaryRead,
   TrainingControlPayload,
   TrainingSchedule,
   TrainingStatus,
@@ -85,7 +87,10 @@ import {
 } from "@/lib/types";
 
 function resolveBaseUrl() {
-  return process.env.API_INTERNAL_URL || process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api/v1";
+  if (typeof window === "undefined") {
+    return process.env.API_INTERNAL_URL || process.env.NEXT_PUBLIC_API_BASE_URL || "http://api:8000/api/v1";
+  }
+  return process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:7002/api/v1";
 }
 
 type ApiFetchOptions = RequestInit & {
@@ -415,6 +420,96 @@ export async function getCloudflarePosts() {
 
 export async function getCloudflarePostsGroupedByCategory() {
   return apiFetch<IntegratedArchiveCategoryGroup[]>("/cloudflare/posts/grouped-by-category");
+}
+
+function mapCloudflarePerformanceSummary(payload: any): CloudflarePerformanceSummaryRead {
+  return {
+    month: payload.month,
+    channelId: payload.channel_id,
+    channelName: payload.channel_name,
+    total: payload.total ?? 0,
+    lowScoreCount: payload.low_score_count ?? 0,
+    refactorCandidateCount: payload.refactor_candidate_count ?? 0,
+    lighthouseBelow70Count: payload.lighthouse_below_70_count ?? 0,
+    availableCategories: (payload.available_categories ?? []).map((item: any) => ({
+      slug: item.slug,
+      name: item.name,
+      count: item.count ?? 0,
+    })),
+    availableStatuses: payload.available_statuses ?? [],
+  };
+}
+
+function mapCloudflarePerformanceRow(payload: any): CloudflarePerformancePageRead["items"][number] {
+  return {
+    channelId: payload.channel_id,
+    channelName: payload.channel_name,
+    categorySlug: payload.category_slug ?? null,
+    categoryName: payload.category_name ?? null,
+    canonicalCategorySlug: payload.canonical_category_slug ?? null,
+    canonicalCategoryName: payload.canonical_category_name ?? null,
+    title: payload.title,
+    url: payload.url ?? null,
+    publishedAt: payload.published_at ?? null,
+    seoScore: payload.seo_score ?? null,
+    geoScore: payload.geo_score ?? null,
+    ctr: payload.ctr ?? null,
+    lighthouseScore: payload.lighthouse_score ?? null,
+    indexStatus: payload.index_status ?? "unknown",
+    liveImageCount: payload.live_image_count ?? null,
+    liveUniqueImageCount: payload.live_unique_image_count ?? null,
+    liveDuplicateImageCount: payload.live_duplicate_image_count ?? null,
+    liveWebpCount: payload.live_webp_count ?? null,
+    livePngCount: payload.live_png_count ?? null,
+    liveOtherImageCount: payload.live_other_image_count ?? null,
+    liveImageIssue: payload.live_image_issue ?? null,
+    liveImageAuditedAt: payload.live_image_audited_at ?? null,
+    lighthouseAccessibilityScore: payload.lighthouse_accessibility_score ?? null,
+    lighthouseBestPracticesScore: payload.lighthouse_best_practices_score ?? null,
+    lighthouseSeoScore: payload.lighthouse_seo_score ?? null,
+    articlePatternId: payload.article_pattern_id ?? null,
+    articlePatternVersion: payload.article_pattern_version ?? null,
+    refactorCandidate: Boolean(payload.refactor_candidate),
+    status: payload.status ?? "unknown",
+    qualityStatus: payload.quality_status ?? null,
+  };
+}
+
+export async function getCloudflarePerformance(params: {
+  month: string;
+  status?: string | null;
+  query?: string | null;
+  sort?: "published_at" | "title" | "seo" | "geo" | "ctr" | "lighthouse";
+  dir?: "asc" | "desc";
+  lowScoreOnly?: boolean;
+  category?: string | null;
+  page?: number;
+  pageSize?: number;
+}) {
+  const search = new URLSearchParams();
+  search.set("month", params.month);
+  if (params.status) search.set("status", params.status);
+  if (params.query) search.set("query", params.query);
+  if (params.sort) search.set("sort", params.sort);
+  if (params.dir) search.set("dir", params.dir);
+  if (params.lowScoreOnly) search.set("low_score_only", "true");
+  if (params.category) search.set("category", params.category);
+  search.set("page", String(params.page ?? 1));
+  search.set("page_size", String(params.pageSize ?? 50));
+  const payload = await apiFetch<any>(`/cloudflare/performance?${search.toString()}`, { revalidate: false, timeoutMs: 10000 });
+  return {
+    month: payload.month,
+    total: payload.total ?? 0,
+    page: payload.page ?? 1,
+    pageSize: payload.page_size ?? params.pageSize ?? 50,
+    summary: mapCloudflarePerformanceSummary(payload.summary ?? {}),
+    items: (payload.items ?? []).map(mapCloudflarePerformanceRow),
+  } satisfies CloudflarePerformancePageRead;
+}
+
+export async function getCloudflarePerformanceSummary(month: string) {
+  const payload = await apiFetch<any>(`/cloudflare/performance/summary?month=${encodeURIComponent(month)}`, { revalidate: false, timeoutMs: 10000 });
+  return mapCloudflarePerformanceSummary(payload);
 }
 
 export async function refreshCloudflarePosts() {
@@ -1143,13 +1238,26 @@ function mapAnalyticsArticleFact(item: any) {
     seoScore: item.seo_score ?? null,
     geoScore: item.geo_score ?? null,
     lighthouseScore: item.lighthouse_score ?? null,
+    lighthouseAccessibilityScore: item.lighthouse_accessibility_score ?? null,
+    lighthouseBestPracticesScore: item.lighthouse_best_practices_score ?? null,
+    lighthouseSeoScore: item.lighthouse_seo_score ?? null,
     similarityScore: item.similarity_score ?? null,
     mostSimilarUrl: item.most_similar_url ?? null,
+    articlePatternId: item.article_pattern_id ?? null,
+    articlePatternVersion: item.article_pattern_version ?? null,
     status: item.status ?? null,
     actualUrl: item.actual_url ?? null,
     sourceType: item.source_type,
     ctr: item.ctr ?? null,
     ctrScore: item.ctr_score ?? null,
+    liveImageCount: item.live_image_count ?? null,
+    liveUniqueImageCount: item.live_unique_image_count ?? null,
+    liveDuplicateImageCount: item.live_duplicate_image_count ?? null,
+    liveWebpCount: item.live_webp_count ?? null,
+    livePngCount: item.live_png_count ?? null,
+    liveOtherImageCount: item.live_other_image_count ?? null,
+    liveImageIssue: item.live_image_issue ?? null,
+    refactorCandidate: Boolean(item.refactor_candidate),
     indexStatus: item.index_status ?? "unknown",
     indexCoverageState: item.index_coverage_state ?? null,
     lastCrawlTime: item.last_crawl_time ?? null,

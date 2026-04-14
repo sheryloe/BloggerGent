@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.api import ModelPolicyRead, OpenAIFreeUsageRead, SettingItem, SettingUpdate
-from app.services.blog_service import list_blog_profiles
-from app.services.blogger_oauth_service import (
+from app.services.platform.blog_service import list_blog_profiles
+from app.services.blogger.blogger_oauth_service import (
     BloggerOAuthError,
     build_blogger_authorization_url,
     exchange_blogger_code,
@@ -21,21 +21,21 @@ from app.services.blogger_oauth_service import (
     get_granted_google_scopes,
     list_blogger_blogs,
 )
-from app.services.platform_oauth_service import (
+from app.services.platform.platform_oauth_service import (
     PlatformOAuthError,
     build_platform_authorization_url,
     complete_google_platform_oauth,
     get_platform_web_return_url,
     try_decode_platform_oauth_state,
 )
-from app.services.platform_service import list_managed_channels
-from app.services.blogger_sync_service import sync_connected_blogger_posts
-from app.services.google_reporting_service import list_analytics_properties, list_search_console_sites
-from app.services.model_policy_service import build_model_policy, validate_text_settings_payload
-from app.services.openai_usage_service import get_openai_free_usage
+from app.services.platform.platform_service import list_managed_channels
+from app.services.blogger.blogger_sync_service import sync_connected_blogger_posts
+from app.services.integrations.google_reporting_service import list_analytics_properties, list_search_console_sites
+from app.services.ops.model_policy_service import build_model_policy, validate_text_settings_payload
+from app.services.ops.openai_usage_service import count_unexpected_openai_text_calls, get_openai_free_usage_status
 from app.services.providers.base import ProviderRuntimeError
-from app.services.settings_service import get_blogger_config, get_settings_map, list_settings, upsert_settings
-from app.services.storage_service import is_private_asset_url
+from app.services.integrations.settings_service import get_blogger_config, get_settings_map, list_settings, upsert_settings
+from app.services.integrations.storage_service import is_private_asset_url
 
 router = APIRouter()
 blogger_router = APIRouter()
@@ -150,28 +150,24 @@ def update_settings(payload: SettingUpdate, db: Session = Depends(get_db)):
 
 @router.get("/openai-free-usage", response_model=OpenAIFreeUsageRead)
 def get_openai_free_usage_route(db: Session = Depends(get_db)):
-    try:
-        return get_openai_free_usage(db)
-    except ProviderRuntimeError as exc:
-        status_code = exc.status_code if exc.status_code in {400, 401, 403, 404, 409, 422, 429} else 502
-        raise HTTPException(
-            status_code=status_code,
-            detail={
-                "provider": exc.provider,
-                "message": exc.message,
-                "detail": exc.detail,
-            },
-        ) from exc
+    return get_openai_free_usage_status(db)
 
 
 @router.get("/model-policy", response_model=ModelPolicyRead)
-def get_model_policy_route():
+def get_model_policy_route(db: Session = Depends(get_db)):
     policy = build_model_policy()
     return ModelPolicyRead(
         large=policy.large,
         small=policy.small,
         deprecated=policy.deprecated,
         defaults=policy.defaults,
+        text_runtime_kind=policy.text_runtime_kind,
+        text_runtime_model=policy.text_runtime_model,
+        image_runtime_kind=policy.image_runtime_kind,
+        image_runtime_model=policy.image_runtime_model,
+        openai_usage_hard_cap_enabled=policy.openai_usage_hard_cap_enabled,
+        unexpected_openai_text_calls=count_unexpected_openai_text_calls(db),
+        banned_text_model_prefixes=policy.banned_text_model_prefixes,
     )
 
 

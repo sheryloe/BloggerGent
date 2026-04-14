@@ -12,7 +12,7 @@ from app.schemas.api import (
     ContentOpsStatusRead,
     ContentReviewItemRead,
 )
-from app.services.content_ops_service import (
+from app.services.content.content_ops_service import (
     ContentOpsError,
     get_content_overview,
     apply_content_review,

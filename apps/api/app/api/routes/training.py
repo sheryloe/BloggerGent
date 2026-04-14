@@ -9,7 +9,7 @@ from app.schemas.api import (
     TrainingScheduleUpdate,
     TrainingStatusRead,
 )
-from app.services.training_service import (
+from app.services.content.training_service import (
     TrainingServiceError,
     request_pause_run,
     resume_training_run,

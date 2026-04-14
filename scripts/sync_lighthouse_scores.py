@@ -32,8 +32,8 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.entities import Article, Blog, PostStatus  # noqa: E402
-from app.services.analytics_service import rebuild_blog_month_rollup, upsert_article_fact  # noqa: E402
-from app.services.lighthouse_service import LighthouseAuditError, run_lighthouse_audit  # noqa: E402
+from app.services.ops.analytics_service import rebuild_blog_month_rollup, upsert_article_fact  # noqa: E402
+from app.services.ops.lighthouse_service import LighthouseAuditError, run_lighthouse_audit  # noqa: E402
 
 
 PROFILE_CHOICES = ("korea_travel", "world_mystery")
@@ -173,7 +173,7 @@ def main() -> int:
                 article.quality_lighthouse_score = float(lighthouse_score)
                 article.quality_lighthouse_last_audited_at = audited_at
                 article.quality_lighthouse_payload = {
-                    "version": "lighthouse-v1",
+                    "version": "lighthouse-v2",
                     "url": url,
                     "form_factor": args.form_factor,
                     "weights": dict(audit.get("weights") or {}),

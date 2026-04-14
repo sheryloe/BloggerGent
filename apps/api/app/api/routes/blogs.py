@@ -25,8 +25,8 @@ from app.schemas.api import (
     WorkflowStepCreate,
     WorkflowStepReorder,
 )
-from app.services.archive_service import list_blog_archive_page
-from app.services.blog_service import (
+from app.services.integrations.archive_service import list_blog_archive_page
+from app.services.platform.blog_service import (
     apply_profile_preset,
     create_workflow_step,
     delete_workflow_step,
@@ -53,10 +53,10 @@ from app.services.blog_service import (
     update_blog_connections,
     update_blog_seo_meta,
 )
-from app.services.blog_seo_meta_service import get_blog_seo_meta_overview, verify_blog_seo_meta
-from app.services.blogger_oauth_service import BloggerOAuthError, list_blogger_blogs
-from app.services.blogger_sync_service import sync_blogger_posts_for_blog
-from app.services.google_reporting_service import list_analytics_properties, list_search_console_sites
+from app.services.content.blog_seo_meta_service import get_blog_seo_meta_overview, verify_blog_seo_meta
+from app.services.blogger.blogger_oauth_service import BloggerOAuthError, list_blogger_blogs
+from app.services.blogger.blogger_sync_service import sync_blogger_posts_for_blog
+from app.services.integrations.google_reporting_service import list_analytics_properties, list_search_console_sites
 from app.services.providers.base import ProviderRuntimeError
 from app.tasks.pipeline import discover_topics_and_enqueue
 

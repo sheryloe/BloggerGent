@@ -6,8 +6,10 @@ import os
 import re
 import sys
 from datetime import datetime, timedelta, timezone
+from html import unescape
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -25,8 +27,8 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.entities import R2AssetRelayoutMapping, SyncedBloggerPost  # noqa: E402
-from app.services.cloudflare_channel_service import _integration_data_or_raise, _integration_request, _list_integration_posts  # noqa: E402
-from app.services.storage_service import (  # noqa: E402
+from app.services.cloudflare.cloudflare_channel_service import _integration_data_or_raise, _integration_request, _list_integration_posts  # noqa: E402
+from app.services.integrations.storage_service import (  # noqa: E402
     cloudflare_r2_object_size,
     delete_cloudflare_r2_asset,
     normalize_r2_url_to_key,
@@ -35,7 +37,6 @@ from app.services.storage_service import (  # noqa: E402
 HTML_IMG_RE = re.compile(r"<img\b[^>]*\bsrc=['\"]([^'\"]+)['\"]", re.IGNORECASE)
 SRCSET_RE = re.compile(r"\bsrcset=['\"]([^'\"]+)['\"]", re.IGNORECASE)
 MD_IMG_RE = re.compile(r"!\[[^\]]*]\(([^)\s]+)\)")
-URL_RE = re.compile(r"https?://[^\s'\"<>)\]]+")
 LIVE_STATUSES = {"live", "published"}
 DELETABLE_EXTENSIONS = (".webp", ".png", ".jpg", ".jpeg")
 
@@ -53,10 +54,28 @@ def _safe_str(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _normalize_candidate_url(raw: str) -> str:
+    candidate = unescape(_safe_str(raw))
+    if not candidate:
+        return ""
+    candidate = candidate.strip().strip("()[]<>")
+    for splitter in ("'", '"', "<", ">", "\r", "\n", "\t", " "):
+        index = candidate.find(splitter)
+        if index > 0:
+            candidate = candidate[:index]
+    candidate = candidate.strip().rstrip(".,);")
+    parsed = urlparse(candidate)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    if "javascript:" in candidate.lower() or "data:" in candidate.lower():
+        return ""
+    return candidate
+
+
 def _extract_srcset_urls(srcset_value: str) -> list[str]:
     urls: list[str] = []
     for part in (srcset_value or "").split(","):
-        candidate = part.strip().split(" ")[0].strip()
+        candidate = _normalize_candidate_url(part.strip().split(" ")[0].strip())
         if candidate:
             urls.append(candidate)
     return urls
@@ -65,13 +84,18 @@ def _extract_srcset_urls(srcset_value: str) -> list[str]:
 def _extract_image_urls(content: str) -> list[str]:
     seen: set[str] = set()
     urls: list[str] = []
-    for pattern in (HTML_IMG_RE, MD_IMG_RE, URL_RE):
-        for match in pattern.finditer(content or ""):
-            value = _safe_str(match.group(1) if pattern is MD_IMG_RE else match.group(0) if pattern is URL_RE else match.group(1))
-            if not value or value in seen:
-                continue
-            seen.add(value)
-            urls.append(value)
+    for match in HTML_IMG_RE.finditer(content or ""):
+        value = _normalize_candidate_url(match.group(1))
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        urls.append(value)
+    for match in MD_IMG_RE.finditer(content or ""):
+        value = _normalize_candidate_url(match.group(1))
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        urls.append(value)
     for match in SRCSET_RE.finditer(content or ""):
         for value in _extract_srcset_urls(match.group(1)):
             if not value or value in seen:

@@ -26,7 +26,7 @@ from app.models.entities import (
 )
 from app.services import content_ops_service as content_ops
 from app.services import telegram_service, training_service
-from app.services.settings_service import get_settings_map, upsert_settings
+from app.services.integrations.settings_service import get_settings_map, upsert_settings
 
 
 def _utc_now() -> datetime:

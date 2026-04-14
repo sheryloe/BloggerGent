@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.api import DashboardMetrics
-from app.services.dashboard_service import build_dashboard_metrics
+from app.services.ops.dashboard_service import build_dashboard_metrics
 
 router = APIRouter()
 

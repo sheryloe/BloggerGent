@@ -31,10 +31,10 @@ from sqlalchemy.orm import Session  # noqa: E402
 
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.entities import AnalyticsArticleFact, SyncedCloudflarePost  # noqa: E402
-from app.services.analytics_service import rebuild_blog_month_rollup  # noqa: E402
-from app.services.blogger_sync_service import sync_connected_blogger_posts  # noqa: E402
-from app.services.cloudflare_sync_service import sync_cloudflare_posts  # noqa: E402
-from app.services.dedupe_utils import (  # noqa: E402
+from app.services.ops.analytics_service import rebuild_blog_month_rollup  # noqa: E402
+from app.services.blogger.blogger_sync_service import sync_connected_blogger_posts  # noqa: E402
+from app.services.cloudflare.cloudflare_sync_service import sync_cloudflare_posts  # noqa: E402
+from app.services.ops.dedupe_utils import (  # noqa: E402
     dedupe_key as build_dedupe_key,
     pick_best_status as pick_best_dedupe_status,
     pick_preferred_url as pick_preferred_dedupe_url,

@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from app.schemas.api import PromptTemplateRead, PromptTemplateUpdate
-from app.services.prompt_service import get_prompt_template, list_prompt_templates, update_prompt_template
+from app.services.content.prompt_service import get_prompt_template, list_prompt_templates, update_prompt_template
 
 router = APIRouter()
 

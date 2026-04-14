@@ -15,16 +15,16 @@ from app.schemas.api import (
     ArticleSearchDescriptionSyncRead,
     ArticleSeoMetaRead,
 )
-from app.services.blog_seo_meta_service import get_article_seo_meta_overview, verify_article_seo_meta
-from app.services.blog_service import list_visible_blog_ids
-from app.services.blogger_editor_service import BloggerEditorAutomationError, sync_article_search_description
-from app.services.publishing_service import (
+from app.services.content.blog_seo_meta_service import get_article_seo_meta_overview, verify_article_seo_meta
+from app.services.platform.blog_service import list_visible_blog_ids
+from app.services.blogger.blogger_editor_service import BloggerEditorAutomationError, sync_article_search_description
+from app.services.platform.publishing_service import (
     enqueue_publish_request,
     load_article_for_publish,
     resolve_request_datetime,
 )
 from app.services.providers.base import ProviderRuntimeError
-from app.services.topic_guard_service import TopicGuardConflictError
+from app.services.content.topic_guard_service import TopicGuardConflictError
 
 router = APIRouter()
 

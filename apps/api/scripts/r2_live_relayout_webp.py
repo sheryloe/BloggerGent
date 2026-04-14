@@ -6,8 +6,8 @@ import json
 import os
 import re
 import sys
-from collections import defaultdict
 from datetime import datetime, timezone
+from html import unescape
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -30,22 +30,18 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from app.db.session import SessionLocal  # noqa: E402
-from app.models.entities import Blog, R2AssetRelayoutMapping, SyncedBloggerPost  # noqa: E402
-from app.services.article_service import (  # noqa: E402
-    build_r2_asset_object_key,
-    resolve_r2_blog_group,
-    resolve_r2_category_key,
-)
-from app.services.blogger_sync_service import sync_blogger_posts_for_blog  # noqa: E402
-from app.services.cloudflare_channel_service import (  # noqa: E402
+from app.models.entities import Blog, ManagedChannel, R2AssetRelayoutMapping, SyncedBloggerPost  # noqa: E402
+from app.services.content.article_service import build_r2_asset_object_key, resolve_r2_category_key  # noqa: E402
+from app.services.blogger.blogger_sync_service import sync_blogger_posts_for_blog  # noqa: E402
+from app.services.cloudflare.cloudflare_channel_service import (  # noqa: E402
     _integration_data_or_raise,
     _integration_request,
     _list_integration_posts,
 )
-from app.services.cloudflare_sync_service import sync_cloudflare_posts  # noqa: E402
+from app.services.cloudflare.cloudflare_sync_service import sync_cloudflare_posts  # noqa: E402
 from app.services.providers.factory import get_blogger_provider  # noqa: E402
-from app.services.settings_service import get_settings_map  # noqa: E402
-from app.services.storage_service import (  # noqa: E402
+from app.services.integrations.settings_service import get_settings_map  # noqa: E402
+from app.services.integrations.storage_service import (  # noqa: E402
     _resolve_cloudflare_r2_configuration,
     cloudflare_r2_download_binary,
     normalize_r2_url_to_key,
@@ -55,12 +51,31 @@ from app.services.storage_service import (  # noqa: E402
 HTML_IMG_RE = re.compile(r"<img\b[^>]*\bsrc=['\"]([^'\"]+)['\"]", re.IGNORECASE)
 SRCSET_RE = re.compile(r"\bsrcset=['\"]([^'\"]+)['\"]", re.IGNORECASE)
 MD_IMG_RE = re.compile(r"!\[[^\]]*]\(([^)\s]+)\)")
-URL_RE = re.compile(r"https?://[^\s'\"<>)\]]+")
 LIVE_STATUSES = {"live", "published"}
+TARGET_BLOGGER_BLOG_IDS = {34, 35, 36, 37}
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Relayout LIVE post assets into canonical R2 WebP paths.")
+    parser.add_argument(
+        "--source",
+        choices=("blogger-only", "all"),
+        default="blogger-only",
+        help="Process source scope.",
+    )
+    parser.add_argument(
+        "--blog-id",
+        action="append",
+        type=int,
+        default=[],
+        help="Target Blogger blog id (repeatable).",
+    )
+    parser.add_argument(
+        "--blog-slug",
+        action="append",
+        default=[],
+        help="Target Blogger blog slug (repeatable).",
+    )
     parser.add_argument(
         "--mode",
         choices=("dry-run", "canary", "full"),
@@ -84,11 +99,57 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional JSON report output path.",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def _safe_str(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _slug_token(value: Any, fallback: str = "") -> str:
+    normalized = slugify(_safe_str(value), separator="-")
+    return normalized or fallback
+
+
+def _resolve_cloudflare_channel_slug(
+    db,
+    *,
+    channel_id: Any,
+    channel_name: Any,
+    cache: dict[str, str] | None = None,
+) -> str:
+    raw_channel_id = _safe_str(channel_id)
+    if cache is not None and raw_channel_id and raw_channel_id in cache:
+        return cache[raw_channel_id]
+    managed_channel = None
+    if raw_channel_id:
+        managed_channel = db.execute(
+            select(ManagedChannel).where(
+                ManagedChannel.provider == "cloudflare",
+                ManagedChannel.channel_id == raw_channel_id,
+            )
+        ).scalar_one_or_none()
+    metadata = managed_channel.channel_metadata if managed_channel and isinstance(managed_channel.channel_metadata, dict) else {}
+    metadata_slug = _slug_token(metadata.get("slug"), fallback="")
+    resolved = metadata_slug
+    if not resolved:
+        resolved = _slug_token(managed_channel.display_name if managed_channel else channel_name, fallback="")
+    if not resolved and raw_channel_id:
+        if ":" in raw_channel_id:
+            tail_slug = _slug_token(raw_channel_id.split(":", 1)[1], fallback="")
+            if tail_slug:
+                resolved = tail_slug
+        if not resolved:
+            resolved = _slug_token(raw_channel_id, fallback="")
+    if not resolved:
+        resolved = "dongri-archive"
+    if cache is not None and raw_channel_id:
+        cache[raw_channel_id] = resolved
+    return resolved
+
+
+def _cloudflare_blog_group(channel_slug: str) -> str:
+    return f"cloudflare/{_slug_token(channel_slug, fallback='dongri-archive')}"
 
 
 def _looks_like_image_url(url: str) -> bool:
@@ -98,10 +159,28 @@ def _looks_like_image_url(url: str) -> bool:
     return "/assets/media/" in lowered or "/cdn-cgi/image/" in lowered
 
 
+def _normalize_candidate_url(raw: str) -> str:
+    candidate = unescape(_safe_str(raw))
+    if not candidate:
+        return ""
+    candidate = candidate.strip().strip("()[]<>")
+    for splitter in ("'", '"', "<", ">", "\r", "\n", "\t", " "):
+        index = candidate.find(splitter)
+        if index > 0:
+            candidate = candidate[:index]
+    candidate = candidate.strip().rstrip(".,);")
+    parsed = urlparse(candidate)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    if "javascript:" in candidate.lower() or "data:" in candidate.lower():
+        return ""
+    return candidate
+
+
 def _extract_srcset_urls(srcset_value: str) -> list[str]:
     urls: list[str] = []
     for part in (srcset_value or "").split(","):
-        candidate = part.strip().split(" ")[0].strip()
+        candidate = _normalize_candidate_url(part.strip().split(" ")[0].strip())
         if candidate:
             urls.append(candidate)
     return urls
@@ -111,7 +190,7 @@ def _extract_image_urls(content: str) -> list[str]:
     seen: set[str] = set()
     results: list[str] = []
     for match in HTML_IMG_RE.finditer(content or ""):
-        value = _safe_str(match.group(1))
+        value = _normalize_candidate_url(match.group(1))
         if value and value not in seen and _looks_like_image_url(value):
             seen.add(value)
             results.append(value)
@@ -121,12 +200,7 @@ def _extract_image_urls(content: str) -> list[str]:
                 seen.add(value)
                 results.append(value)
     for match in MD_IMG_RE.finditer(content or ""):
-        value = _safe_str(match.group(1))
-        if value and value not in seen and _looks_like_image_url(value):
-            seen.add(value)
-            results.append(value)
-    for match in URL_RE.finditer(content or ""):
-        value = _safe_str(match.group(0))
+        value = _normalize_candidate_url(match.group(1))
         if value and value not in seen and _looks_like_image_url(value):
             seen.add(value)
             results.append(value)
@@ -157,6 +231,13 @@ def _slug_from_url(value: str, fallback: str) -> str:
     return slugify(fallback, separator="-") or "post"
 
 
+def _normalize_target_key_for_layout(key: str) -> str:
+    normalized = _safe_str(key).strip().lstrip("/")
+    while normalized.startswith("assets/assets/"):
+        normalized = normalized[len("assets/") :]
+    return normalized
+
+
 def _expected_prefix(*, blog_group: str, category_key: str, post_slug: str) -> str:
     return f"assets/media/{blog_group}/{category_key}/"
 
@@ -168,7 +249,7 @@ def _is_target_path(
     category_key: str,
     post_slug: str,
 ) -> bool:
-    normalized_key = key.strip().lstrip("/")
+    normalized_key = _normalize_target_key_for_layout(key)
     if not normalized_key.lower().endswith(".webp"):
         return False
     prefix = _expected_prefix(blog_group=blog_group, category_key=category_key, post_slug=post_slug)
@@ -201,6 +282,20 @@ def _download_source_bytes(
     response = httpx.get(url, timeout=timeout, follow_redirects=True)
     response.raise_for_status()
     return response.content
+
+
+def _fetch_live_html(url: str, *, timeout: float) -> str:
+    candidate = _safe_str(url)
+    if not candidate:
+        return ""
+    response = httpx.get(
+        candidate,
+        timeout=timeout,
+        follow_redirects=True,
+        headers={"User-Agent": "Mozilla/5.0 (BloggerGent relayout)"},
+    )
+    response.raise_for_status()
+    return response.text
 
 
 def _upsert_mapping(
@@ -271,18 +366,21 @@ def _process_single_image(
     source_post_url: str | None,
     url: str,
     blog_group: str,
+    mapping_blog_group: str,
     category_key: str,
     post_slug: str,
     asset_role: str,
     profile_key: str,
     primary_language: str,
+    blog_slug: str,
+    channel_slug: str,
     mode: str,
     r2_public_prefix: str,
     timeout: float,
     title: str,
     summary: str,
 ) -> dict[str, Any]:
-    legacy_key = normalize_r2_url_to_key(url)
+    legacy_key = _normalize_target_key_for_layout(normalize_r2_url_to_key(url))
     if _is_target_path(key=legacy_key, blog_group=blog_group, category_key=category_key, post_slug=post_slug):
         return {
             "status": "skip",
@@ -298,6 +396,8 @@ def _process_single_image(
         placeholder_key = build_r2_asset_object_key(
             profile_key=profile_key,
             primary_language=primary_language,
+            blog_slug=blog_slug,
+            channel_slug=channel_slug,
             editorial_category_key=category_key,
             editorial_category_label=category_key,
             labels=[category_key],
@@ -328,6 +428,8 @@ def _process_single_image(
     object_key = build_r2_asset_object_key(
         profile_key=profile_key,
         primary_language=primary_language,
+        blog_slug=blog_slug,
+        channel_slug=channel_slug,
         editorial_category_key=category_key,
         editorial_category_label=category_key,
         labels=[category_key],
@@ -356,7 +458,7 @@ def _process_single_image(
         legacy_key=legacy_key,
         migrated_url=migrated_url,
         migrated_key=migrated_key,
-        blog_group=blog_group,
+        blog_group=mapping_blog_group,
         category_key=category_key,
         asset_role=asset_role,
     )
@@ -379,16 +481,41 @@ def _replace_urls(content: str, replacements: dict[str, str]) -> str:
     return updated
 
 
-def _load_live_blogger_posts(db, *, mode: str, canary_count: int) -> list[SyncedBloggerPost]:
-    blogs = (
-        db.execute(
-            select(Blog)
-            .where(Blog.is_active.is_(True), Blog.blogger_blog_id.is_not(None))
-            .order_by(Blog.id.asc())
+def _load_target_blogger_blogs(
+    db,
+    *,
+    blog_ids: list[int],
+    blog_slugs: list[str],
+) -> list[Blog]:
+    requested_ids = {int(item) for item in blog_ids if int(item) > 0}
+    allowed_ids = set(TARGET_BLOGGER_BLOG_IDS)
+    target_ids = allowed_ids & requested_ids if requested_ids else allowed_ids
+    if not target_ids:
+        return []
+    query = (
+        select(Blog)
+        .where(
+            Blog.is_active.is_(True),
+            Blog.blogger_blog_id.is_not(None),
+            Blog.id.in_(sorted(target_ids)),
         )
-        .scalars()
-        .all()
+        .order_by(Blog.id.asc())
     )
+    if blog_slugs:
+        normalized = sorted({_safe_str(item) for item in blog_slugs if _safe_str(item)})
+        if not normalized:
+            return []
+        query = query.where(Blog.slug.in_(normalized))
+    return db.execute(query).scalars().all()
+
+
+def _load_live_blogger_posts(
+    db,
+    *,
+    blogs: list[Blog],
+    mode: str,
+    canary_count: int,
+) -> list[SyncedBloggerPost]:
     posts: list[SyncedBloggerPost] = []
     for blog in blogs:
         rows = (
@@ -421,16 +548,25 @@ def _fetch_cloudflare_post_detail(db, post_id: str) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _build_report_base(mode: str) -> dict[str, Any]:
+def _build_report_base(mode: str, *, source: str, blog_ids: list[int], blog_slugs: list[str]) -> dict[str, Any]:
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "mode": mode,
+        "source": source,
+        "target_blog_ids": sorted({int(item) for item in blog_ids if int(item) > 0}),
+        "target_blog_slugs": sorted({_safe_str(item) for item in blog_slugs if _safe_str(item)}),
         "summary": {
-            "planned": 0,
-            "updated": 0,
-            "skipped": 0,
+            "posts_scanned": 0,
+            "images_planned": 0,
+            "images_migrated": 0,
+            "already_target": 0,
+            "legacy_cleanup_candidates": 0,
             "failed": 0,
             "posts_updated": 0,
+            "posts_scanned_blogger": 0,
+            "posts_scanned_cloudflare": 0,
+            "posts_updated_blogger": 0,
+            "posts_updated_cloudflare": 0,
         },
         "blogger": [],
         "cloudflare": [],
@@ -439,11 +575,18 @@ def _build_report_base(mode: str) -> dict[str, Any]:
 
 def main() -> int:
     args = parse_args()
+    source = args.source
     mode = args.mode
     canary_count = max(int(args.canary_count or 1), 1)
     timeout = float(args.timeout or 45.0)
     apply_changes = mode in {"canary", "full"}
-    report = _build_report_base(mode)
+    report = _build_report_base(
+        mode,
+        source=source,
+        blog_ids=list(args.blog_id or []),
+        blog_slugs=list(args.blog_slug or []),
+    )
+    legacy_cleanup_candidates: set[str] = set()
 
     with SessionLocal() as db:
         settings_map = get_settings_map(db)
@@ -453,21 +596,29 @@ def main() -> int:
         if not public_base_url:
             raise SystemExit("cloudflare_r2_public_base_url is required.")
 
+        target_blogs = _load_target_blogger_blogs(
+            db,
+            blog_ids=list(args.blog_id or []),
+            blog_slugs=list(args.blog_slug or []),
+        )
+
         try:
-            connected_blogs = (
-                db.execute(select(Blog).where(Blog.is_active.is_(True), Blog.blogger_blog_id.is_not(None)))
-                .scalars()
-                .all()
-            )
-            for blog in connected_blogs:
+            for blog in target_blogs:
                 sync_blogger_posts_for_blog(db, blog)
         except Exception:
             db.rollback()
 
         touched_blogger_blog_ids: set[int] = set()
 
-        blogger_posts = _load_live_blogger_posts(db, mode=mode, canary_count=canary_count)
+        blogger_posts = _load_live_blogger_posts(
+            db,
+            blogs=target_blogs,
+            mode=mode,
+            canary_count=canary_count,
+        )
         for post in blogger_posts:
+            report["summary"]["posts_scanned"] += 1
+            report["summary"]["posts_scanned_blogger"] += 1
             blog = post.blog
             if blog is None:
                 continue
@@ -480,11 +631,18 @@ def main() -> int:
                 title=post.title,
                 summary=post.excerpt_text,
             )
-            blog_group = resolve_r2_blog_group(
-                profile_key=blog.profile_key,
-                primary_language=blog.primary_language,
-            )
-            image_urls = _extract_image_urls(post.content_html or "")
+            normalized_blog_slug = _safe_str(blog.slug) or f"blog-{blog.id}"
+            blog_group = f"google-blogger/{normalized_blog_slug}"
+            extraction_source = "stored_content_html"
+            extraction_html = _safe_str(post.content_html)
+            live_url = _safe_str(post.url)
+            if live_url:
+                try:
+                    extraction_html = _fetch_live_html(live_url, timeout=timeout)
+                    extraction_source = "live_page"
+                except Exception:
+                    extraction_source = "stored_content_html_fallback"
+            image_urls = _extract_image_urls(extraction_html or "")
             replacements: dict[str, str] = {}
             item_logs: list[dict[str, Any]] = []
             for index, image_url in enumerate(image_urls):
@@ -498,11 +656,14 @@ def main() -> int:
                         source_post_url=post.url,
                         url=image_url,
                         blog_group=blog_group,
+                        mapping_blog_group=blog_group,
                         category_key=category_key,
                         post_slug=post_slug,
                         asset_role=asset_role,
                         profile_key=blog.profile_key,
                         primary_language=blog.primary_language,
+                        blog_slug=normalized_blog_slug,
+                        channel_slug="",
                         mode=mode,
                         r2_public_prefix=r2_public_prefix,
                         timeout=timeout,
@@ -510,13 +671,19 @@ def main() -> int:
                         summary=post.excerpt_text,
                     )
                     item_logs.append(item)
+                    legacy_key = _safe_str(item.get("legacy_key"))
+                    migrated_key = _safe_str(item.get("migrated_key"))
+                    if legacy_key and migrated_key and legacy_key != migrated_key:
+                        legacy_cleanup_candidates.add(legacy_key)
                     if item["status"] == "plan":
-                        report["summary"]["planned"] += 1
+                        report["summary"]["images_planned"] += 1
                     elif item["status"] == "updated":
-                        report["summary"]["updated"] += 1
+                        report["summary"]["images_migrated"] += 1
                         replacements[image_url] = item["migrated_url"]
+                    elif item["reason"] == "already_target_path":
+                        report["summary"]["already_target"] += 1
                     else:
-                        report["summary"]["skipped"] += 1
+                        report["summary"]["already_target"] += 1
                 except Exception as exc:  # noqa: BLE001
                     item_logs.append(
                         {
@@ -548,6 +715,7 @@ def main() -> int:
                     touched_blogger_blog_ids.add(blog.id)
                     post_updated = True
                     report["summary"]["posts_updated"] += 1
+                    report["summary"]["posts_updated_blogger"] += 1
                 except Exception as exc:  # noqa: BLE001
                     report["summary"]["failed"] += 1
                     item_logs.append(
@@ -568,6 +736,7 @@ def main() -> int:
                     "post_slug": post_slug,
                     "blog_group": blog_group,
                     "category_key": category_key,
+                    "image_source": extraction_source,
                     "items": item_logs,
                     "post_updated": post_updated,
                 }
@@ -580,127 +749,150 @@ def main() -> int:
                     continue
                 sync_blogger_posts_for_blog(db, blog)
 
-        cloudflare_posts = _list_integration_posts(db)
-        cloudflare_live = [
-            item
-            for item in cloudflare_posts
-            if _safe_str(item.get("status")).lower() in LIVE_STATUSES and _safe_str(item.get("id"))
-        ]
-        if mode == "canary":
-            cloudflare_live = cloudflare_live[:canary_count]
+        if source == "all":
+            cloudflare_posts = _list_integration_posts(db)
+            cloudflare_live = [
+                item
+                for item in cloudflare_posts
+                if _safe_str(item.get("status")).lower() in LIVE_STATUSES and _safe_str(item.get("id"))
+            ]
+            if mode == "canary":
+                cloudflare_live = cloudflare_live[:canary_count]
 
-        for row in cloudflare_live:
-            post_id = _safe_str(row.get("id"))
-            detail = _fetch_cloudflare_post_detail(db, post_id)
-            if not detail:
-                continue
-            post_slug = _safe_str(detail.get("slug")) or _slug_from_url(_safe_str(detail.get("publicUrl")), fallback=f"post-{post_id}")
-            post_url = _safe_str(detail.get("publicUrl") or detail.get("url"))
-            content = _safe_str(detail.get("content") or detail.get("contentMarkdown") or detail.get("content_markdown"))
-            cover_image = _safe_str(detail.get("coverImage"))
-            category = detail.get("category") if isinstance(detail.get("category"), dict) else {}
-            category_slug = _safe_str(category.get("slug"))
-            category_key = resolve_r2_category_key(
-                profile_key="archive",
-                category_slug=category_slug or "uncategorized",
-            )
-            blog_group = "archive"
+            channel_slug_cache: dict[str, str] = {}
+            for row in cloudflare_live:
+                report["summary"]["posts_scanned"] += 1
+                report["summary"]["posts_scanned_cloudflare"] += 1
+                post_id = _safe_str(row.get("id"))
+                detail = _fetch_cloudflare_post_detail(db, post_id)
+                if not detail:
+                    continue
+                post_slug = _safe_str(detail.get("slug")) or _slug_from_url(_safe_str(detail.get("publicUrl")), fallback=f"post-{post_id}")
+                post_url = _safe_str(detail.get("publicUrl") or detail.get("url"))
+                content = _safe_str(detail.get("content") or detail.get("contentMarkdown") or detail.get("content_markdown"))
+                cover_image = _safe_str(detail.get("coverImage"))
+                category = detail.get("category") if isinstance(detail.get("category"), dict) else {}
+                category_slug = _safe_str(category.get("slug"))
+                category_key = resolve_r2_category_key(
+                    profile_key="archive",
+                    category_slug=category_slug or "uncategorized",
+                )
+                channel_slug = _resolve_cloudflare_channel_slug(
+                    db,
+                    channel_id=detail.get("channelId") or row.get("channelId"),
+                    channel_name=detail.get("channelName") or row.get("channelName"),
+                    cache=channel_slug_cache,
+                )
+                blog_group = _cloudflare_blog_group(channel_slug)
 
-            ordered_urls: list[str] = []
-            if cover_image:
-                ordered_urls.append(cover_image)
-            for image_url in _extract_image_urls(content):
-                if image_url not in ordered_urls:
-                    ordered_urls.append(image_url)
+                ordered_urls: list[str] = []
+                if cover_image:
+                    ordered_urls.append(cover_image)
+                for image_url in _extract_image_urls(content):
+                    if image_url not in ordered_urls:
+                        ordered_urls.append(image_url)
 
-            replacements: dict[str, str] = {}
-            item_logs: list[dict[str, Any]] = []
-            for index, image_url in enumerate(ordered_urls):
-                asset_role = "cover" if index == 0 and image_url == cover_image else f"inline-{index}"
-                try:
-                    item = _process_single_image(
-                        db,
-                        source_type="cloudflare",
-                        source_blog_id=None,
-                        source_post_id=post_id,
-                        source_post_url=post_url,
-                        url=image_url,
-                        blog_group=blog_group,
-                        category_key=category_key,
-                        post_slug=post_slug,
-                        asset_role=asset_role,
-                        profile_key="archive",
-                        primary_language="ko",
-                        mode=mode,
-                        r2_public_prefix=r2_public_prefix,
-                        timeout=timeout,
-                        title=_safe_str(detail.get("title") or post_slug),
-                        summary=_safe_str(detail.get("excerpt")),
-                    )
-                    item_logs.append(item)
-                    if item["status"] == "plan":
-                        report["summary"]["planned"] += 1
-                    elif item["status"] == "updated":
-                        report["summary"]["updated"] += 1
-                        replacements[image_url] = item["migrated_url"]
-                    else:
-                        report["summary"]["skipped"] += 1
-                except Exception as exc:  # noqa: BLE001
-                    item_logs.append(
-                        {
-                            "status": "failed",
-                            "reason": str(exc),
-                            "legacy_url": image_url,
-                            "asset_role": asset_role,
-                        }
-                    )
-                    report["summary"]["failed"] += 1
-
-            post_updated = False
-            if apply_changes and replacements:
-                updated_content = _replace_urls(content, replacements)
-                update_payload: dict[str, Any] = {}
-                if updated_content != content:
-                    update_payload["content"] = updated_content
-                if cover_image and cover_image in replacements:
-                    update_payload["coverImage"] = replacements[cover_image]
-                if update_payload:
+                replacements: dict[str, str] = {}
+                item_logs: list[dict[str, Any]] = []
+                for index, image_url in enumerate(ordered_urls):
+                    asset_role = "cover" if index == 0 and image_url == cover_image else f"inline-{index}"
                     try:
-                        response = _integration_request(
+                        item = _process_single_image(
                             db,
-                            method="PUT",
-                            path=f"/api/integrations/posts/{post_id}",
-                            json_payload=update_payload,
-                            timeout=120.0,
+                            source_type="cloudflare",
+                            source_blog_id=None,
+                            source_post_id=post_id,
+                            source_post_url=post_url,
+                            url=image_url,
+                            blog_group=blog_group,
+                            mapping_blog_group=blog_group,
+                            category_key=category_key,
+                            post_slug=post_slug,
+                            asset_role=asset_role,
+                            profile_key="archive",
+                            primary_language="ko",
+                            blog_slug="",
+                            channel_slug=channel_slug,
+                            mode=mode,
+                            r2_public_prefix=r2_public_prefix,
+                            timeout=timeout,
+                            title=_safe_str(detail.get("title") or post_slug),
+                            summary=_safe_str(detail.get("excerpt")),
                         )
-                        _integration_data_or_raise(response)
-                        post_updated = True
-                        report["summary"]["posts_updated"] += 1
+                        item_logs.append(item)
+                        legacy_key = _safe_str(item.get("legacy_key"))
+                        migrated_key = _safe_str(item.get("migrated_key"))
+                        if legacy_key and migrated_key and legacy_key != migrated_key:
+                            legacy_cleanup_candidates.add(legacy_key)
+                        if item["status"] == "plan":
+                            report["summary"]["images_planned"] += 1
+                        elif item["status"] == "updated":
+                            report["summary"]["images_migrated"] += 1
+                            replacements[image_url] = item["migrated_url"]
+                        elif item["reason"] == "already_target_path":
+                            report["summary"]["already_target"] += 1
+                        else:
+                            report["summary"]["already_target"] += 1
                     except Exception as exc:  # noqa: BLE001
-                        report["summary"]["failed"] += 1
                         item_logs.append(
                             {
                                 "status": "failed",
-                                "reason": f"cloudflare_update_failed:{exc}",
-                                "legacy_url": "",
-                                "asset_role": "post-update",
+                                "reason": str(exc),
+                                "legacy_url": image_url,
+                                "asset_role": asset_role,
                             }
                         )
+                        report["summary"]["failed"] += 1
 
-            report["cloudflare"].append(
-                {
-                    "post_id": post_id,
-                    "post_url": post_url,
-                    "post_slug": post_slug,
-                    "blog_group": blog_group,
-                    "category_key": category_key,
-                    "items": item_logs,
-                    "post_updated": post_updated,
-                }
-            )
+                post_updated = False
+                if apply_changes and replacements:
+                    updated_content = _replace_urls(content, replacements)
+                    update_payload: dict[str, Any] = {}
+                    if updated_content != content:
+                        update_payload["content"] = updated_content
+                    if cover_image and cover_image in replacements:
+                        update_payload["coverImage"] = replacements[cover_image]
+                    if update_payload:
+                        try:
+                            response = _integration_request(
+                                db,
+                                method="PUT",
+                                path=f"/api/integrations/posts/{post_id}",
+                                json_payload=update_payload,
+                                timeout=120.0,
+                            )
+                            _integration_data_or_raise(response)
+                            post_updated = True
+                            report["summary"]["posts_updated"] += 1
+                            report["summary"]["posts_updated_cloudflare"] += 1
+                        except Exception as exc:  # noqa: BLE001
+                            report["summary"]["failed"] += 1
+                            item_logs.append(
+                                {
+                                    "status": "failed",
+                                    "reason": f"cloudflare_update_failed:{exc}",
+                                    "legacy_url": "",
+                                    "asset_role": "post-update",
+                                }
+                            )
 
-        if apply_changes:
-            sync_cloudflare_posts(db, include_non_published=False)
+                report["cloudflare"].append(
+                    {
+                        "post_id": post_id,
+                        "post_url": post_url,
+                        "post_slug": post_slug,
+                        "blog_group": blog_group,
+                        "channel_slug": channel_slug,
+                        "category_key": category_key,
+                        "items": item_logs,
+                        "post_updated": post_updated,
+                    }
+                )
+
+            if apply_changes:
+                sync_cloudflare_posts(db, include_non_published=False)
+
+        report["summary"]["legacy_cleanup_candidates"] = len(legacy_cleanup_candidates)
 
         db.commit()
 

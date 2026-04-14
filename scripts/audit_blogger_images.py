@@ -31,10 +31,10 @@ from sqlalchemy.orm import selectinload  # noqa: E402
 
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.entities import Article, Blog, BloggerPost, Image, PostStatus  # noqa: E402
-from app.services.blogger_live_audit_service import fetch_and_audit_blogger_post  # noqa: E402
+from app.services.blogger.blogger_live_audit_service import fetch_and_audit_blogger_post  # noqa: E402
 from app.services.providers.factory import get_blogger_provider, get_image_provider  # noqa: E402
-from app.services.publishing_service import rebuild_article_html, refresh_article_public_image, upsert_article_blogger_post  # noqa: E402
-from app.services.storage_service import save_public_binary  # noqa: E402
+from app.services.platform.publishing_service import rebuild_article_html, refresh_article_public_image, upsert_article_blogger_post  # noqa: E402
+from app.services.integrations.storage_service import save_public_binary  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:

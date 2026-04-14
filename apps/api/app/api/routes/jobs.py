@@ -7,13 +7,13 @@ from sqlalchemy.orm import Session, selectinload
 from app.db.session import get_db
 from app.models.entities import AIUsageEvent, Article, AuditLog, Blog, BloggerPost, Image, Job, PostStatus, PublishMode, PublishQueueItem, Topic
 from app.schemas.api import GeneratedDataResetResponse, JobCreate, JobDetailRead, JobListItemRead, JobRetryResponse
-from app.services.blog_service import get_blog, list_visible_blog_ids
-from app.services.content_guard_service import DuplicateContentError
-from app.services.job_service import create_job, load_job
+from app.services.platform.blog_service import get_blog, list_visible_blog_ids
+from app.services.content.content_guard_service import DuplicateContentError
+from app.services.ops.job_service import create_job, load_job
 from app.services.providers.factory import get_blogger_provider
-from app.services.settings_service import get_settings_map
-from app.services.storage_service import clear_generated_storage
-from app.services.topic_guard_service import TopicGuardConflictError
+from app.services.integrations.settings_service import get_settings_map
+from app.services.integrations.storage_service import clear_generated_storage
+from app.services.content.topic_guard_service import TopicGuardConflictError
 from app.tasks.pipeline import PIPELINE_CONTROL_KEY, _resolve_stop_after, _serialize_pipeline_control, run_job
 
 router = APIRouter()

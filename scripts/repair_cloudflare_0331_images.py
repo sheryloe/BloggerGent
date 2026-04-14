@@ -41,7 +41,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from app.db.session import SessionLocal  # noqa: E402
-from app.services.cloudflare_channel_service import (  # noqa: E402
+from app.services.cloudflare.cloudflare_channel_service import (  # noqa: E402
     _integration_data_or_raise,
     _integration_request,
     _safe_fallback_image_prompt,

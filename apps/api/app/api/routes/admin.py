@@ -14,10 +14,10 @@ from app.schemas.api import (
     CloudflareR2MigrationRead,
     CloudflareR2MigrationRequest,
 )
-from app.services.blog_service import list_visible_blog_ids
-from app.services.blogger_label_backfill_service import dry_run_blogger_editorial_label_backfill
-from app.services.ops_health_service import generate_ops_health_report
-from app.services.cloudflare_r2_migration_service import run_cloudflare_r2_image_migration
+from app.services.platform.blog_service import list_visible_blog_ids
+from app.services.blogger.blogger_label_backfill_service import dry_run_blogger_editorial_label_backfill
+from app.services.ops.ops_health_service import generate_ops_health_report
+from app.services.cloudflare.cloudflare_r2_migration_service import run_cloudflare_r2_image_migration
 from app.services.providers.base import ProviderRuntimeError
 from app.tasks.admin import run_blogger_editorial_label_backfill
 

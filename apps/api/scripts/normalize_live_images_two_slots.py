@@ -30,15 +30,15 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.entities import Blog, SyncedBloggerPost  # noqa: E402
-from app.services.blogger_sync_service import sync_blogger_posts_for_blog  # noqa: E402
-from app.services.cloudflare_channel_service import (  # noqa: E402
+from app.services.blogger.blogger_sync_service import sync_blogger_posts_for_blog  # noqa: E402
+from app.services.cloudflare.cloudflare_channel_service import (  # noqa: E402
     _integration_data_or_raise,
     _integration_request,
     _list_integration_posts,
     _safe_fallback_image_prompt,
     _upload_integration_asset,
 )
-from app.services.cloudflare_sync_service import sync_cloudflare_posts  # noqa: E402
+from app.services.cloudflare.cloudflare_sync_service import sync_cloudflare_posts  # noqa: E402
 from app.services.providers.factory import get_blogger_provider, get_image_provider  # noqa: E402
 
 LIVE_STATUSES = {"live", "published"}
@@ -108,6 +108,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--mode", choices=("audit", "canary", "full"), default="audit")
     parser.add_argument("--source", choices=("all", "blogger", "cloudflare"), default="all")
+    parser.add_argument("--generation-policy", choices=("existing-only", "generate"), default="existing-only")
     parser.add_argument("--model", default="gpt-image-1")
     parser.add_argument("--canary-count", type=int, default=15)
     parser.add_argument("--timeout", type=float, default=20.0)
@@ -693,6 +694,7 @@ def _new_report(args: argparse.Namespace) -> dict[str, Any]:
         "generated_at": _utc_now_iso(),
         "mode": args.mode,
         "source": args.source,
+        "generation_policy": _safe_str(getattr(args, "generation_policy", "existing-only")) or "existing-only",
         "model": args.model,
         "canary_count": int(args.canary_count),
         "summary": {
@@ -710,6 +712,7 @@ def _new_report(args: argparse.Namespace) -> dict[str, Any]:
             "class_3_plus": 0,
             "duplicate_slots": 0,
             "broken_related_urls": 0,
+            "manual_review_required": 0,
         },
         "by_host": {},
         "items": [],
@@ -781,6 +784,7 @@ def _normalize_post_content(
 def main() -> int:
     args = parse_args()
     apply_mode = args.mode in {"canary", "full"}
+    generation_policy = _safe_str(getattr(args, "generation_policy", "existing-only")) or "existing-only"
     report = _new_report(args)
 
     with SessionLocal() as db:
@@ -788,7 +792,7 @@ def main() -> int:
         if args.source != "all":
             targets = [target for target in targets if target.source == args.source]
         report["summary"]["targets"] = len(targets)
-        image_provider = get_image_provider(db, model_override=args.model) if apply_mode else None
+        image_provider = get_image_provider(db, model_override=args.model) if apply_mode and generation_policy == "generate" else None
         touched_blog_ids: set[int] = set()
         touched_cloudflare = False
 
@@ -912,6 +916,15 @@ def main() -> int:
                 inline_url = healthy_urls[1] if len(healthy_urls) >= 2 else ""
                 upload_slug = _safe_str(target.cloudflare_slug) or target.slug_seed or slugify(target.title, separator="-")
                 generated_prompts: dict[str, str] = {}
+
+                if generation_policy == "existing-only" and (not cover_url or not inline_url or inline_url == cover_url):
+                    row["status"] = "manual_review_required"
+                    row["reason"] = "insufficient_existing_images"
+                    row["normalized_cover"] = cover_url
+                    row["normalized_inline"] = inline_url
+                    report["summary"]["manual_review_required"] += 1
+                    report["items"].append(row)
+                    continue
 
                 if not cover_url:
                     ok, value, prompt = _upload_generated_slot(

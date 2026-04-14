@@ -35,15 +35,15 @@ from package_common import (  # noqa: E402
     write_json,
 )
 
-from app.services.cloudflare_channel_service import (  # noqa: E402
+from app.services.cloudflare.cloudflare_channel_service import (  # noqa: E402
     _category_topic_guidance,
     _cloudflare_content_brief,
     _cloudflare_editorial_category_key,
     _cloudflare_target_audience,
 )
-from app.services.prompt_service import render_prompt_template  # noqa: E402
+from app.services.content.prompt_service import render_prompt_template  # noqa: E402
 from app.services.providers.factory import get_article_provider, get_runtime_config  # noqa: E402
-from app.services.settings_service import get_settings_map  # noqa: E402
+from app.services.integrations.settings_service import get_settings_map  # noqa: E402
 
 
 IMAGE_SNIPPET_RE = re.compile(r"!\[[^\]]*]\([^)]+\)|<img\b[^>]*>", re.IGNORECASE)

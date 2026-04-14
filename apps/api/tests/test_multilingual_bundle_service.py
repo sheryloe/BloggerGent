@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.services.multilingual_bundle_service import (
+from app.services.content.multilingual_bundle_service import (
     build_language_switch_block,
     parse_planner_bundle_context,
     resolve_blog_bundle_language,

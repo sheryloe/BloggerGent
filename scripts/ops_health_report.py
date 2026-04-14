@@ -19,7 +19,7 @@ if str(API_ROOT) not in sys.path:
     sys.path.insert(0, str(API_ROOT))
 
 from app.db.session import SessionLocal  # noqa: E402
-from app.services.ops_health_service import generate_ops_health_report  # noqa: E402
+from app.services.ops.ops_health_service import generate_ops_health_report  # noqa: E402
 
 
 def main() -> None:

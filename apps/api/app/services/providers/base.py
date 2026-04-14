@@ -15,6 +15,10 @@ class RuntimeProviderConfig:
     gemini_model: str
     blogger_access_token: str
     default_publish_mode: str
+    text_runtime_kind: str = "openai"
+    text_runtime_model: str = "gpt-5.4"
+    image_runtime_kind: str = "openai_image"
+    codex_job_timeout_seconds: int = 900
 
 
 class ProviderRuntimeError(Exception):

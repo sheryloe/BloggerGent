@@ -38,14 +38,14 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.entities import BloggerPost, PostStatus, SyncedBloggerPost  # noqa: E402
-from app.services.cloudflare_channel_service import (  # noqa: E402
+from app.services.cloudflare.cloudflare_channel_service import (  # noqa: E402
     _integration_data_or_raise,
     _integration_request,
     _list_integration_posts,
 )
 from app.services.providers.factory import get_blogger_provider  # noqa: E402
-from app.services.settings_service import get_settings_map  # noqa: E402
-from app.services.storage_service import (  # noqa: E402
+from app.services.integrations.settings_service import get_settings_map  # noqa: E402
+from app.services.integrations.storage_service import (  # noqa: E402
     _resolve_cloudflare_r2_configuration,
     cloudflare_r2_download_binary,
     cloudflare_r2_object_exists,

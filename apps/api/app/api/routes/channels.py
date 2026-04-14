@@ -7,10 +7,10 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.api import ManagedChannelRead, PromptFlowRead, PromptFlowReorderRequest, PromptFlowStepUpdate, WorkflowStepCreate
-from app.services.blog_service import create_workflow_step, delete_workflow_step, get_blog, get_blog_summary_map, list_blogs, reorder_workflow_steps, update_blog_agent
-from app.services.channel_prompt_service import build_prompt_flow, save_platform_prompt_step
-from app.services.cloudflare_channel_service import save_cloudflare_prompt
-from app.services.workspace_service import list_managed_channels, serialize_managed_channel
+from app.services.platform.blog_service import create_workflow_step, delete_workflow_step, get_blog, get_blog_summary_map, list_blogs, reorder_workflow_steps, update_blog_agent
+from app.services.content.channel_prompt_service import build_prompt_flow, save_platform_prompt_step
+from app.services.cloudflare.cloudflare_channel_service import save_cloudflare_prompt
+from app.services.platform.workspace_service import list_managed_channels, serialize_managed_channel
 
 router = APIRouter(prefix="/channels", tags=["channels"])
 

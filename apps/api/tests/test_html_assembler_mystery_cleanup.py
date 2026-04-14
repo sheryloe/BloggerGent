@@ -1,4 +1,4 @@
-from app.services.html_assembler import _strip_mystery_inline_artifacts
+from app.services.content.html_assembler import _strip_mystery_inline_artifacts
 
 
 def test_strip_mystery_inline_artifacts_removes_collage_markers_and_figures() -> None:

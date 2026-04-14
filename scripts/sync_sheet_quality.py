@@ -34,29 +34,29 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.entities import Article, Blog, PostStatus  # noqa: E402
-from app.services.article_service import estimate_reading_time, sanitize_blog_html  # noqa: E402
-from app.services.cloudflare_channel_service import (  # noqa: E402
+from app.services.content.article_service import estimate_reading_time, sanitize_blog_html  # noqa: E402
+from app.services.cloudflare.cloudflare_channel_service import (  # noqa: E402
     _integration_data_or_raise,
     _integration_request,
     _sync_cloudflare_quality_rows,
     list_cloudflare_posts,
 )
-from app.services.content_ops_service import (  # noqa: E402
+from app.services.content.content_ops_service import (  # noqa: E402
     compute_blog_dbs_summary,
     compute_dbs_score,
     compute_seo_geo_scores,
     compute_similarity_analysis,
     normalize_similarity_text,
 )
-from app.services.google_sheet_service import (  # noqa: E402
+from app.services.integrations.google_sheet_service import (  # noqa: E402
     BLOGGER_SNAPSHOT_COLUMNS,
     QUALITY_COLUMNS,
     get_google_sheet_sync_config,
     sync_google_sheet_quality_tab,
 )
 from app.services.providers.factory import get_blogger_provider  # noqa: E402
-from app.services.publishing_service import rebuild_article_html, refresh_article_public_image, upsert_article_blogger_post  # noqa: E402
-from app.services.settings_service import get_settings_map  # noqa: E402
+from app.services.platform.publishing_service import rebuild_article_html, refresh_article_public_image, upsert_article_blogger_post  # noqa: E402
+from app.services.integrations.settings_service import get_settings_map  # noqa: E402
 
 
 TAG_RE = re.compile(r"<[^>]+>")

@@ -40,7 +40,7 @@ def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Session:
 
     session = SessionLocal()
     try:
-        from app.services.settings_service import get_settings_map
+        from app.services.integrations.settings_service import get_settings_map
     except SyntaxError:
         get_settings_map = None
     if callable(get_settings_map):

@@ -22,7 +22,7 @@ if "STORAGE_ROOT" not in os.environ:
 sys.path.insert(0, str(API_ROOT))
 
 from app.db.session import SessionLocal  # noqa: E402
-from app.services.cloudflare_channel_service import sync_cloudflare_prompts_from_files  # noqa: E402
+from app.services.cloudflare.cloudflare_channel_service import sync_cloudflare_prompts_from_files  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:

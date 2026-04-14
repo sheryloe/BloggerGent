@@ -32,9 +32,9 @@ from sqlalchemy.orm import selectinload  # noqa: E402
 
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.entities import Article, Blog, BloggerPost, PostStatus  # noqa: E402
-from app.services.cloudflare_channel_service import _list_remote_posts  # noqa: E402
-from app.services.content_ops_service import compute_seo_geo_scores  # noqa: E402
-from app.services.settings_service import get_settings_map  # noqa: E402
+from app.services.cloudflare.cloudflare_channel_service import _list_remote_posts  # noqa: E402
+from app.services.content.content_ops_service import compute_seo_geo_scores  # noqa: E402
+from app.services.integrations.settings_service import get_settings_map  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:

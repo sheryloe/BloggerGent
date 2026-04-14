@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 
 from app.schemas.api import HelpTopicRead
-from app.services.help_service import get_help_topic, list_help_topics
+from app.services.integrations.help_service import get_help_topic, list_help_topics
 
 
 router = APIRouter()

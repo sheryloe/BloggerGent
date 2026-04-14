@@ -13,9 +13,9 @@ from app.core.config import settings as app_settings
 from app.db.base import Base
 from app.models.entities import Blog, BlogTheme, ContentItem, ContentPlanDay, ContentPlanSlot, PublicationRecord, PublishMode, WorkflowStageType
 from app.services import planner_service
-from app.services.blog_service import ensure_blog_workflow_steps, get_workflow_step, stage_supports_prompt
-from app.services.platform_service import ensure_managed_channels
-from app.services.settings_service import get_settings_map, upsert_settings
+from app.services.platform.blog_service import ensure_blog_workflow_steps, get_workflow_step, stage_supports_prompt
+from app.services.platform.platform_service import ensure_managed_channels
+from app.services.integrations.settings_service import get_settings_map, upsert_settings
 
 
 @pytest.fixture()

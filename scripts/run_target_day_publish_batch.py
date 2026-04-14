@@ -21,10 +21,10 @@ sys.path.insert(0, str(API_ROOT))
 
 from sqlalchemy.orm import joinedload  # noqa: E402
 
-import app.services.planner_service as planner_service  # noqa: E402
+import app.services.ops.planner_service as planner_service  # noqa: E402
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.entities import ContentPlanDay, ContentPlanSlot, Job, JobStatus, PublishMode  # noqa: E402
-from app.services.cloudflare_sync_service import sync_cloudflare_posts  # noqa: E402
+from app.services.cloudflare.cloudflare_sync_service import sync_cloudflare_posts  # noqa: E402
 from app.tasks.pipeline import PIPELINE_CONTROL_KEY, run_job  # noqa: E402
 
 

@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import base64
 
+import pytest
+
+from app.services.providers.base import ProviderRuntimeError
+from app.services.providers.factory import get_image_provider
 from app.services.providers.openai import OpenAIImageProvider
 
 
@@ -68,3 +72,30 @@ def test_generate_image_falls_back_to_dall_e_3_when_gpt_image_fails(monkeypatch)
     assert raw["requested_model"] == "gpt-image-1"
     assert raw["actual_model"] == "dall-e-3"
     assert raw["fallback_used"] is True
+
+
+def test_get_image_provider_requires_openai_key_in_live_mode(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.providers.factory.get_settings_map",
+        lambda _db: {
+            "provider_mode": "live",
+            "openai_api_key": "",
+            "openai_image_model": "gpt-image-1",
+            "topic_discovery_provider": "codex_cli",
+            "topic_discovery_model": "gpt-5.4",
+            "gemini_api_key": "",
+            "gemini_model": "gemini-2.5-flash",
+            "blogger_access_token": "",
+            "default_publish_mode": "draft",
+            "text_runtime_kind": "codex_cli",
+            "text_runtime_model": "gpt-5.4",
+            "image_runtime_kind": "openai_image",
+            "codex_job_timeout_seconds": "900",
+        },
+    )
+
+    with pytest.raises(ProviderRuntimeError) as exc_info:
+        get_image_provider(object())
+
+    assert exc_info.value.status_code == 503
+    assert "image api key is required" in exc_info.value.message.lower()

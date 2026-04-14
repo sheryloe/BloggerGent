@@ -11,11 +11,11 @@ from sqlalchemy import and_
 
 from app.db.session import SessionLocal
 from app.models.entities import Blog, ContentPlanDay, ContentPlanSlot, ManagedChannel, WorkflowStageType
-from app.services.blog_service import ensure_all_blog_workflows, enforce_free_tier_model_policy, get_blog, sync_stage_prompts_from_profile_files
-from app.services.cloudflare_channel_service import sync_cloudflare_prompts_from_files
-from app.services.openai_usage_service import FREE_TIER_DEFAULT_LARGE_TEXT_MODEL
-from app.services.planner_service import analyze_day_briefs, apply_day_briefs, create_month_plan, get_calendar
-from app.services.settings_service import upsert_settings
+from app.services.platform.blog_service import ensure_all_blog_workflows, enforce_free_tier_model_policy, get_blog, sync_stage_prompts_from_profile_files
+from app.services.cloudflare.cloudflare_channel_service import sync_cloudflare_prompts_from_files
+from app.services.ops.openai_usage_service import FREE_TIER_DEFAULT_LARGE_TEXT_MODEL
+from app.services.ops.planner_service import analyze_day_briefs, apply_day_briefs, create_month_plan, get_calendar
+from app.services.integrations.settings_service import upsert_settings
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

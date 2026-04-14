@@ -75,7 +75,7 @@ Return exactly one JSON object with keys only:
 - Use 4-6 major H2 sections with decision-useful content.
 - Add one section for practical mistakes or decision guidance.
 - End with `<h2>Final Takeaway</h2>`.
-- Do not use headings such as "핵심 요약", "확인된 사실", "미확인 정보/가정", "출처/확인 경로", or their direct equivalents unless the topic truly requires them.
+- Do not use headings such as "要点まとめ", "確認済み事実", "未確認情報/仮定", "出典/確認経路", or their direct equivalents unless the topic truly requires them.
 
 [FAQ]
 - Exactly 4 items.

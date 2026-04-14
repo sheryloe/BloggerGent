@@ -11,8 +11,8 @@ from app.db.base import Base
 from app.models.entities import Blog, BlogAgentConfig, PublishMode, WorkflowStageType
 from app.schemas.api import PromptFlowStepUpdate
 from app.services import channel_prompt_service
-from app.services.platform_service import ensure_managed_channels
-from app.services.settings_service import get_settings_map
+from app.services.platform.platform_service import ensure_managed_channels
+from app.services.integrations.settings_service import get_settings_map
 
 
 @pytest.fixture()

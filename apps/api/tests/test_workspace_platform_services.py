@@ -15,9 +15,9 @@ from app.services import metric_ingestion_service
 from app.services import platform_oauth_service
 from app.services import platform_publish_service
 from app.services import workspace_service
-from app.services.platform_oauth_service import build_platform_authorization_url, complete_google_platform_oauth, refresh_platform_access_token
-from app.services.platform_publish_service import mark_content_item_publish_queued, process_platform_publish_queue
-from app.services.platform_service import (
+from app.services.platform.platform_oauth_service import build_platform_authorization_url, complete_google_platform_oauth, refresh_platform_access_token
+from app.services.platform.platform_publish_service import mark_content_item_publish_queued, process_platform_publish_queue
+from app.services.platform.platform_service import (
     create_content_item,
     ensure_managed_channels,
     get_channel_credential,
@@ -25,9 +25,9 @@ from app.services.platform_service import (
     list_platform_integrations,
     upsert_platform_credential,
 )
-from app.services.secret_service import decrypt_secret_value
-from app.services.settings_service import get_settings_map, upsert_settings
-from app.services.usage_service import record_usage_event
+from app.services.integrations.secret_service import decrypt_secret_value
+from app.services.integrations.settings_service import get_settings_map, upsert_settings
+from app.services.ops.usage_service import record_usage_event
 
 
 class FakeResponse:

@@ -1,8 +1,14 @@
+from datetime import datetime, timezone
+from types import SimpleNamespace
+
 from app.services import cloudflare_channel_service as cloudflare_service
-from app.services.cloudflare_channel_service import (
+from app.services.cloudflare.cloudflare_channel_service import (
+    _build_cloudflare_render_metadata,
+    _default_prompt_for_stage,
     _is_blossom_topic_keyword,
     _quality_gate_fail_reasons,
     _resolve_cloudflare_requested_models,
+    _sanitize_cloudflare_public_body,
     _would_exceed_blossom_cap,
 )
 from app.services.providers.base import RuntimeProviderConfig
@@ -22,6 +28,54 @@ def test_cloudflare_quality_gate_fail_reasons() -> None:
     assert reasons == ["similarity_threshold", "seo_below_min", "geo_below_min", "ctr_below_min"]
 
 
+def test_sanitize_cloudflare_public_body_removes_trace_leaks_and_appends_closing_record() -> None:
+    cleaned = _sanitize_cloudflare_public_body(
+        "<p><strong>Quick brief.</strong> internal note</p><h2>본문</h2><p>현장 내용</p>",
+        category_slug="여행과-기록",
+        title="서울 산책",
+    )
+
+    assert "Quick brief" not in cleaned
+    assert "internal note" not in cleaned
+    assert "<h2>마무리 기록</h2>" in cleaned
+
+
+def test_default_prompt_for_stage_prefers_channel_prompt_files() -> None:
+    prompt = _default_prompt_for_stage(
+        {
+            "id": "cat-donggri-travel",
+            "slug": "여행과-기록",
+            "name": "여행과 기록",
+            "description": "여행 동선, 장소 기록, 현장 팁을 다루는 카테고리",
+        },
+        "article_generation",
+    )
+
+    assert "This category is only for actual places" in prompt
+    assert "마무리 기록" in prompt
+
+
+def test_build_cloudflare_render_metadata_uses_hamni_viewpoint() -> None:
+    article_output = SimpleNamespace(
+        series_variant="us-stock-dialogue-v1",
+        company_name="IonQ",
+        ticker="IONQ",
+        exchange="NYSE",
+        chart_provider="tradingview",
+        chart_symbol="NYSE:IONQ",
+        chart_interval="1D",
+        slide_sections=[],
+    )
+
+    metadata = _build_cloudflare_render_metadata(
+        article_output=article_output,
+        planner_brief={},
+        title="아이온큐 흐름 점검",
+    )
+
+    assert metadata["viewpoints"] == ["동그리", "햄니"]
+
+
 def test_cloudflare_blossom_cap_allows_bootstrap_pick() -> None:
     counter = {"total_topics": 0, "blossom_topics": 0}
     assert _would_exceed_blossom_cap(counter=counter, is_blossom=True, cap_ratio=0.2) is False
@@ -39,7 +93,7 @@ def test_cloudflare_blossom_keyword_detection_supports_korean_variants() -> None
     assert _is_blossom_topic_keyword("겹벚꽃 사진 명소 정리") is True
 
 
-def test_cloudflare_topic_provider_order_adds_openai_recovery() -> None:
+def test_cloudflare_topic_provider_order_keeps_standard_provider_for_regular_generation() -> None:
     runtime = RuntimeProviderConfig(
         provider_mode="live",
         openai_api_key="test-openai",
@@ -53,7 +107,7 @@ def test_cloudflare_topic_provider_order_adds_openai_recovery() -> None:
         default_publish_mode="draft",
     )
 
-    assert cloudflare_service._build_cloudflare_topic_provider_order(runtime) == ["gemini", "openai"]
+    assert cloudflare_service._build_cloudflare_topic_provider_order(runtime) == ["gemini"]
 
 
 def test_cloudflare_topic_provider_switches_on_repeated_category_mismatch() -> None:
@@ -152,7 +206,7 @@ def test_cloudflare_requested_models_fallback_to_topic_model_when_article_missin
     assert prompt_model == "gpt-4.1"
 
 
-def test_cloudflare_generation_forces_openai_topic_provider_when_openai_available() -> None:
+def test_cloudflare_generation_keeps_standard_topic_provider_even_when_openai_key_exists() -> None:
     runtime = RuntimeProviderConfig(
         provider_mode="live",
         openai_api_key="test-openai",
@@ -166,7 +220,7 @@ def test_cloudflare_generation_forces_openai_topic_provider_when_openai_availabl
         default_publish_mode="draft",
     )
 
-    assert cloudflare_service._resolve_cloudflare_topic_provider_order_for_generation(runtime) == ["openai"]
+    assert cloudflare_service._resolve_cloudflare_topic_provider_order_for_generation(runtime) == ["gemini"]
 
 
 def test_list_cloudflare_posts_computes_fallback_scores_from_detail(monkeypatch) -> None:
@@ -238,16 +292,30 @@ def test_list_cloudflare_posts_computes_fallback_scores_from_detail(monkeypatch)
 
 
 def test_list_cloudflare_posts_merges_scheme_variant_duplicates(monkeypatch) -> None:
-    class _EmptyResult:
+    state_row = SimpleNamespace(
+        url="https://dongriarchive.com/ko/post/busan-sand-festival-guide",
+        index_status="indexed",
+        index_coverage_state="submitted_and_indexed",
+        last_checked_at=datetime(2026, 4, 7, 4, 0, tzinfo=timezone.utc),
+        next_eligible_at=None,
+        last_error=None,
+        updated_at=datetime(2026, 4, 7, 4, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 4, 7, 4, 0, tzinfo=timezone.utc),
+    )
+
+    class _StateResult:
+        def __init__(self, rows):
+            self._rows = rows
+
         def scalars(self):
             return self
 
         def all(self):
-            return []
+            return list(self._rows)
 
     class _FakeDB:
         def execute(self, _stmt):
-            return _EmptyResult()
+            return _StateResult([state_row])
 
     monkeypatch.setattr(cloudflare_service, "get_settings_map", lambda _db: {"cloudflare_blog_api_base_url": "https://api.example.com"})
     monkeypatch.setattr(
@@ -303,4 +371,6 @@ def test_list_cloudflare_posts_merges_scheme_variant_duplicates(monkeypatch) -> 
     assert row["seo_score"] == 88
     assert row["geo_score"] == 77
     assert row["lighthouse_score"] == 82
+    assert row["index_status"] == "indexed"
+    assert row["index_coverage_state"] == "submitted_and_indexed"
     assert row["labels"] == ["travel", "festival"]

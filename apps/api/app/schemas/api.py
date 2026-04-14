@@ -420,6 +420,8 @@ class ArticleListItemRead(BaseModel):
     slug: str
     excerpt: str
     reading_time_minutes: int
+    article_pattern_id: str | None = None
+    article_pattern_version: int | None = None
     editorial_category_key: str | None = None
     editorial_category_label: str | None = None
     created_at: datetime
@@ -664,7 +666,117 @@ class CloudflareGenerateRead(BaseModel):
     per_category: int = 0
     categories: list[CloudflareGenerateCategoryRead] = Field(default_factory=list)
     quality_sheet_sync: dict | None = None
+    sync_result: dict | None = None
     sheet_sync: dict | None = None
+
+
+class CloudflareRefactorRequest(BaseModel):
+    execute: bool = False
+    queue: bool = False
+    threshold: float = Field(default=80.0, ge=0.0, le=100.0)
+    month: str | None = None
+    category_slugs: list[str] = Field(default_factory=list)
+    limit: int | None = Field(default=None, ge=1, le=500)
+    sync_before: bool = True
+    parallel_workers: int = Field(default=1, ge=1, le=8)
+
+
+class CloudflareRefactorItemRead(BaseModel):
+    remote_id: str
+    category_slug: str | None = None
+    category_name: str | None = None
+    title: str
+    url: str | None = None
+    published_at: str | None = None
+    seo_score: float | None = None
+    geo_score: float | None = None
+    ctr: float | None = None
+    lighthouse_score: float | None = None
+    refactor_candidate: bool = False
+    action: str
+    updated_title: str | None = None
+    updated_url: str | None = None
+    article_pattern_id: str | None = None
+    article_pattern_version: int | None = None
+    quality_gate: dict | None = None
+    error: str | None = None
+
+
+class CloudflareRefactorRead(BaseModel):
+    status: str
+    execute: bool
+    threshold: float
+    month: str
+    parallel_workers: int = 1
+    task_id: str | None = None
+    total_candidates: int = 0
+    processed_count: int = 0
+    updated_count: int = 0
+    failed_count: int = 0
+    skipped_count: int = 0
+    sync_before_result: dict | None = None
+    sync_after_result: dict | None = None
+    summary_after: dict | None = None
+    items: list[CloudflareRefactorItemRead] = Field(default_factory=list)
+
+
+class BloggerRefactorRequest(BaseModel):
+    execute: bool = False
+    queue: bool = False
+    threshold: float = Field(default=80.0, ge=0.0, le=100.0)
+    month: str | None = None
+    limit: int | None = Field(default=None, ge=1, le=500)
+    sync_before: bool = True
+    run_lighthouse: bool = True
+    parallel_workers: int = Field(default=1, ge=1, le=8)
+
+
+class BloggerRefactorItemRead(BaseModel):
+    fact_id: int
+    synced_post_id: int
+    remote_post_id: str
+    title: str
+    url: str | None = None
+    published_at: str | None = None
+    seo_score: float | None = None
+    geo_score: float | None = None
+    ctr: float | None = None
+    ctr_score: float | None = None
+    lighthouse_score: float | None = None
+    refactor_candidate: bool = False
+    action: str
+    updated_title: str | None = None
+    updated_url: str | None = None
+    predicted_seo_score: float | None = None
+    predicted_geo_score: float | None = None
+    predicted_ctr_score: float | None = None
+    lighthouse_after: dict | None = None
+    article_pattern_id: str | None = None
+    article_pattern_version: int | None = None
+    quality_gate: dict | None = None
+    search_description_sync: dict | None = None
+    telegram: dict | None = None
+    error: str | None = None
+
+
+class BloggerRefactorRead(BaseModel):
+    status: str
+    execute: bool
+    blog_id: int
+    blog_name: str
+    threshold: float
+    month: str
+    parallel_workers: int = 1
+    task_id: str | None = None
+    total_candidates: int = 0
+    processed_count: int = 0
+    updated_count: int = 0
+    failed_count: int = 0
+    skipped_count: int = 0
+    sync_before_result: dict | None = None
+    sync_after_result: dict | None = None
+    summary_after: dict | None = None
+    items: list[BloggerRefactorItemRead] = Field(default_factory=list)
 
 
 class IntegratedArchiveItemRead(BaseModel):
@@ -686,6 +798,11 @@ class IntegratedArchiveItemRead(BaseModel):
     ctr: float | None = None
     lighthouse_score: float | None = None
     live_image_count: int | None = None
+    live_unique_image_count: int | None = None
+    live_duplicate_image_count: int | None = None
+    live_webp_count: int | None = None
+    live_png_count: int | None = None
+    live_other_image_count: int | None = None
     live_image_issue: str | None = None
     live_image_audited_at: str | None = None
     index_status: str = "unknown"
@@ -829,6 +946,12 @@ class OpenAIFreeUsageRead(BaseModel):
     large: OpenAIFreeUsageBucketRead
     small: OpenAIFreeUsageBucketRead
     warning: str | None = None
+    hard_cap_enabled: bool = True
+    blocked_due_to_usage_unavailable: bool = False
+    blocked_due_to_usage_cap: bool = False
+    warning_threshold_percent: float = 80.0
+    hard_cap_threshold_percent: float = 100.0
+    unexpected_text_api_call_count: int = 0
 
 
 class TelegramTestRequest(BaseModel):
@@ -1040,6 +1163,11 @@ class SyncedBloggerPostRead(BaseModel):
     thumbnail_url: str | None = None
     excerpt_text: str = ""
     live_image_count: int | None = None
+    live_unique_image_count: int | None = None
+    live_duplicate_image_count: int | None = None
+    live_webp_count: int | None = None
+    live_png_count: int | None = None
+    live_other_image_count: int | None = None
     live_cover_present: bool | None = None
     live_inline_present: bool | None = None
     live_image_issue: str | None = None
@@ -1377,6 +1505,13 @@ class ModelPolicyRead(BaseModel):
     small: list[str]
     deprecated: list[str]
     defaults: dict[str, str]
+    text_runtime_kind: str
+    text_runtime_model: str
+    image_runtime_kind: str
+    image_runtime_model: str
+    openai_usage_hard_cap_enabled: bool
+    unexpected_openai_text_calls: int = 0
+    banned_text_model_prefixes: list[str] = Field(default_factory=list)
 
 
 class ManagedChannelRead(BaseModel):
@@ -2011,13 +2146,26 @@ class AnalyticsArticleFactRead(BaseModel):
     seo_score: float | None = None
     geo_score: float | None = None
     lighthouse_score: float | None = None
+    lighthouse_accessibility_score: float | None = None
+    lighthouse_best_practices_score: float | None = None
+    lighthouse_seo_score: float | None = None
     similarity_score: float | None = None
     most_similar_url: str | None = None
+    article_pattern_id: str | None = None
+    article_pattern_version: int | None = None
     status: str | None = None
     actual_url: str | None = None
     source_type: str
     ctr: float | None = None
     ctr_score: float | None = None
+    live_image_count: int | None = None
+    live_unique_image_count: int | None = None
+    live_duplicate_image_count: int | None = None
+    live_webp_count: int | None = None
+    live_png_count: int | None = None
+    live_other_image_count: int | None = None
+    live_image_issue: str | None = None
+    refactor_candidate: bool = False
     index_status: str = "unknown"
     index_coverage_state: str | None = None
     last_crawl_time: str | None = None
@@ -2161,3 +2309,63 @@ class AnalyticsIntegratedRead(BaseModel):
     status: str | None = None
     available_themes: list[AnalyticsThemeFilterOptionRead] = Field(default_factory=list)
     available_categories: list[str] = Field(default_factory=list)
+
+
+class CloudflarePerformanceCategoryOptionRead(BaseModel):
+    slug: str
+    name: str
+    count: int = 0
+
+
+class CloudflarePerformanceRowRead(BaseModel):
+    channel_id: str
+    channel_name: str
+    category_slug: str | None = None
+    category_name: str | None = None
+    canonical_category_slug: str | None = None
+    canonical_category_name: str | None = None
+    title: str
+    url: str | None = None
+    published_at: str | None = None
+    seo_score: float | None = None
+    geo_score: float | None = None
+    ctr: float | None = None
+    lighthouse_score: float | None = None
+    index_status: str = "unknown"
+    live_image_count: int | None = None
+    live_unique_image_count: int | None = None
+    live_duplicate_image_count: int | None = None
+    live_webp_count: int | None = None
+    live_png_count: int | None = None
+    live_other_image_count: int | None = None
+    live_image_issue: str | None = None
+    live_image_audited_at: str | None = None
+    lighthouse_accessibility_score: float | None = None
+    lighthouse_best_practices_score: float | None = None
+    lighthouse_seo_score: float | None = None
+    article_pattern_id: str | None = None
+    article_pattern_version: int | None = None
+    refactor_candidate: bool = False
+    status: str
+    quality_status: str | None = None
+
+
+class CloudflarePerformanceSummaryRead(BaseModel):
+    month: str
+    channel_id: str
+    channel_name: str
+    total: int = 0
+    low_score_count: int = 0
+    refactor_candidate_count: int = 0
+    lighthouse_below_70_count: int = 0
+    available_categories: list[CloudflarePerformanceCategoryOptionRead] = Field(default_factory=list)
+    available_statuses: list[str] = Field(default_factory=list)
+
+
+class CloudflarePerformancePageRead(BaseModel):
+    month: str
+    total: int = 0
+    page: int = 1
+    page_size: int = 50
+    summary: CloudflarePerformanceSummaryRead
+    items: list[CloudflarePerformanceRowRead] = Field(default_factory=list)

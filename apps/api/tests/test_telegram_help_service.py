@@ -10,7 +10,7 @@ from app.core.config import settings as app_settings
 from app.db.base import Base
 from app.models.entities import TelegramCommandEvent, TelegramDeliveryEvent
 from app.services import telegram_service
-from app.services.settings_service import get_settings_map, upsert_settings
+from app.services.integrations.settings_service import get_settings_map, upsert_settings
 
 
 @pytest.fixture()
@@ -193,3 +193,110 @@ def test_get_telegram_telemetry_aggregates_events(db: Session) -> None:
     assert payload["deliveries_sent"] == 1
     assert payload["deliveries_failed"] == 1
     assert len(payload["top_commands"]) == 2
+
+
+def test_publish_notification_dedupes_on_normalized_url(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    upsert_settings(
+        db,
+        {
+            "telegram_bot_token": "token",
+            "telegram_chat_id": "100",
+        },
+    )
+
+    sent_messages: list[str] = []
+
+    def _fake_post(*, bot_token: str, chat_id: str, text: str, reply_markup=None):  # noqa: ANN001
+        sent_messages.append(text)
+        return {"delivery_status": "sent", "chat_id": chat_id, "message_id": len(sent_messages)}
+
+    monkeypatch.setattr(telegram_service, "_post_telegram_message", _fake_post)
+
+    first = telegram_service.send_telegram_post_notification(
+        db,
+        blog_name="Travel",
+        article_title="Busan Night Walk",
+        post_url="http://dongdonggri.blogspot.com/2026/04/busan-night-walk.html?utm_source=test",
+        post_status="published",
+    )
+    second = telegram_service.send_telegram_post_notification(
+        db,
+        blog_name="Travel",
+        article_title="Busan Night Walk",
+        post_url="https://dongdonggri.blogspot.com/2026/04/busan-night-walk.html",
+        post_status="published",
+    )
+
+    events = db.query(TelegramDeliveryEvent).order_by(TelegramDeliveryEvent.id.asc()).all()
+
+    assert first["delivery_status"] == "sent"
+    assert second["delivery_status"] == "skipped"
+    assert len(sent_messages) == 1
+    assert len(events) == 1
+    assert events[0].dedupe_key == "publish:dongdonggri.blogspot.com/2026/04/busan-night-walk.html"
+    assert events[0].event_payload["raw_url"] == "http://dongdonggri.blogspot.com/2026/04/busan-night-walk.html?utm_source=test"
+    assert events[0].event_payload["normalized_url"] == "dongdonggri.blogspot.com/2026/04/busan-night-walk.html"
+
+
+def test_publish_notification_retries_after_failed_delivery(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    upsert_settings(
+        db,
+        {
+            "telegram_bot_token": "token",
+            "telegram_chat_id": "100",
+        },
+    )
+
+    responses = [
+        {"delivery_status": "failed", "chat_id": "100", "error_code": 500, "error_message": "timeout"},
+        {"delivery_status": "sent", "chat_id": "100", "message_id": 2},
+    ]
+
+    def _fake_post(*, bot_token: str, chat_id: str, text: str, reply_markup=None):  # noqa: ANN001
+        return responses.pop(0)
+
+    monkeypatch.setattr(telegram_service, "_post_telegram_message", _fake_post)
+
+    first = telegram_service.send_telegram_post_notification(
+        db,
+        blog_name="Travel",
+        article_title="Retry Test",
+        post_url="https://dongdonggri.blogspot.com/2026/04/retry-test.html",
+        post_status="published",
+    )
+    second = telegram_service.send_telegram_post_notification(
+        db,
+        blog_name="Travel",
+        article_title="Retry Test",
+        post_url="https://dongdonggri.blogspot.com/2026/04/retry-test.html",
+        post_status="published",
+    )
+
+    events = db.query(TelegramDeliveryEvent).order_by(TelegramDeliveryEvent.id.asc()).all()
+
+    assert first["delivery_status"] == "failed"
+    assert second["delivery_status"] == "sent"
+    assert len(events) == 2
+    assert events[0].status == "failed"
+    assert events[1].status == "sent"
+
+
+def test_normalize_telegram_publish_url_sorts_query_and_strips_default_port() -> None:
+    normalized = telegram_service.normalize_telegram_publish_url(
+        "https://DongDongGri.Blogspot.com:443/2026/04/reorder-test.html?b=2&a=1&utm_source=test"
+    )
+
+    assert normalized == "dongdonggri.blogspot.com/2026/04/reorder-test.html?a=1&b=2"
+
+
+def test_upsert_settings_keeps_openai_usage_hard_cap_enabled_true(db: Session) -> None:
+    upsert_settings(
+        db,
+        {
+            "openai_usage_hard_cap_enabled": "false",
+        },
+    )
+
+    values = get_settings_map(db)
+
+    assert values["openai_usage_hard_cap_enabled"] == "true"

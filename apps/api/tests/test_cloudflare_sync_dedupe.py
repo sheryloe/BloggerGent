@@ -118,7 +118,7 @@ def test_sync_cloudflare_posts_does_not_delete_on_remote_fetch_failure(db: Sessi
 
     monkeypatch.setattr(cloudflare_sync_service, "ensure_managed_channels", lambda _db: None)
 
-    from app.services.cloudflare_channel_service import CloudflareRemoteFetchError
+    from app.services.cloudflare.cloudflare_channel_service import CloudflareRemoteFetchError
 
     def _raise_fetch_error(_db):
         raise CloudflareRemoteFetchError("simulated_remote_error")

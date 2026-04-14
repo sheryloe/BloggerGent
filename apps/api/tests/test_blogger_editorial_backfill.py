@@ -11,8 +11,8 @@ from app.core.config import settings as app_settings
 from app.db.base import Base
 from app.models.entities import Article, Blog, BloggerPost, Job, JobStatus, PostStatus, PublishMode
 from app.services import blogger_label_backfill_service as backfill_service
-from app.services.article_service import ensure_article_editorial_labels
-from app.services.settings_service import get_settings_map
+from app.services.content.article_service import ensure_article_editorial_labels
+from app.services.integrations.settings_service import get_settings_map
 
 
 @pytest.fixture()

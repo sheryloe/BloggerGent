@@ -5,10 +5,10 @@ x-api-common: &api-common
   env_file:
     - ${SERVICE_ENV_FILE:-env/runtime.settings.env}
   environment:
-    DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://bloggent:bloggent@postgres:5432/bloggent}
-    REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    DATABASE_URL: postgresql+psycopg2://bloggent:bloggent@postgres:5432/bloggent
+    REDIS_URL: redis://redis:6379/0
     STORAGE_ROOT: /app/storage
-    PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8000}
+    PUBLIC_API_BASE_URL: http://localhost:7002
   volumes:
     - ./apps/api:/app
     - ${API_STORAGE_DIR:-./storage}:/app/storage
@@ -89,8 +89,8 @@ services:
     env_file:
       - ${SERVICE_ENV_FILE:-env/runtime.settings.env}
     environment:
-      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000/api/v1}
-      API_INTERNAL_URL: ${API_INTERNAL_URL:-http://api:8000/api/v1}
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:7002/api/v1
+      API_INTERNAL_URL: http://api:8000/api/v1
       CHOKIDAR_USEPOLLING: "true"
       WATCHPACK_POLLING: "true"
     depends_on:

@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     openai_text_model: str = "gpt-4.1-2025-04-14"
     article_generation_model: str = "gpt-4.1-2025-04-14"
     openai_image_model: str = "gpt-image-1"
+    text_runtime_kind: str = "openai"
+    text_runtime_model: str = "gpt-5.4"
+    image_runtime_kind: str = "openai_image"
+    codex_job_timeout_seconds: int = 900
+    openai_usage_hard_cap_enabled: bool = True
     openai_request_saver_mode: bool = True
     topic_discovery_provider: str = "openai"
     topic_discovery_model: str = "gpt-4.1-2025-04-14"

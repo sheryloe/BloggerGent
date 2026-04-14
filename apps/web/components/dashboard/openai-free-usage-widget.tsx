@@ -147,6 +147,26 @@ export function OpenAIFreeUsageWidget() {
               value={usage ? `${formatNumber(usage.small.remaining_tokens)} tokens` : "N/A"}
             />
             <UsageRow label="Key mode" value={usage?.key_mode ?? "N/A"} />
+            <UsageRow
+              label="Hard cap"
+              value={
+                usage
+                  ? usage.blocked_due_to_usage_cap
+                    ? "blocked"
+                    : usage.hard_cap_enabled
+                      ? "enabled"
+                      : "disabled"
+                  : "N/A"
+              }
+            />
+            <UsageRow
+              label="Usage unavailable"
+              value={usage ? (usage.blocked_due_to_usage_unavailable ? "blocked" : "ok") : "N/A"}
+            />
+            <UsageRow
+              label="Unexpected text API"
+              value={usage ? `${formatNumber(usage.unexpected_text_api_call_count)} calls / 24h` : "N/A"}
+            />
           </div>
 
           {usage ? (

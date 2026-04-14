@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import settings as app_settings
 from app.db.base import Base
 from app.models.entities import Blog, PublishMode, TopicMemory
-from app.services.settings_service import get_settings_map, upsert_settings
-from app.services.topic_guard_service import TopicDescriptor, evaluate_topic_guard
+from app.services.integrations.settings_service import get_settings_map, upsert_settings
+from app.services.content.topic_guard_service import TopicDescriptor, evaluate_topic_guard
 
 
 @pytest.fixture()

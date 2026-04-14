@@ -10,7 +10,7 @@ Editorial category guidance: {editorial_category_guidance}
 [Mission]
 - Propose exactly {topic_count} English topic candidates for this run.
 - Every topic must fit the current editorial category.
-- Keep SEO intent clear and location-specific.
+- Keep SEO intent clear, location-specific, and verifiable on Google Maps.
 - Avoid duplicate intent from recent posts.
 
 [Category Fit Rules]
@@ -30,6 +30,7 @@ Output JSON only:
   "topics": [
     {
       "keyword": "SEO-friendly English topic title",
+      "primary_google_maps_query": "Exact Korean or English place name to fetch Google Maps API (e.g., 'Gyeongbokgung Palace' or 'Busan Station')",
       "reason": "why this topic is timely and useful now",
       "trend_score": 0.0
     }

@@ -10,9 +10,9 @@ from app.core.config import settings as app_settings
 from app.db.base import Base
 from app.models.entities import Blog, SyncedBloggerPost
 from app.services import analytics_service, blogger_sync_service
-from app.services.blogger_live_audit_service import BloggerLiveImageAuditResult
-from app.services.blogger_oauth_service import BloggerOAuthError
-from app.services.topic_guard_service import rebuild_topic_memories_for_blog
+from app.services.blogger.blogger_live_audit_service import BloggerLiveImageAuditResult
+from app.services.blogger.blogger_oauth_service import BloggerOAuthError
+from app.services.content.topic_guard_service import rebuild_topic_memories_for_blog
 
 
 @pytest.fixture()
@@ -108,6 +108,11 @@ def test_sync_blogger_posts_falls_back_to_public_feed_when_api_project_is_delete
         "fetch_and_audit_blogger_post",
         lambda _url, client=None: BloggerLiveImageAuditResult(
             live_image_count=2,
+            live_unique_image_count=2,
+            live_duplicate_image_count=0,
+            live_webp_count=2,
+            live_png_count=0,
+            live_other_image_count=0,
             live_cover_present=True,
             live_inline_present=True,
             live_image_issue="",

@@ -21,6 +21,7 @@ type BloggerRow = AnalyticsArticleFactRead & {
 };
 
 const PAGE_SIZE = 25;
+const API_FETCH_PAGE_SIZE = 200;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -224,6 +225,35 @@ export function BloggerAnalyticsWorkspace({ blogs, channels: _channels }: { blog
   const [deletingFactId, setDeletingFactId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const fetchAllMonthlyFacts = async (blogId: number) => {
+    const collected: AnalyticsArticleFactRead[] = [];
+    let page = 1;
+    let totalPages = 1;
+
+    while (page <= totalPages) {
+      const payload = await getBlogMonthlyArticles(blogId, {
+        month: queryMonth,
+        status: queryStatus || null,
+        page,
+        pageSize: API_FETCH_PAGE_SIZE,
+        sort: mapApiSort(querySort),
+        dir: queryDir,
+      });
+      const pageItems = payload.items ?? [];
+      if (page === 1) {
+        const total = Number.isFinite(payload.total as number) ? Number(payload.total) : pageItems.length;
+        totalPages = Math.max(1, Math.ceil(total / API_FETCH_PAGE_SIZE));
+      }
+      collected.push(...pageItems);
+      if (pageItems.length === 0) {
+        break;
+      }
+      page += 1;
+    }
+
+    return collected;
+  };
+
   const setQuery = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams(searchParams.toString());
     Object.entries(patch).forEach(([key, value]) => {
@@ -255,22 +285,15 @@ export function BloggerAnalyticsWorkspace({ blogs, channels: _channels }: { blog
     setError(null);
 
     Promise.all([
-      getBlogMonthlyArticles(selectedBlogId, {
-        month: queryMonth,
-        status: queryStatus || null,
-        page: 1,
-        pageSize: 200,
-        sort: mapApiSort(querySort),
-        dir: queryDir,
-      }),
+      fetchAllMonthlyFacts(selectedBlogId),
       getBlogDailySummary(selectedBlogId, {
         month: queryMonth,
         status: queryStatus || null,
       }),
     ])
-      .then(([factPayload, dailyPayload]) => {
+      .then(([allFacts, dailyPayload]) => {
         if (cancelled) return;
-        setFacts(factPayload.items ?? []);
+        setFacts(allFacts);
         setDailySummaries(dailyPayload.items ?? []);
       })
       .catch((cause: unknown) => {
@@ -307,21 +330,14 @@ export function BloggerAnalyticsWorkspace({ blogs, channels: _channels }: { blog
     setError(null);
     try {
       await deleteBlogMonthlyArticleFact(selectedBlogId, row.id);
-      const [factPayload, dailyPayload] = await Promise.all([
-        getBlogMonthlyArticles(selectedBlogId, {
-          month: queryMonth,
-          status: queryStatus || null,
-          page: 1,
-          pageSize: 200,
-          sort: mapApiSort(querySort),
-          dir: queryDir,
-        }),
+      const [allFacts, dailyPayload] = await Promise.all([
+        fetchAllMonthlyFacts(selectedBlogId),
         getBlogDailySummary(selectedBlogId, {
           month: queryMonth,
           status: queryStatus || null,
         }),
       ]);
-      setFacts(factPayload.items ?? []);
+      setFacts(allFacts);
       setDailySummaries(dailyPayload.items ?? []);
     } catch (cause: unknown) {
       const message = cause instanceof Error ? cause.message : "게시글 수동 삭제에 실패했습니다.";
