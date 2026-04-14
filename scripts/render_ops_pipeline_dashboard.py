@@ -25,7 +25,7 @@ if str(API_ROOT) not in sys.path:
 
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.entities import ContentReviewItem, Job, JobStatus, PublishQueueItem  # noqa: E402
-from app.services.settings_service import get_settings_map  # noqa: E402
+from app.services.integrations.settings_service import get_settings_map  # noqa: E402
 
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
 REPORT_DIR = ROOT / "storage" / "reports"

@@ -1,4 +1,4 @@
-from app.services.cloudflare_channel_service import _hash_image_bytes, _is_inline_duplicate
+from app.services.cloudflare.cloudflare_channel_service import _hash_image_bytes, _is_inline_duplicate
 
 
 def test_inline_duplicate_detects_same_bytes() -> None:

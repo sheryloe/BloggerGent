@@ -1,0 +1,118 @@
+﻿{
+    "mode":  "apply",
+    "runtime_root":  "D:\\Donggri_Runtime\\BloggerGent",
+    "mapping":  {
+                    "postgres":  {
+                                     "source":  "D:/Donggri_Runtime/BloggerGent/db/postgres",
+                                     "target":  "D:\\Donggri_Runtime\\BloggerGent\\db\\postgres"
+                                 },
+                    "redis":  {
+                                  "source":  "D:/Donggri_Runtime/BloggerGent/db/redis",
+                                  "target":  "D:\\Donggri_Runtime\\BloggerGent\\db\\redis"
+                              },
+                    "minio":  {
+                                  "source":  "D:/Donggri_Runtime/BloggerGent/db/minio",
+                                  "target":  "D:\\Donggri_Runtime\\BloggerGent\\db\\minio"
+                              },
+                    "storage":  {
+                                    "source":  "D:/Donggri_Runtime/BloggerGent/storage",
+                                    "target":  "D:\\Donggri_Runtime\\BloggerGent\\storage"
+                                }
+                },
+    "source_stats":  {
+                         "minio":  {
+                                       "Path":  "D:/Donggri_Runtime/BloggerGent/db/minio",
+                                       "Exists":  true,
+                                       "FileCount":  7,
+                                       "SizeBytes":  14306,
+                                       "SizeGB":  0
+                                   },
+                         "postgres":  {
+                                          "Path":  "D:/Donggri_Runtime/BloggerGent/db/postgres",
+                                          "Exists":  true,
+                                          "FileCount":  1818,
+                                          "SizeBytes":  3554347771,
+                                          "SizeGB":  3.31
+                                      },
+                         "redis":  {
+                                       "Path":  "D:/Donggri_Runtime/BloggerGent/db/redis",
+                                       "Exists":  true,
+                                       "FileCount":  4,
+                                       "SizeBytes":  21311121,
+                                       "SizeGB":  0.02
+                                   },
+                         "storage":  {
+                                         "Path":  "D:/Donggri_Runtime/BloggerGent/storage",
+                                         "Exists":  true,
+                                         "FileCount":  3593,
+                                         "SizeBytes":  21459116020,
+                                         "SizeGB":  19.985
+                                     }
+                     },
+    "target_stats":  {
+                         "minio":  {
+                                       "Path":  "D:\\Donggri_Runtime\\BloggerGent\\db\\minio",
+                                       "Exists":  true,
+                                       "FileCount":  7,
+                                       "SizeBytes":  14306,
+                                       "SizeGB":  0
+                                   },
+                         "postgres":  {
+                                          "Path":  "D:\\Donggri_Runtime\\BloggerGent\\db\\postgres",
+                                          "Exists":  true,
+                                          "FileCount":  1818,
+                                          "SizeBytes":  3554347771,
+                                          "SizeGB":  3.31
+                                      },
+                         "redis":  {
+                                       "Path":  "D:\\Donggri_Runtime\\BloggerGent\\db\\redis",
+                                       "Exists":  true,
+                                       "FileCount":  4,
+                                       "SizeBytes":  21294839,
+                                       "SizeGB":  0.02
+                                   },
+                         "storage":  {
+                                         "Path":  "D:\\Donggri_Runtime\\BloggerGent\\storage",
+                                         "Exists":  true,
+                                         "FileCount":  3482,
+                                         "SizeBytes":  8858212840,
+                                         "SizeGB":  8.25
+                                     }
+                     },
+    "cleanup":  {
+                    "removed_backup_sets":  [
+                                                "D:\\Donggri_Runtime\\BloggerGent\\storage\\backups\\analysis-rebuild-20260411-031559",
+                                                "D:\\Donggri_Runtime\\BloggerGent\\storage\\backups\\analysis-rebuild-20260411-030715",
+                                                "D:\\Donggri_Runtime\\BloggerGent\\storage\\backups\\analysis-rebuild-20260411-025022",
+                                                "D:\\Donggri_Runtime\\BloggerGent\\storage\\backups\\analysis-rebuild-20260411-023955"
+                                            ],
+                    "removed_backup_set_count":  4,
+                    "removed_report_file_count":  87,
+                    "removed_report_size_gb":  0.092,
+                    "keep_backup_sets":  2,
+                    "report_retention_days":  14
+                },
+    "git":  {
+                "before":  [
+                               "count: 9859",
+                               "size: 4.89 GiB",
+                               "in-pack: 4567",
+                               "packs: 5",
+                               "size-pack: 332.36 MiB",
+                               "prune-packable: 0",
+                               "garbage: 1",
+                               "size-garbage: 112.83 KiB"
+                           ],
+                "after":  [
+                              "count: 0",
+                              "size: 0 bytes",
+                              "in-pack: 4142",
+                              "packs: 1",
+                              "size-pack: 331.76 MiB",
+                              "prune-packable: 0",
+                              "garbage: 0",
+                              "size-garbage: 0 bytes"
+                          ]
+            },
+    "generated_at":  "2026-04-14T15:37:27.6741616+09:00"
+}

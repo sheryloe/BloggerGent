@@ -118,7 +118,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, str(API_ROOT))
 
-from app.services.content_ops_service import compute_seo_geo_scores  # noqa: E402
+from app.services.content.content_ops_service import compute_seo_geo_scores  # noqa: E402
 
 
 @dataclass

@@ -13,24 +13,25 @@ Create one final English hero collage prompt for "{blog_name}".
 {article_context}
 
 [Persona Direction by Language]
-- `en`: US-first traveler expectations, but keep UK/EU planning relevance.
-- `ja`: Japanese 20-40 independent traveler priorities (route flow, crowds, budget control).
-- `es`: Global Spanish-speaking traveler clarity, neutral style, practical decisions.
+- `en`: Premium editorial travel vibe, clear practical contrast.
+- `ja`: Focus on clean route flow, station surroundings, and avoiding crowds.
+- `es`: Emphasize social vibes, emotional ambiance (e.g., bustling markets, cinematic night scenes), and warm colors.
 
 [Output Rules]
 - Return plain text only.
-- Return one final prompt for one composite 3x3 travel collage image.
-- Exactly 9 distinct panels in a visible 3x3 grid.
-- The center panel must be dominant and visually larger than surrounding panels.
-- Use visible white gutters.
+- Return one final prompt for one composite **4x2 wide travel collage** image (total 8 panels) designed for a 1280x640 canvas (2:1 ratio).
+- **MANDATORY:** Arrange panels horizontally in a precise **4 columns by 2 rows** grid. All 8 panels must be distinct.
+- **NO SINGLE DOMINANT PANEL:** Do not make a center panel larger. All 8 panels should be equally sized grid units to maintain the precise wide format.
+- Use visible white gutters between all 8 panels.
 - No blended panorama, no seamless split, no text, no logos.
 - Realistic photography only.
 
 [Content Rules]
-- Match the article's main promise immediately.
+- Match the article's main promise immediately within the first few panels.
+- Include at least one panel showing the transportation journey (e.g., KTX bullet train passing, a clean subway entrance, or an airport bus terminal) to visually support the 'How to Get There' section.
 - Reflect the exact route/place/event logic from the article and planner brief.
-- Include decision-useful visual cues (transport nodes, crowd flow, timing mood, practical scene contrast).
-- Avoid generic postcard compositions when the topic is location-specific.
+- Provide a mix of establishing shots, close-ups of food/culture, and movement/transport shots across the 8 panels.
+- Ensure all 8 panels are materials from Korean location identity.
 
 [Style]
 - Premium editorial travel photography.

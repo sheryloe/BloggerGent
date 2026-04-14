@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from app.services.google_sheet_service import (
+from app.services.integrations.google_sheet_service import (
     BLOGGER_SNAPSHOT_COLUMNS,
     CLOUDFLARE_SNAPSHOT_COLUMNS,
     COLUMN_LABELS_KO,
@@ -306,7 +306,7 @@ def test_sync_google_sheet_quality_tab_applies_operational_format(monkeypatch) -
             return _Response({"values": []})
         return _Response({})
 
-    monkeypatch.setattr("app.services.google_sheet_service.authorized_google_request", _fake_google_request)
+    monkeypatch.setattr("app.services.integrations.google_sheet_service.authorized_google_request", _fake_google_request)
 
     sync_google_sheet_quality_tab(
         db=object(),

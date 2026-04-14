@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from urllib.parse import urlparse
 
 from fastapi import FastAPI
@@ -9,14 +10,17 @@ from fastapi.staticfiles import StaticFiles
 from app.api.router import api_router
 from app.core.config import settings
 from app.db.session import SessionLocal
-from app.services.blog_service import (
-    enforce_free_tier_model_policy,
+from app.services.platform.blog_service import (
+    enforce_text_runtime_policy,
     ensure_all_blog_workflows,
     purge_legacy_demo_blogs,
 )
-from app.services.settings_service import ensure_default_settings, get_settings_map
-from app.services.storage_service import ensure_storage_dirs
-from app.services.topic_guard_service import backfill_missing_topic_memories
+from app.services.cloudflare.cloudflare_performance_service import get_cloudflare_performance_summary
+from app.services.integrations.settings_service import ensure_default_settings, get_settings_map
+from app.services.integrations.storage_service import ensure_storage_dirs
+from app.services.content.topic_guard_service import backfill_missing_topic_memories
+
+logger = logging.getLogger(__name__)
 
 
 def _normalized_origin(url: str) -> str:
@@ -68,8 +72,12 @@ def on_startup() -> None:
         get_settings_map(db)
         purge_legacy_demo_blogs(db)
         ensure_all_blog_workflows(db)
-        enforce_free_tier_model_policy(db)
+        enforce_text_runtime_policy(db)
         backfill_missing_topic_memories(db)
+        try:
+            get_cloudflare_performance_summary(db)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Cloudflare performance smoke check failed at startup: %s", exc)
     finally:
         db.close()
 

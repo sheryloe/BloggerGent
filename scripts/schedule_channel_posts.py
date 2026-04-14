@@ -21,14 +21,14 @@ if str(REPO_ROOT_PATH) not in sys.path:
 from scripts.package_common import REPO_ROOT, STORAGE_ROOT, SessionLocal, now_iso, write_json
 
 from app.models.entities import JobStatus
-from app.services.cloudflare_channel_service import (
+from app.services.cloudflare.cloudflare_channel_service import (
     _load_daily_counter,
     _select_weighted_daily_categories_from_counts,
     _serialize_daily_counter,
     generate_cloudflare_posts,
 )
-from app.services.job_service import increment_attempt, load_job, record_failure
-from app.services.settings_service import get_settings_map, upsert_settings
+from app.services.ops.job_service import increment_attempt, load_job, record_failure
+from app.services.integrations.settings_service import get_settings_map, upsert_settings
 from app.tasks.pipeline import (
     DuplicateContentError,
     _upsert_blogger_post,
@@ -474,7 +474,7 @@ def build_batch_manifest(args: argparse.Namespace) -> tuple[Path, dict[str, Any]
     db = SessionLocal()
     try:
         settings_map = get_settings_map(db)
-        from app.services.planner_service import _resolve_channel_context  # local import to avoid wider side effects
+        from app.services.ops.planner_service import _resolve_channel_context  # local import to avoid wider side effects
         from scripts.package_common import resolve_blog_by_profile_key
 
         travel_blog = resolve_blog_by_profile_key(db, "korea_travel")

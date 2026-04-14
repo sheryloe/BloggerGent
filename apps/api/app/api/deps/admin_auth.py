@@ -7,7 +7,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.services.settings_service import get_settings_map
+from app.services.integrations.settings_service import get_settings_map
 
 
 _basic_auth = HTTPBasic(auto_error=False)

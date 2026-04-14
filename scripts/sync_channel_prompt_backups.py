@@ -21,7 +21,7 @@ if "STORAGE_ROOT" not in os.environ:
 sys.path.insert(0, str(API_ROOT))
 
 from app.db.session import SessionLocal  # noqa: E402
-from app.services.channel_prompt_service import sync_all_channel_prompt_backups  # noqa: E402
+from app.services.content.channel_prompt_service import sync_all_channel_prompt_backups  # noqa: E402
 
 
 def main() -> int:

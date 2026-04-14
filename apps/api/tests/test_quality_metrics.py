@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.services.content_ops_service import compute_seo_geo_scores, compute_similarity_analysis
+from app.services.content.content_ops_service import compute_seo_geo_scores, compute_similarity_analysis
 
 
 def test_compute_similarity_analysis_detects_near_duplicate_pair() -> None:

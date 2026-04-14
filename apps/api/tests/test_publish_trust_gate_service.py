@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.publish_trust_gate_service import (
+from app.services.content.publish_trust_gate_service import (
     MISSING_AS_OF_REASON,
     MISSING_SOURCES_REASON,
     enforce_publish_trust_requirements,

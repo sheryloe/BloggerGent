@@ -1635,10 +1635,10 @@ export function SettingsConsole({ settings, config, mode = "all" }: SettingsCons
                       {remoteConfigLoading ? "연동 데이터 조회 중..." : "연동 데이터 불러오기"}
                     </button>
                     <a
-                      href="/google"
+                      href="/analytics"
                       className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
                     >
-                      연동 상태 확인
+                      분석 화면 열기
                     </a>
                     <a
                       href="/guide"
@@ -1682,7 +1682,7 @@ export function SettingsConsole({ settings, config, mode = "all" }: SettingsCons
                   <p className="font-semibold text-slate-900">동작하지 않을 때 확인 순서</p>
                   <p className="mt-2">1. `blogger_client_id`, `blogger_client_secret`, `blogger_redirect_uri` 저장 후 현재 탭 저장을 눌러 반영합니다.</p>
                   <p>2. Google OAuth 동의화면이 Testing이면 실제 로그인 계정을 Test users에 추가합니다.</p>
-                  <p>3. `OAuth2 연결/재인증` 버튼으로 다시 인증하고, `/google` 화면에서 승인 Scope에 indexing이 포함됐는지 확인합니다.</p>
+                  <p>3. `OAuth2 연결/재인증` 버튼으로 다시 인증하고, 분석 화면에서 승인 Scope에 indexing이 포함됐는지 확인합니다.</p>
                   <p>4. 여전히 실패하면 Redirect URI가 Google Cloud 설정과 완전히 동일한지(프로토콜/포트/경로) 확인합니다.</p>
                 </div>
               </article>

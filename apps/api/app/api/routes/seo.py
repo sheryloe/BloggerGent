@@ -5,9 +5,9 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.api import SeoTargetRead
-from app.services.blog_service import list_connected_blogs
-from app.services.cloudflare_channel_service import get_cloudflare_overview
-from app.services.workspace_service import list_managed_channels
+from app.services.platform.blog_service import list_connected_blogs
+from app.services.cloudflare.cloudflare_channel_service import get_cloudflare_overview
+from app.services.platform.workspace_service import list_managed_channels
 
 router = APIRouter(prefix="/seo", tags=["seo"])
 

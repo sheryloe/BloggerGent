@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import settings as app_settings
 from app.db.base import Base
 from app.services import cloudflare_channel_service as cloudflare_service
-from app.services.settings_service import get_settings_map, upsert_settings
+from app.services.integrations.settings_service import get_settings_map, upsert_settings
 
 
 @pytest.fixture()

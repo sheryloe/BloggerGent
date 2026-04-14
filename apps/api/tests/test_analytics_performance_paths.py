@@ -40,7 +40,7 @@ def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Session:
 
     session = SessionLocal()
     try:
-        from app.services.settings_service import get_settings_map
+        from app.services.integrations.settings_service import get_settings_map
     except SyntaxError:
         get_settings_map = None
     if callable(get_settings_map):
@@ -398,6 +398,49 @@ def test_duplicate_url_rows_merge_into_single_article_and_rollups(db: Session) -
     assert integrated.kpis.avg_geo_score == 73.0
 
 
+def test_scheme_variant_rows_merge_and_prefer_https(db: Session) -> None:
+    blog = _create_blog(db, blog_id=40)
+    shared_path = "dongdonggri.blogspot.com/2026/04/busan-sand-festival.html"
+
+    _create_fact(
+        db,
+        blog_id=blog.id,
+        month="2026-04",
+        date_text="2026-04-07",
+        title="2026 Busan Haeundae Sand Festival Guide",
+        source_type="generated",
+        seo=90,
+        geo=78,
+        lighthouse=75.4,
+        article_id=9001,
+        actual_url=f"http://{shared_path}",
+        status="error",
+    )
+    _create_fact(
+        db,
+        blog_id=blog.id,
+        month="2026-04",
+        date_text="2026-04-07",
+        title="2026 Busan Haeundae Sand Festival Guide",
+        source_type="generated",
+        seo=91,
+        geo=80,
+        lighthouse=87.0,
+        article_id=9001,
+        actual_url=f"https://{shared_path}",
+        status="published",
+    )
+    db.commit()
+
+    response = analytics_service.get_blog_monthly_articles(db, blog_id=blog.id, month="2026-04")
+
+    assert response.total == 1
+    row = response.items[0]
+    assert row.status == "published"
+    assert row.actual_url == f"https://{shared_path}"
+    assert row.status_variant != "error_deleted"
+
+
 def test_missing_url_rows_attach_to_matching_title_and_date_group(db: Session) -> None:
     blog = _create_blog(db, blog_id=5)
     shared_url = "https://example.com/lantern-route"
@@ -578,3 +621,31 @@ def test_blogger_config_without_remote_skips_external_calls(db: Session, monkeyp
     assert payload["search_console_sites"] == []
     assert payload["analytics_properties"] == []
     assert call_counter == {"blogs": 0, "sc": 0, "ga4": 0}
+
+
+def test_merge_fact_rows_prefers_published_status_over_error() -> None:
+    published = AnalyticsArticleFact(
+        id=10,
+        blog_id=1,
+        month="2026-04",
+        title="BTS Concert Info 2026",
+        published_at=datetime.fromisoformat("2026-04-04T09:00:00+00:00"),
+        source_type="generated",
+        status="published",
+        actual_url="https://dongdonggri.blogspot.com/2026/04/bts-concert-info-2026.html",
+    )
+    errored = AnalyticsArticleFact(
+        id=11,
+        blog_id=1,
+        month="2026-04",
+        title="BTS Concert Info 2026",
+        published_at=datetime.fromisoformat("2026-04-04T09:00:00+00:00"),
+        source_type="generated",
+        status="error",
+        actual_url="https://dongdonggri.blogspot.com/2026/04/bts-concert-info-2026.html",
+    )
+
+    merged_rows = analytics_service._merge_fact_rows([errored, published])
+
+    assert len(merged_rows) == 1
+    assert merged_rows[0].fact.status == "published"

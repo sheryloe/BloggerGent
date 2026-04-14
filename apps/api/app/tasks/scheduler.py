@@ -9,17 +9,17 @@ from sqlalchemy import or_
 from app.core.celery_app import celery_app
 from app.db.session import SessionLocal
 from app.models.entities import ContentPlanDay, ContentPlanSlot, PublishMode, WorkflowStageType
-from app.services.blog_service import enforce_free_tier_model_policy, get_workflow_step, list_active_blogs
-from app.services.cloudflare_channel_service import run_cloudflare_daily_schedule
-from app.services.content_ops_service import sync_live_content_reviews
-from app.services.metric_ingestion_service import run_workspace_metric_sync_schedule
-from app.services.planner_service import run_slot_generation
-from app.services.google_sheet_service import sync_google_sheet_snapshot
-from app.services.publishing_service import process_publish_queue_batch
-from app.services.platform_publish_service import process_platform_publish_queue
-from app.services.settings_service import get_settings_map, upsert_settings
-from app.services.telegram_service import poll_telegram_ops_commands, send_telegram_error_notification
-from app.services.training_service import (
+from app.services.platform.blog_service import enforce_text_runtime_policy, get_workflow_step, list_active_blogs
+from app.services.cloudflare.cloudflare_channel_service import run_cloudflare_daily_schedule
+from app.services.content.content_ops_service import sync_live_content_reviews
+from app.services.ops.metric_ingestion_service import run_workspace_metric_sync_schedule
+from app.services.ops.planner_service import run_slot_generation
+from app.services.integrations.google_sheet_service import sync_google_sheet_snapshot
+from app.services.platform.publishing_service import process_publish_queue_batch
+from app.services.platform.platform_publish_service import process_platform_publish_queue
+from app.services.integrations.settings_service import get_settings_map, upsert_settings
+from app.services.integrations.telegram_service import poll_telegram_ops_commands, send_telegram_error_notification
+from app.services.content.training_service import (
     DEFAULT_SAVE_EVERY_MINUTES,
     DEFAULT_SESSION_HOURS,
     SCHEDULE_LAST_RUN_ON_KEY,
@@ -431,7 +431,7 @@ def _run_planner_due_slots(db, *, now: datetime) -> dict:
 def run_scheduler_tick() -> dict:
     db = SessionLocal()
     try:
-        enforce_free_tier_model_policy(db)
+        enforce_text_runtime_policy(db)
         settings_map = get_settings_map(db)
         if settings_map.get("automation_master_enabled", "false").lower() != "true":
             return {"status": "disabled", "reason": "automation_master_disabled"}

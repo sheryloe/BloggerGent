@@ -1,4 +1,4 @@
-from app.services.html_assembler import (
+from app.services.content.html_assembler import (
     LANGUAGE_SWITCH_END_MARKER,
     LANGUAGE_SWITCH_START_MARKER,
     upsert_language_switch_html,

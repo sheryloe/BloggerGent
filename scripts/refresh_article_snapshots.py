@@ -27,12 +27,12 @@ from sqlalchemy.orm import selectinload  # noqa: E402
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.entities import Article, Blog  # noqa: E402
 from app.services.providers.factory import get_blogger_provider  # noqa: E402
-from app.services.publishing_service import (  # noqa: E402
+from app.services.platform.publishing_service import (  # noqa: E402
     rebuild_article_html,
     refresh_article_public_image,
     upsert_article_blogger_post,
 )
-from app.services.storage_service import save_html  # noqa: E402
+from app.services.integrations.storage_service import save_html  # noqa: E402
 
 
 def to_local_storage_path(file_path: str | None) -> str:

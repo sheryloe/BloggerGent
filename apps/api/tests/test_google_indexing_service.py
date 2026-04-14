@@ -25,7 +25,7 @@ IMPORT_ERROR: SyntaxError | None = None
 try:
     from app.services import analytics_service
     from app.services import google_indexing_service as indexing_service
-    from app.services.settings_service import get_settings_map, upsert_settings
+    from app.services.integrations.settings_service import get_settings_map, upsert_settings
 except SyntaxError as exc:
     analytics_service = None
     indexing_service = None

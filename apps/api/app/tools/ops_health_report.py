@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from app.db.session import SessionLocal
-from app.services.ops_health_service import generate_ops_health_report
+from app.services.ops.ops_health_service import generate_ops_health_report
 
 
 def main() -> None:

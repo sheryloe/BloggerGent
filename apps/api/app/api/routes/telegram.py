@@ -13,7 +13,7 @@ from app.schemas.api import (
     TelegramTestRead,
     TelegramTestRequest,
 )
-from app.services.telegram_service import (
+from app.services.integrations.telegram_service import (
     get_telegram_telemetry,
     list_telegram_subscriptions,
     poll_telegram_ops_commands,

@@ -36,11 +36,11 @@ from sqlalchemy.orm import selectinload  # noqa: E402
 
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.entities import Article, Blog, BloggerPost, Image, PostStatus, WorkflowStageType  # noqa: E402
-from app.services.blog_service import sync_stage_prompts_from_profile_files  # noqa: E402
+from app.services.platform.blog_service import sync_stage_prompts_from_profile_files  # noqa: E402
 from app.services.providers.factory import get_article_provider, get_blogger_provider, get_image_provider  # noqa: E402
-from app.services.publishing_service import rebuild_article_html, upsert_article_blogger_post  # noqa: E402
-from app.services.settings_service import get_settings_map  # noqa: E402
-from app.services.storage_service import save_public_binary  # noqa: E402
+from app.services.platform.publishing_service import rebuild_article_html, upsert_article_blogger_post  # noqa: E402
+from app.services.integrations.settings_service import get_settings_map  # noqa: E402
+from app.services.integrations.storage_service import save_public_binary  # noqa: E402
 
 TAG_RE = re.compile(r"<[^>]+>")
 WHITESPACE_RE = re.compile(r"\s+")

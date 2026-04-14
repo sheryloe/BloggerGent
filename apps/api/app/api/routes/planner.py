@@ -18,7 +18,7 @@ from app.schemas.api import (
     PlannerSlotRead,
     PlannerSlotUpdate,
 )
-from app.services.planner_service import (
+from app.services.ops.planner_service import (
     analyze_day_briefs,
     apply_day_briefs,
     cancel_slot,

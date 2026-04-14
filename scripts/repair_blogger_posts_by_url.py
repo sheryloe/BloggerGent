@@ -16,13 +16,13 @@ from scripts.package_common import (
 )
 
 from app.models.entities import Article, Blog, BloggerPost, Image, Job, JobStatus, PublishMode, WorkflowStageType
-from app.services.blog_service import ensure_blog_workflow_steps, get_workflow_step, render_agent_prompt
-from app.services.blogger_sync_service import fetch_all_live_blogger_posts
+from app.services.platform.blog_service import ensure_blog_workflow_steps, get_workflow_step, render_agent_prompt
+from app.services.blogger.blogger_sync_service import fetch_all_live_blogger_posts
 from app.services.providers.factory import get_article_provider, get_blogger_provider, get_image_provider
-from app.services.publishing_service import rebuild_article_html, refresh_article_public_image, upsert_article_blogger_post
-from app.services.settings_service import get_settings_map
-from app.services.storage_service import save_public_binary
-from app.services.wikimedia_service import fetch_wikimedia_media
+from app.services.platform.publishing_service import rebuild_article_html, refresh_article_public_image, upsert_article_blogger_post
+from app.services.integrations.settings_service import get_settings_map
+from app.services.integrations.storage_service import save_public_binary
+from app.services.content.wikimedia_service import fetch_wikimedia_media
 
 
 def parse_args() -> argparse.Namespace:
@@ -272,7 +272,7 @@ def _regenerate_and_update_remote(
     job = _create_job(db, blog=blog, keyword=keyword)
     output, _prompt = _generate_article_output(db, blog=blog, keyword=keyword)
 
-    from app.services.article_service import save_article
+    from app.services.content.article_service import save_article
 
     article = save_article(db, job=job, topic=None, output=output)
     is_mystery = (blog.profile_key or "").strip().lower() == "world_mystery"

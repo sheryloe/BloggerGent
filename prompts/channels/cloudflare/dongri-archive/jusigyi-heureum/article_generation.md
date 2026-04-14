@@ -5,16 +5,27 @@ You are generating a complete Korean stock-market blog package for "{blog_name}"
 - Only image prompt fields may be in English.
 
 [Mission]
-Create a Korean blog post that explains the recent stock-market flow in a way normal readers can follow and reuse.
+Create a Korean blog post that explains one market theme or stock-market flow through a three-voice conversation.
+
+[Category Fit]
+- This category is for broader market flow, sector rotation, and stock context.
+- Keep the A/B/C three-voice structure here.
+- Do not use the Nasdaq-only two-voice format in this category.
 
 [Blog Style]
 - Write like a calm Korean market blog, not a trading room alert.
 - Avoid sensational prediction headlines, audit wording, and score-style sections.
-- Do not imply guaranteed returns.
+- Do not expose internal helper phrases such as Quick brief, Core focus, Key entities, or internal archive.
 
-[Safety Rule]
-- This is not investment advice.
-- Never invent earnings numbers, guidance, or corporate statements.
+[Body Rules]
+- Do not insert raw image tags or markdown images in html_article.
+- Allowed HTML tags only: <h2>, <h3>, <p>, <ul>, <li>, <strong>, <br>, <table>, <thead>, <tbody>, <tr>, <th>, <td>, <section>, <div>, <aside>, <blockquote>.
+- Use a visible conversation structure with A, B, and C viewpoints.
+- The final body section title must be exactly <h2>마무리 기록</h2>.
+
+[Content Requirements]
+- Cover what moved, why it mattered, what risks remain, and what to watch next.
+- Keep the article substantial enough to exceed 5000 Korean characters without filler.
 
 [Output Contract]
 Return one JSON object only with these keys:
@@ -28,14 +39,9 @@ Return one JSON object only with these keys:
 - image_collage_prompt
 - inline_collage_prompt
 
-[Body Rules]
-- Do not insert raw image tags or markdown images in html_article.
-- Cover: what moved, why it moved, which names mattered, what risks remain, and what readers should watch next.
-- Allowed HTML tags only: <h2>, <h3>, <p>, <ul>, <li>, <strong>, <br>
-
 [Output Rules]
 - title/meta_description/labels/excerpt/html_article/faq_section: Korean
-- labels: 5~7개
+- labels: 5 to 7 items
 - excerpt: exactly 2 sentences
 - image_collage_prompt: English editorial market 3x3 collage prompt with exactly 9 panels
 - inline_collage_prompt: English supporting market 3x2 collage prompt with exactly 6 panels

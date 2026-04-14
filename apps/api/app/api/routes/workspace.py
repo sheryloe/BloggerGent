@@ -10,7 +10,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.services.blogger_oauth_service import BloggerOAuthError
+from app.services.blogger.blogger_oauth_service import BloggerOAuthError
 from app.schemas.api import (
     AgentRunCreate,
     AgentRunRead,
@@ -31,16 +31,16 @@ from app.schemas.api import (
     WorkspaceRuntimeOverviewRead,
     WorkspaceRuntimeUsageRead,
 )
-from app.services.blogger_sync_service import sync_connected_blogger_posts
-from app.services.platform_oauth_service import (
+from app.services.blogger.blogger_sync_service import sync_connected_blogger_posts
+from app.services.platform.platform_oauth_service import (
     PlatformOAuthError,
     complete_google_platform_oauth,
     complete_instagram_oauth,
     get_platform_web_return_url,
     try_decode_platform_oauth_state,
 )
-from app.services.platform_publish_service import PlatformPublishError
-from app.services.workspace_service import (
+from app.services.platform.platform_publish_service import PlatformPublishError
+from app.services.platform.workspace_service import (
     build_mission_control_payload,
     build_channel_oauth_authorization_url,
     build_runtime_health,

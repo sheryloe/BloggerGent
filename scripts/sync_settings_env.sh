@@ -3,7 +3,6 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_PATH="${1:-$ROOT_DIR/env/runtime.settings.env}"
-ENV_PATH="${2:-$ROOT_DIR/.env}"
 
 mkdir -p "$(dirname "$OUT_PATH")"
 
@@ -74,61 +73,4 @@ for group_name, items in GROUPS:
     print("")
 PY
 
-python - <<'PY' "$OUT_PATH" "$ENV_PATH"
-import sys
-from pathlib import Path
-
-out_path = Path(sys.argv[1])
-env_path = Path(sys.argv[2])
-
-def load_env(path: Path) -> list[str]:
-    if not path.exists():
-        return []
-    return path.read_text(encoding="utf-8").splitlines()
-
-def parse_env(lines: list[str]) -> dict[str, str]:
-    data = {}
-    for line in lines:
-        raw = line.strip()
-        if not raw or raw.startswith("#") or "=" not in raw:
-            continue
-        key, value = raw.split("=", 1)
-        data[key.strip()] = value.strip()
-    return data
-
-out_lines = load_env(out_path)
-out_map = parse_env(out_lines)
-if not out_map:
-    raise SystemExit(f"No settings exported: {out_path}")
-
-lines = load_env(env_path)
-existing = parse_env(lines)
-
-updated_lines = []
-seen_keys = set()
-for line in lines:
-    raw = line.strip()
-    if not raw or raw.startswith("#") or "=" not in raw:
-        updated_lines.append(line)
-        continue
-    key, _ = raw.split("=", 1)
-    key = key.strip()
-    if key in out_map:
-        updated_lines.append(f"{key}={out_map[key]}")
-        seen_keys.add(key)
-    else:
-        updated_lines.append(line)
-
-missing = [key for key in out_map.keys() if key not in seen_keys and key not in existing]
-if missing:
-    if updated_lines and updated_lines[-1].strip():
-        updated_lines.append("")
-    updated_lines.append("# Synced from settings")
-    for key in missing:
-        updated_lines.append(f"{key}={out_map[key]}")
-
-env_path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
-PY
-
 echo "Exported grouped settings -> $OUT_PATH"
-echo "Merged settings into -> $ENV_PATH"

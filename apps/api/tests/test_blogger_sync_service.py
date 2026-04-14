@@ -10,9 +10,9 @@ from app.core.config import settings as app_settings
 from app.db.base import Base
 from app.models.entities import Blog, SyncedBloggerPost
 from app.services import analytics_service, blogger_sync_service
-from app.services.blogger_live_audit_service import BloggerLiveImageAuditResult
-from app.services.blogger_oauth_service import BloggerOAuthError
-from app.services.topic_guard_service import rebuild_topic_memories_for_blog
+from app.services.blogger.blogger_live_audit_service import BloggerLiveImageAuditResult
+from app.services.blogger.blogger_oauth_service import BloggerOAuthError
+from app.services.content.topic_guard_service import rebuild_topic_memories_for_blog
 
 
 @pytest.fixture()
@@ -108,6 +108,11 @@ def test_sync_blogger_posts_falls_back_to_public_feed_when_api_project_is_delete
         "fetch_and_audit_blogger_post",
         lambda _url, client=None: BloggerLiveImageAuditResult(
             live_image_count=2,
+            live_unique_image_count=2,
+            live_duplicate_image_count=0,
+            live_webp_count=2,
+            live_png_count=0,
+            live_other_image_count=0,
             live_cover_present=True,
             live_inline_present=True,
             live_image_issue="",
@@ -129,3 +134,48 @@ def test_sync_blogger_posts_falls_back_to_public_feed_when_api_project_is_delete
     assert synced.remote_post_id == "999"
     assert synced.url == "https://example.blogspot.com/2026/04/recovered-post.html"
     assert synced.live_image_count == 2
+
+
+def test_sync_connected_blogger_posts_returns_actual_refreshed_ids(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    blog_with_id = Blog(
+        id=41,
+        name="With Remote Id",
+        slug="with-remote-id",
+        content_category="travel",
+        primary_language="en",
+        profile_key="korea_travel",
+        is_active=True,
+        blogger_blog_id="remote-41",
+        blogger_url="https://with-id.blogspot.com",
+    )
+    blog_with_url_only = Blog(
+        id=42,
+        name="With URL Only",
+        slug="with-url-only",
+        content_category="travel",
+        primary_language="en",
+        profile_key="korea_travel",
+        is_active=True,
+        blogger_blog_id=None,
+        blogger_url="https://url-only.blogspot.com",
+    )
+    db.add_all([blog_with_id, blog_with_url_only])
+    db.commit()
+
+    synced_ids: list[int] = []
+
+    def _fake_sync_for_blog(_db: Session, blog: Blog):
+        synced_ids.append(blog.id)
+        return {"blog_id": blog.id, "count": 1}
+
+    monkeypatch.setattr(blogger_sync_service, "sync_blogger_posts_for_blog", _fake_sync_for_blog)
+
+    result = blogger_sync_service.sync_connected_blogger_posts(db)
+
+    assert sorted(synced_ids) == [41, 42]
+    assert sorted(result["refreshed_blog_ids"]) == [41, 42]
+    assert result["skipped_blog_ids"] == []
+    assert result["warnings"] == []

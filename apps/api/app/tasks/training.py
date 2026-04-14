@@ -9,8 +9,8 @@ from celery import Task
 
 from app.core.celery_app import celery_app
 from app.db.session import SessionLocal
-from app.services.telegram_service import send_telegram_ops_notification
-from app.services.training_service import (
+from app.services.integrations.telegram_service import send_telegram_ops_notification
+from app.services.content.training_service import (
     PAUSED_STATE,
     create_checkpoint,
     is_real_training_engine_enabled,

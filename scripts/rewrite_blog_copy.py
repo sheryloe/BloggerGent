@@ -34,10 +34,10 @@ from sqlalchemy.orm import selectinload  # noqa: E402
 
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.entities import Article, Blog, BloggerPost, PostStatus  # noqa: E402
-from app.services.article_service import estimate_reading_time, sanitize_blog_html  # noqa: E402
+from app.services.content.article_service import estimate_reading_time, sanitize_blog_html  # noqa: E402
 from app.services.providers.factory import get_blogger_provider  # noqa: E402
-from app.services.publishing_service import rebuild_article_html, upsert_article_blogger_post  # noqa: E402
-from app.services.settings_service import get_settings_map  # noqa: E402
+from app.services.platform.publishing_service import rebuild_article_html, upsert_article_blogger_post  # noqa: E402
+from app.services.integrations.settings_service import get_settings_map  # noqa: E402
 
 
 TAG_RE = re.compile(r"<[^>]+>")

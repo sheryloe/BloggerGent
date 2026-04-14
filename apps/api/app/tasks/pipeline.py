@@ -24,27 +24,28 @@ from app.models.entities import (
     Topic,
     WorkflowStageType,
 )
-from app.services.article_service import (
+from app.services.content.article_service import (
     build_article_r2_asset_object_key,
     build_collage_prompt,
     ensure_article_editorial_labels,
     save_article,
 )
-from app.services.audit_service import add_log, count_logs_since
-from app.services.blog_service import get_blog, get_workflow_step, render_agent_prompt, stage_label
-from app.services.content_guard_service import (
+from app.services.content.article_pattern_service import apply_pattern_defaults, select_blogger_article_pattern
+from app.services.ops.audit_service import add_log, count_logs_since
+from app.services.platform.blog_service import get_blog, get_workflow_step, render_agent_prompt, stage_label
+from app.services.content.content_guard_service import (
     DuplicateContentError,
     build_duplicate_exclusion_prompt,
     filter_duplicate_topic_items,
 )
-from app.services.content_ops_service import (
+from app.services.content.content_ops_service import (
     compute_seo_geo_scores,
     compute_similarity_analysis,
     persist_article_quality_cache,
     review_article_draft,
     review_article_publish_state,
 )
-from app.services.google_sheet_service import (
+from app.services.integrations.google_sheet_service import (
     DEFAULT_TOPIC_HISTORY_LOOKBACK_DAYS,
     DEFAULT_TOPIC_NOVELTY_ANGLE_THRESHOLD,
     DEFAULT_TOPIC_NOVELTY_CLUSTER_THRESHOLD,
@@ -55,8 +56,8 @@ from app.services.google_sheet_service import (
     list_sheet_topic_history_entries,
     sync_google_sheet_snapshot,
 )
-from app.services.html_assembler import assemble_article_html, upsert_language_switch_html
-from app.services.job_service import (
+from app.services.content.html_assembler import assemble_article_html, upsert_language_switch_html
+from app.services.ops.job_service import (
     create_job,
     increment_attempt,
     load_job,
@@ -65,11 +66,12 @@ from app.services.job_service import (
     record_failure,
     set_status,
 )
-from app.services.multilingual_bundle_service import (
+from app.services.content.multilingual_bundle_service import (
     SUPPORTED_LANGUAGES,
     build_language_switch_block,
     resolve_blog_bundle_language,
 )
+from app.services.ops.analytics_service import upsert_article_fact
 from app.services.providers.base import ProviderRuntimeError
 from app.services.providers.factory import (
     get_article_provider,
@@ -78,30 +80,31 @@ from app.services.providers.factory import (
     get_runtime_config,
     get_topic_provider,
 )
-from app.services.publish_trust_gate_service import (
+from app.services.content.publish_trust_gate_service import (
     assess_publish_trust_requirements,
     enforce_publish_trust_requirements,
     ensure_trust_gate_appendix,
 )
-from app.services.openai_usage_service import (
+from app.services.ops.openai_usage_service import (
     FREE_TIER_DEFAULT_LARGE_TEXT_MODEL,
     route_openai_free_tier_text_model,
     resolve_free_tier_text_model,
 )
-from app.services.related_posts import find_related_articles
-from app.services.settings_service import get_settings_map, upsert_settings
-from app.services.storage_service import save_html, save_public_binary
-from app.services.telegram_service import send_telegram_post_notification
-from app.services.topic_discovery_run_service import create_topic_discovery_run
-from app.services.topic_guard_service import (
+from app.services.ops.model_policy_service import CODEX_TEXT_RUNTIME_KIND, CODEX_TEXT_RUNTIME_MODEL
+from app.services.content.related_posts import find_related_articles
+from app.services.integrations.settings_service import get_settings_map, upsert_settings
+from app.services.integrations.storage_service import save_html, save_public_binary
+from app.services.integrations.telegram_service import send_telegram_post_notification
+from app.services.content.topic_discovery_run_service import create_topic_discovery_run
+from app.services.content.topic_guard_service import (
     TopicGuardConflictError,
     annotate_topic_items,
     assert_topic_guard,
     current_publish_target_datetime,
     rebuild_topic_memories_for_blog,
 )
-from app.services.topic_service import upsert_topics
-from app.services.wikimedia_service import fetch_wikimedia_media
+from app.services.content.topic_service import upsert_topics
+from app.services.content.wikimedia_service import fetch_wikimedia_media
 
 OPENAI_TOPIC_REQUEST_STAGE = "OPENAI_TOPIC_REQUEST"
 GEMINI_TOPIC_REQUEST_STAGE = "GEMINI_TOPIC_REQUEST"
@@ -190,6 +193,8 @@ def _stage_allows_large_text_model(stage_type: WorkflowStageType) -> bool:
 
 
 def _default_stage_text_model(*, stage_type: WorkflowStageType, runtime) -> str:
+    if str(getattr(runtime, "text_runtime_kind", "") or "").strip().lower() == CODEX_TEXT_RUNTIME_KIND:
+        return str(getattr(runtime, "text_runtime_model", "") or CODEX_TEXT_RUNTIME_MODEL).strip() or CODEX_TEXT_RUNTIME_MODEL
     if stage_type == WorkflowStageType.TOPIC_DISCOVERY:
         return runtime.topic_discovery_model or FREE_TIER_DEFAULT_LARGE_TEXT_MODEL
     if stage_type == WorkflowStageType.ARTICLE_GENERATION:
@@ -198,6 +203,8 @@ def _default_stage_text_model(*, stage_type: WorkflowStageType, runtime) -> str:
 
 
 def _resolve_stage_text_model(*, stage_type: WorkflowStageType, configured_model: str | None, runtime) -> str:
+    if str(getattr(runtime, "text_runtime_kind", "") or "").strip().lower() == CODEX_TEXT_RUNTIME_KIND:
+        return str(configured_model or getattr(runtime, "text_runtime_model", "") or CODEX_TEXT_RUNTIME_MODEL).strip() or CODEX_TEXT_RUNTIME_MODEL
     allow_large = _stage_allows_large_text_model(stage_type)
     fallback_model = configured_model or _default_stage_text_model(stage_type=stage_type, runtime=runtime)
     return resolve_free_tier_text_model(fallback_model, allow_large=allow_large)
@@ -210,8 +217,12 @@ def _resolve_stage_text_model_for_call(
     configured_model: str | None,
     runtime,
     job=None,
+    provider_hint: str | None = None,
 ) -> str:
     fallback_model = configured_model or _default_stage_text_model(stage_type=stage_type, runtime=runtime)
+    normalized_provider_hint = str(provider_hint or getattr(runtime, "text_runtime_kind", "") or "").strip().lower()
+    if normalized_provider_hint == CODEX_TEXT_RUNTIME_KIND:
+        return str(fallback_model or getattr(runtime, "text_runtime_model", "") or CODEX_TEXT_RUNTIME_MODEL).strip() or CODEX_TEXT_RUNTIME_MODEL
     allow_large = _stage_allows_large_text_model(stage_type)
 
     if runtime.provider_mode != "live":
@@ -879,6 +890,7 @@ def _run_blogger_quality_gate(
     article,
     initial_output,
     article_configured_model: str | None,
+    article_provider_hint: str | None,
     runtime,
     base_prompt: str,
     thresholds: dict[str, float],
@@ -917,9 +929,24 @@ def _run_blogger_quality_gate(
             configured_model=article_configured_model,
             runtime=runtime,
             job=job,
+            provider_hint=article_provider_hint,
         )
-        retry_provider = get_article_provider(db, model_override=retry_model, allow_large=True)
+        retry_provider = get_article_provider(
+            db,
+            model_override=retry_model,
+            provider_hint=article_provider_hint,
+            allow_large=True,
+        )
         retry_output, retry_raw = retry_provider.generate_article(job.keyword_snapshot, retry_prompt)
+        retry_output = apply_pattern_defaults(
+            retry_output,
+            select_blogger_article_pattern(
+                db,
+                blog_id=blog.id,
+                profile_key=blog.profile_key,
+                editorial_category_key=(topic.editorial_category_key if topic else None),
+            ),
+        )
         merge_response(
             db,
             job,
@@ -1085,7 +1112,7 @@ def _parse_datetime(value: str | datetime | None, *, timezone_name: str = "UTC")
 
 
 def _resolve_topic_provider(runtime, provider_hint: str | None = None) -> str:
-    provider = (provider_hint or runtime.topic_discovery_provider or "openai").strip().lower()
+    provider = (provider_hint or runtime.topic_discovery_provider or getattr(runtime, "text_runtime_kind", "") or "openai").strip().lower()
     if provider == "openai_text":
         return "openai"
     return provider
@@ -1675,6 +1702,7 @@ def discover_topics_and_enqueue(
         )
         prompt = (
             render_agent_prompt(
+                db,
                 blog,
                 topic_step,
                 topic_count=str(requested_topic_count),
@@ -1690,12 +1718,13 @@ def discover_topics_and_enqueue(
             + travel_topic_override_prompt
         )
 
-        if runtime.provider_mode == "live" and topic_provider_name == "openai":
+        if runtime.provider_mode == "live" and topic_provider_name in {"openai", CODEX_TEXT_RUNTIME_KIND}:
             topic_model = _resolve_stage_text_model_for_call(
                 db,
                 stage_type=WorkflowStageType.TOPIC_DISCOVERY,
                 configured_model=topic_step.provider_model or runtime.topic_discovery_model,
                 runtime=runtime,
+                provider_hint=topic_step.provider_hint,
             )
 
         provider = get_topic_provider(
@@ -2154,7 +2183,14 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
     ) or ""
 
     set_status(db, job, JobStatus.GENERATING_ARTICLE, f"{blog.name} generating article content.")
+    article_pattern_selection = select_blogger_article_pattern(
+        db,
+        blog_id=blog.id,
+        profile_key=blog.profile_key,
+        editorial_category_key=topic_editorial_key,
+    )
     rendered_article_prompt = render_agent_prompt(
+        db,
         blog,
         article_step,
         keyword=job.keyword_snapshot,
@@ -2176,9 +2212,16 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
         configured_model=article_step.provider_model,
         runtime=runtime,
         job=job,
+        provider_hint=article_step.provider_hint,
     )
-    article_provider = get_article_provider(db, model_override=article_model, allow_large=True)
+    article_provider = get_article_provider(
+        db,
+        model_override=article_model,
+        provider_hint=article_step.provider_hint,
+        allow_large=True,
+    )
     article_output, article_raw = article_provider.generate_article(job.keyword_snapshot, rendered_article_prompt)
+    article_output = apply_pattern_defaults(article_output, article_pattern_selection)
     merge_response(db, job, article_step.stage_type.value, article_raw)
     article = save_article(db, job=job, topic=topic, output=article_output)
     article.inline_media = []
@@ -2198,6 +2241,7 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
             article=article,
             initial_output=article_output,
             article_configured_model=article_step.provider_model,
+            article_provider_hint=article_step.provider_hint,
             runtime=runtime,
             base_prompt=rendered_article_prompt,
             thresholds=quality_gate_thresholds,
@@ -2244,6 +2288,7 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
         )
     elif image_prompt_step and not request_saver_mode:
         rendered_visual_prompt_request = render_agent_prompt(
+            db,
             blog,
             image_prompt_step,
             keyword=job.keyword_snapshot,
@@ -2270,10 +2315,12 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
             configured_model=image_prompt_step.provider_model,
             runtime=runtime,
             job=job,
+            provider_hint=image_prompt_step.provider_hint,
         )
         prompt_refinement_provider = get_article_provider(
             db,
             model_override=prompt_refinement_model,
+            provider_hint=image_prompt_step.provider_hint,
             allow_large=False,
         )
         rendered_visual_prompt, visual_prompt_raw = prompt_refinement_provider.generate_visual_prompt(
@@ -2756,6 +2803,8 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
 
     telegram_result = None
     if blogger_post.published_url and blogger_post.post_status in {PostStatus.PUBLISHED, PostStatus.SCHEDULED}:
+        upsert_article_fact(db, article.id, commit=True)
+        review_article_publish_state(db, article.id, trigger="pipeline_publish")
         telegram_result = send_telegram_post_notification(
             db,
             blog_name=blog.name,
@@ -2764,7 +2813,6 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
             post_status=blogger_post.post_status.value,
             scheduled_for=blogger_post.scheduled_for,
         )
-        review_article_publish_state(db, article.id, trigger="pipeline_publish")
 
     merge_response(
         db,

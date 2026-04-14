@@ -16,7 +16,7 @@ from app.schemas.api import (
     AnalyticsThemeWeightApplyRequest,
     AnalyticsThemeWeightApplyResponse,
 )
-from app.services.analytics_service import (
+from app.services.ops.analytics_service import (
     apply_next_month_weights,
     backfill_analytics,
     delete_blog_article_fact,
@@ -26,7 +26,7 @@ from app.services.analytics_service import (
     get_integrated_dashboard,
     get_monthly_blog_summaries,
 )
-from app.services.google_indexing_service import refresh_indexing_for_blog, request_indexing_for_url
+from app.services.integrations.google_indexing_service import refresh_indexing_for_blog, request_indexing_for_url
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 

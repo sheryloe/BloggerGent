@@ -19,8 +19,8 @@ from package_common import (
     normalize_space,
 )
 
-from app.services.content_ops_service import compute_seo_geo_scores
-from app.services.settings_service import get_settings_map
+from app.services.content.content_ops_service import compute_seo_geo_scores
+from app.services.integrations.settings_service import get_settings_map
 
 
 MIN_BODY_CHARS = 2000

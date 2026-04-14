@@ -10,8 +10,8 @@ from app.core.config import settings as app_settings
 from app.db.base import Base
 from app.models.entities import ContentItem
 from app.services import metric_ingestion_service
-from app.services.platform_service import ensure_managed_channels, get_managed_channel_by_channel_id
-from app.services.settings_service import get_settings_map, upsert_settings
+from app.services.platform.platform_service import ensure_managed_channels, get_managed_channel_by_channel_id
+from app.services.integrations.settings_service import get_settings_map, upsert_settings
 
 
 @pytest.fixture()

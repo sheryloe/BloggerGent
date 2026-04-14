@@ -34,6 +34,7 @@ docs/assets/images/
 
 # local storage snapshots
 storage/reports/
+storage/backups/
 storage/tmp/
 storage/rewrite-packages/
 storage/scheduled-post-batches/
