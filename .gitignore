@@ -57,3 +57,11 @@ scripts/fix_cloudflare_ctr_images.py
 # Codex optimization gate (2026-04-10)
 storage/playwright-browser/
 apps/api/storage/reports/
+apps/api/storage/html/*
+apps/api/storage/reports/*
+
+# refactoring workspace artifacts
+refactoring/reports/
+refactoring/tmp/
+refactoring/output/
+refactoring/codex_write/packages/
