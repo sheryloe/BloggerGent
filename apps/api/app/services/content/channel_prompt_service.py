@@ -26,7 +26,11 @@ from app.services.platform.blog_service import (
     stage_label,
     stage_supports_prompt,
 )
-from app.services.cloudflare.cloudflare_channel_service import get_cloudflare_overview, get_cloudflare_prompt_bundle
+from app.services.cloudflare.cloudflare_channel_service import (
+    get_cloudflare_overview,
+    get_cloudflare_prompt_bundle,
+    get_cloudflare_prompt_category_relative_path,
+)
 from app.services.platform.platform_service import PLATFORM_PROMPT_STEPS
 from app.services.integrations.settings_service import get_settings_map, upsert_settings
 from app.services.platform.workspace_service import get_managed_channel, list_managed_channels
@@ -47,6 +51,33 @@ _CLOUDFLARE_CANONICAL_STAGE_TYPES: tuple[WorkflowStageType, ...] = (
     WorkflowStageType.HTML_ASSEMBLY,
     WorkflowStageType.PUBLISHING,
 )
+_CLOUDFLARE_STAGE_LABELS: dict[WorkflowStageType, str] = {
+    WorkflowStageType.TOPIC_DISCOVERY: "주제 발굴",
+    WorkflowStageType.ARTICLE_GENERATION: "본문 작성",
+    WorkflowStageType.IMAGE_PROMPT_GENERATION: "이미지 프롬프트",
+    WorkflowStageType.RELATED_POSTS: "관련 글 구성",
+    WorkflowStageType.IMAGE_GENERATION: "이미지 생성",
+    WorkflowStageType.HTML_ASSEMBLY: "HTML 조합",
+    WorkflowStageType.PUBLISHING: "게시 준비",
+}
+_CLOUDFLARE_STAGE_DEFAULT_NAMES: dict[WorkflowStageType, str] = {
+    WorkflowStageType.TOPIC_DISCOVERY: "주제 발굴 에이전트",
+    WorkflowStageType.ARTICLE_GENERATION: "본문 작성 에이전트",
+    WorkflowStageType.IMAGE_PROMPT_GENERATION: "이미지 프롬프트 에이전트",
+    WorkflowStageType.RELATED_POSTS: "관련 글 시스템 단계",
+    WorkflowStageType.IMAGE_GENERATION: "이미지 생성 시스템 단계",
+    WorkflowStageType.HTML_ASSEMBLY: "HTML 조합 시스템 단계",
+    WorkflowStageType.PUBLISHING: "게시 준비 시스템 단계",
+}
+_CLOUDFLARE_STAGE_DEFAULT_OBJECTIVES: dict[WorkflowStageType, str] = {
+    WorkflowStageType.TOPIC_DISCOVERY: "카테고리에 맞는 실제 주제 후보를 발굴합니다.",
+    WorkflowStageType.ARTICLE_GENERATION: "제목, 요약, 본문, FAQ, 이미지 프롬프트까지 포함한 게시 패키지를 작성합니다.",
+    WorkflowStageType.IMAGE_PROMPT_GENERATION: "대표 이미지와 인라인 이미지를 위한 프롬프트를 정리합니다.",
+    WorkflowStageType.RELATED_POSTS: "관련 글 후보를 연결할 수 있는 기준 정보를 정리합니다.",
+    WorkflowStageType.IMAGE_GENERATION: "확정된 프롬프트를 바탕으로 이미지 생성을 준비합니다.",
+    WorkflowStageType.HTML_ASSEMBLY: "본문, FAQ, 이미지 슬롯을 최종 HTML로 조합합니다.",
+    WorkflowStageType.PUBLISHING: "최종 게시 가능한 상태로 정리하고 공개 입력을 대기합니다.",
+}
 
 
 def _utc_now_iso() -> str:
@@ -307,6 +338,25 @@ def _cloudflare_system_step_backup(channel_name: str, category_name: str, stage_
     )
 
 
+def _cloudflare_stage_label(stage_type: WorkflowStageType) -> str:
+    return _CLOUDFLARE_STAGE_LABELS.get(stage_type, stage_label(stage_type))
+
+
+def _cloudflare_stage_default_name(stage_type: WorkflowStageType) -> str:
+    definition = get_stage_definition(stage_type)
+    return _CLOUDFLARE_STAGE_DEFAULT_NAMES.get(stage_type, definition.default_name)
+
+
+def _cloudflare_step_objective(category_name: str, stage_type: WorkflowStageType) -> str:
+    definition = get_stage_definition(stage_type)
+    stage_objective = _CLOUDFLARE_STAGE_DEFAULT_OBJECTIVES.get(stage_type, definition.default_objective)
+    return f"{category_name} 카테고리에서 {stage_objective}"
+
+
+def _cloudflare_category_backup_path(category_slug: str, *, channel_backup_directory: str) -> Path:
+    return Path(channel_backup_directory) / get_cloudflare_prompt_category_relative_path(category_slug)
+
+
 def _resolve_platform_definition(provider: str, step_id: str):
     definitions = PLATFORM_PROMPT_STEPS.get(provider, ())
     if not definitions:
@@ -476,7 +526,7 @@ def _build_cloudflare_flow(db: Session, channel_id: str) -> PromptFlowRead:
                     channel_id=channel_id,
                     provider="cloudflare",
                     stage_type=stage_type.value,
-                    stage_label=stage_label(stage_type),
+                    stage_label=_cloudflare_stage_label(stage_type),
                     name=(
                         str(template.get("name") or "").strip()
                         if template
@@ -712,3 +762,229 @@ def sync_all_channel_prompt_backups(db: Session, *, include_disconnected: bool =
         except ValueError:
             continue
     return flows
+
+
+def _cloudflare_category_metadata_payload(
+    flow: PromptFlowRead,
+    *,
+    category_slug: str,
+    category_name: str,
+    category_backup_directory: Path,
+    steps: list[PromptFlowStepRead],
+) -> dict:
+    ordered_steps = sorted(steps, key=lambda item: (item.sort_order, item.id))
+    relative_parts = category_backup_directory.parts
+    upper_category_name = relative_parts[-2] if len(relative_parts) >= 2 else ""
+    channel_name = f"{flow.channel_name} | {upper_category_name} | {category_name}" if upper_category_name else f"{flow.channel_name} | {category_name}"
+    backup_files = [step.backup_relative_path for step in ordered_steps if step.backup_relative_path]
+    return {
+        "channel_id": f"{flow.channel_id}::{category_slug}",
+        "root_channel_id": flow.channel_id,
+        "channel_name": channel_name,
+        "provider": flow.provider,
+        "backup_directory": category_backup_directory.as_posix(),
+        "backup_files": sorted(backup_files),
+        "steps": [
+            {
+                "id": step.id,
+                "stage_type": step.stage_type,
+                "stage_label": step.stage_label,
+                "name": step.name,
+                "role_name": step.role_name,
+                "objective": step.objective,
+                "provider_hint": step.provider_hint,
+                "provider_model": step.provider_model,
+                "is_enabled": step.is_enabled,
+                "is_required": step.is_required,
+                "prompt_enabled": step.prompt_enabled,
+                "sort_order": step.sort_order,
+                "backup_relative_path": step.backup_relative_path,
+            }
+            for step in ordered_steps
+        ],
+    }
+
+
+def _cloudflare_backup_relative_dir() -> str:
+    return (_backup_root() / "cloudflare" / "dongri-archive").relative_to(_prompt_root()).as_posix()
+
+
+def _write_cloudflare_category_channel_jsons(db: Session, flow: PromptFlowRead, *, root: Path) -> None:
+    bundle = get_cloudflare_prompt_bundle(db)
+    categories_by_slug = {
+        str(item.get("slug") or "").strip(): item
+        for item in bundle.get("categories", [])
+        if str(item.get("slug") or "").strip()
+    }
+    steps_by_category: dict[str, list[PromptFlowStepRead]] = {}
+    for step in flow.steps:
+        category_slug, _separator, _stage = str(step.id).partition("::")
+        if not category_slug:
+            continue
+        steps_by_category.setdefault(category_slug, []).append(step)
+
+    for category_slug, steps in steps_by_category.items():
+        category = categories_by_slug.get(category_slug, {})
+        category_name = str(category.get("name") or category_slug).strip() or category_slug
+        category_backup_directory = _cloudflare_category_backup_path(
+            category_slug,
+            channel_backup_directory=str(flow.backup_directory or _default_channel_backup_relative_dir(flow.channel_id)),
+        )
+        payload = _cloudflare_category_metadata_payload(
+            flow,
+            category_slug=category_slug,
+            category_name=category_name,
+            category_backup_directory=category_backup_directory,
+            steps=steps,
+        )
+        _write_json(root / category_backup_directory / "channel.json", payload)
+
+
+def _build_cloudflare_flow(db: Session, channel_id: str) -> PromptFlowRead:
+    overview = get_cloudflare_overview(db)
+    bundle = get_cloudflare_prompt_bundle(db)
+    channel_name = overview.get("channel_name") or overview.get("site_title") or "Cloudflare"
+    stage_order = {
+        stage_type.value: index for index, stage_type in enumerate(_CLOUDFLARE_CANONICAL_STAGE_TYPES, start=1)
+    }
+    category_order = {item.get("slug"): index for index, item in enumerate(bundle.get("categories", []), start=1)}
+    templates_by_key = {
+        (str(item.get("categorySlug") or "").strip(), str(item.get("stage") or "").strip()): item
+        for item in bundle.get("templates", [])
+        if str(item.get("categorySlug") or "").strip() and str(item.get("stage") or "").strip()
+    }
+    steps: list[PromptFlowStepRead] = []
+    for category in bundle.get("categories", []):
+        category_slug = str(category.get("slug") or "").strip()
+        category_name = str(category.get("name") or category_slug or "Cloudflare").strip() or "Cloudflare"
+        if not category_slug:
+            continue
+        category_rank = category_order.get(category_slug, 999)
+        for stage_type in _CLOUDFLARE_CANONICAL_STAGE_TYPES:
+            template = templates_by_key.get((category_slug, stage_type.value))
+            definition = get_stage_definition(stage_type)
+            prompt_enabled = stage_supports_prompt(stage_type)
+            steps.append(
+                PromptFlowStepRead(
+                    id=f"{category_slug}::{stage_type.value}",
+                    channel_id=channel_id,
+                    provider="cloudflare",
+                    stage_type=stage_type.value,
+                    stage_label=_cloudflare_stage_label(stage_type),
+                    name=(
+                        str(template.get("name") or "").strip()
+                        if template
+                        else f"{category_name} | {_cloudflare_stage_default_name(stage_type)}"
+                    ),
+                    role_name=definition.default_role_name,
+                    objective=(
+                        str(template.get("objective") or "").strip()
+                        if template
+                        else _cloudflare_step_objective(category_name, stage_type)
+                    ),
+                    prompt_template=(
+                        _normalize_prompt_text(str(template.get("content") or ""))
+                        if template
+                        else (
+                            _default_cloudflare_prompt(channel_name, category_name, stage_type)
+                            if prompt_enabled
+                            else _cloudflare_system_step_backup(channel_name, category_name, stage_type)
+                        )
+                    ),
+                    provider_hint=("cloudflare" if prompt_enabled else (definition.provider_hint or "cloudflare")),
+                    provider_model=(
+                        str(template.get("providerModel") or "").strip() or definition.provider_model
+                        if template
+                        else definition.provider_model
+                    ),
+                    is_enabled=bool(template.get("isEnabled", True)) if template else True,
+                    is_required=definition.is_required,
+                    removable=False,
+                    prompt_enabled=prompt_enabled,
+                    editable=prompt_enabled,
+                    structure_editable=False,
+                    content_editable=prompt_enabled,
+                    sort_order=(category_rank * 100) + stage_order[stage_type.value],
+                )
+            )
+    return PromptFlowRead(
+        channel_id=channel_id,
+        channel_name=channel_name,
+        provider="cloudflare",
+        structure_editable=False,
+        content_editable=True,
+        available_stage_types=[],
+        steps=steps,
+        backup_directory=_cloudflare_backup_relative_dir(),
+    )
+
+
+def _step_backup_relative_path(db: Session, flow: PromptFlowRead, step: PromptFlowStepRead, index: int) -> str | None:
+    file_name = _step_backup_file_name(db, flow, step)
+    if not file_name:
+        return None
+
+    channel_dir = Path(flow.backup_directory or _default_channel_backup_relative_dir(flow.channel_id))
+    if flow.provider == "cloudflare":
+        category_slug, _separator, _stage = str(step.id).partition("::")
+        return (_cloudflare_category_backup_path(category_slug, channel_backup_directory=channel_dir.as_posix()) / file_name).as_posix()
+
+    return (channel_dir / file_name).as_posix()
+
+
+def sync_prompt_flow_backup(db: Session, flow: PromptFlowRead) -> PromptFlowRead:
+    attach_backup_metadata(db, flow)
+
+    root = _prompt_root()
+    channel_dir = root / str(flow.backup_directory or _default_channel_backup_relative_dir(flow.channel_id))
+    legacy_channel_dir = root / _default_channel_backup_relative_dir(flow.channel_id)
+
+    if channel_dir.exists():
+        _safe_remove_tree(channel_dir, root=root)
+    channel_dir.mkdir(parents=True, exist_ok=True)
+
+    for step in flow.steps:
+        if not step.backup_relative_path:
+            continue
+        _write_text(root / step.backup_relative_path, step.prompt_template)
+
+    auxiliary_files = _auxiliary_backup_files(db, flow)
+    for relative_path, content in auxiliary_files.items():
+        _write_text(root / relative_path, content)
+
+    metadata = {
+        "channel_id": flow.channel_id,
+        "channel_name": flow.channel_name,
+        "provider": flow.provider,
+        "backup_directory": flow.backup_directory,
+        "backup_files": sorted(
+            [step.backup_relative_path for step in flow.steps if step.backup_relative_path] + list(auxiliary_files.keys())
+        ),
+        "steps": [
+            {
+                "id": step.id,
+                "stage_type": step.stage_type,
+                "stage_label": step.stage_label,
+                "name": step.name,
+                "role_name": step.role_name,
+                "objective": step.objective,
+                "provider_hint": step.provider_hint,
+                "provider_model": step.provider_model,
+                "is_enabled": step.is_enabled,
+                "is_required": step.is_required,
+                "prompt_enabled": step.prompt_enabled,
+                "sort_order": step.sort_order,
+                "backup_relative_path": step.backup_relative_path,
+            }
+            for step in flow.steps
+        ],
+    }
+    _write_json(channel_dir / "channel.json", metadata)
+    if flow.provider == "cloudflare":
+        _write_cloudflare_category_channel_jsons(db, flow, root=root)
+        return attach_backup_metadata(db, flow)
+
+    _cleanup_stale_channel_dirs(flow, root=root, current_channel_dir=channel_dir)
+    if legacy_channel_dir != channel_dir:
+        _safe_remove_tree(legacy_channel_dir, root=root)
+    return attach_backup_metadata(db, flow)

@@ -59,19 +59,19 @@ CLOUDFLARE_PROMPT_STAGE_FILE_MAP: dict[str, str] = {
     "article_generation": "article_generation.md",
     "image_prompt_generation": "image_prompt_generation.md",
 }
-CLOUDFLARE_PROMPT_CATEGORY_DIR_MAP: dict[str, str] = {
-    "개발과-프로그래밍": "gaebalgwa-peurogeuraeming",
-    "여행과-기록": "yeohaenggwa-girog",
-    "축제와-현장": "cugjewa-hyeonjang",
-    "문화와-공간": "munhwawa-gonggan",
-    "미스테리아-스토리": "miseuteria-seutori",
-    "동그리의-생각": "donggeuriyi-saenggag",
-    "주식의-흐름": "jusigyi-heureum",
-    "나스닥의-흐름": "naseudagyi-heureum",
-    "크립토의-흐름": "keuribtoyi-heureum",
-    "삶을-유용하게": "salmeul-yuyonghage",
-    "삶의-기름칠": "salmyi-gireumcil",
-    "일상과-메모": "ilsanggwa-memo",
+CLOUDFLARE_PROMPT_CATEGORY_PATH_MAP: dict[str, str] = {
+    "개발과-프로그래밍": "동그리의 기록/gaebalgwa-peurogeuraeming",
+    "일상과-메모": "동그리의 기록/ilsanggwa-memo",
+    "여행과-기록": "동그리의 기록/yeohaenggwa-girog",
+    "삶을-유용하게": "생활의 기록/salmeul-yuyonghage",
+    "삶의-기름칠": "생활의 기록/salmyi-gireumcil",
+    "동그리의-생각": "세상의 기록/donggeuriyi-saenggag",
+    "미스테리아-스토리": "세상의 기록/miseuteria-seutori",
+    "주식의-흐름": "시장의 기록/jusigyi-heureum",
+    "나스닥의-흐름": "시장의 기록/naseudagyi-heureum",
+    "크립토의-흐름": "시장의 기록/keuribtoyi-heureum",
+    "축제와-현장": "정보의 기록/cugjewa-hyeonjang",
+    "문화와-공간": "정보의 기록/munhwawa-gonggan",
 }
 _CLOUDFLARE_VISIBLE_TRACE_TOKENS: tuple[str, ...] = (
     "quick brief",
@@ -369,12 +369,16 @@ def _cloudflare_channel_prompt_root() -> Path:
     return candidates[0]
 
 
-def _cloudflare_prompt_category_dir(category_slug: str) -> str:
+def get_cloudflare_prompt_category_relative_path(category_slug: str) -> Path:
     normalized_slug = str(category_slug or "").strip()
-    if normalized_slug in CLOUDFLARE_PROMPT_CATEGORY_DIR_MAP:
-        return CLOUDFLARE_PROMPT_CATEGORY_DIR_MAP[normalized_slug]
+    if normalized_slug in CLOUDFLARE_PROMPT_CATEGORY_PATH_MAP:
+        return Path(CLOUDFLARE_PROMPT_CATEGORY_PATH_MAP[normalized_slug])
     fallback = slugify(normalized_slug or "general", separator="-")
-    return fallback or "general"
+    return Path(fallback or "general")
+
+
+def _cloudflare_prompt_category_dir(category_slug: str) -> str:
+    return get_cloudflare_prompt_category_relative_path(category_slug).as_posix()
 
 
 def _cloudflare_stage_prompt_path(category: dict[str, Any], stage: str) -> Path | None:
@@ -383,7 +387,7 @@ def _cloudflare_stage_prompt_path(category: dict[str, Any], stage: str) -> Path 
     if not stage_file:
         return None
     category_slug = str(category.get("slug") or "").strip()
-    prompt_dir = _cloudflare_prompt_category_dir(category_slug)
+    prompt_dir = get_cloudflare_prompt_category_relative_path(category_slug)
     return _cloudflare_channel_prompt_root() / prompt_dir / stage_file
 
 

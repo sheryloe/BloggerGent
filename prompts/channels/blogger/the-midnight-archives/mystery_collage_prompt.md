@@ -16,11 +16,13 @@ Visual direction:
 - dim natural light, overcast light, twilight, or muted weather when suitable
 - realistic textures and natural shadows
 - subtle tension without fantasy excess
-- no gore
+- no gore, no blood, no disturbing violence
 - no text overlays
 - no logos
 - premium editorial composition
 - high realism with a 50mm lens feel
 
 If the topic is a legend, keep the image atmospheric but still believable.
-If the topic is a historical mystery, prefer evidence-rich environments, landscapes, ruins, sea, forest, snow, desert, or archival-feeling locations that fit the story.
+If the topic is a historical mystery, prefer evidence-rich environments, landscapes, ruins, sea, forest, snow, desert, or archival-feeling locations that fit the story. Include visual elements of documents or analog clocks if a timeline is central.
+
+Return plain text only.
