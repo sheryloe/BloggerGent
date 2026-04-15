@@ -91,88 +91,6 @@ def _normalize_related_thumbnail_url(url: str | None) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, normalized_path, parsed.query, parsed.fragment))
 
 
-def _replace_path_token(url: str, source: str, target: str) -> str:
-    parsed = urlsplit(url)
-    path = unquote(parsed.path or "")
-    if source not in path:
-        return ""
-    replaced = path.replace(source, target, 1)
-    if replaced == path:
-        return ""
-    return urlunsplit((parsed.scheme, parsed.netloc, quote(replaced, safe="/-_.~"), parsed.query, parsed.fragment))
-
-
-def _replace_path_extension(url: str, extension: str) -> str:
-    parsed = urlsplit(url)
-    path = unquote(parsed.path or "")
-    dot_index = path.rfind(".")
-    slash_index = path.rfind("/")
-    if dot_index <= slash_index:
-        return ""
-    replaced = f"{path[:dot_index]}{extension}"
-    return urlunsplit((parsed.scheme, parsed.netloc, quote(replaced, safe="/-_.~"), parsed.query, parsed.fragment))
-
-
-def _related_thumbnail_fallback_candidates(url: str | None) -> list[str]:
-    normalized = _normalize_related_thumbnail_url(url)
-    if not normalized:
-        return []
-
-    candidates: list[str] = []
-    for source, target in (
-        ("/assets/media/", "/assets/assets/media/"),
-        ("/assets/assets/media/", "/assets/media/"),
-    ):
-        swapped = _replace_path_token(normalized, source, target)
-        if swapped:
-            candidates.append(swapped)
-
-    lowered_path = urlsplit(normalized).path.lower()
-    if lowered_path.endswith(".webp"):
-        for ext in (".jpg", ".jpeg"):
-            switched = _replace_path_extension(normalized, ext)
-            if switched:
-                candidates.append(switched)
-        for base in list(candidates):
-            if urlsplit(base).path.lower().endswith(".webp"):
-                for ext in (".jpg", ".jpeg"):
-                    switched = _replace_path_extension(base, ext)
-                    if switched:
-                        candidates.append(switched)
-
-    out: list[str] = []
-    seen: set[str] = set()
-    for candidate in candidates:
-        normalized_candidate = _normalize_related_thumbnail_url(candidate)
-        if not normalized_candidate or normalized_candidate == normalized:
-            continue
-        if normalized_candidate in seen:
-            continue
-        seen.add(normalized_candidate)
-        out.append(normalized_candidate)
-    return out
-
-
-def _escape_js_single_quote(value: str) -> str:
-    return value.replace("\\", "\\\\").replace("'", "\\'")
-
-
-def _related_thumbnail_onerror(url: str | None) -> str:
-    fallbacks = _related_thumbnail_fallback_candidates(url)
-    if not fallbacks:
-        return "this.onerror=null;this.style.display='none';"
-
-    parts = []
-    for index, candidate in enumerate(fallbacks):
-        escaped = _escape_js_single_quote(candidate)
-        token = f"fb{index}"
-        parts.append(
-            f"if(this.dataset.{token}!=='1'){{this.dataset.{token}='1';this.src='{escaped}';return;}}"
-        )
-    parts.append("this.onerror=null;this.style.display='none';")
-    return "".join(parts)
-
-
 def _normalize_topic_value(value: str | None) -> str:
     return re.sub(r"\s+", " ", (value or "").strip().lower())
 
@@ -497,10 +415,9 @@ def render_related_cards_html(
         link = html.escape(str(post.get("link") or ""), quote=True)
         raw_thumbnail_url = _normalize_related_thumbnail_url(str(post.get("thumbnail") or ""))
         thumbnail_url = html.escape(raw_thumbnail_url, quote=True)
-        onerror_attr = html.escape(_related_thumbnail_onerror(raw_thumbnail_url), quote=True)
         thumbnail = (
             f"<img src='{thumbnail_url}' alt='{title}' "
-            f"loading='lazy' decoding='async' onerror=\"{onerror_attr}\" "
+            "loading='lazy' decoding='async' "
             "style='width:100%;height:120px;object-fit:cover;border-radius:14px;' />"
             if post.get("thumbnail")
             else ""

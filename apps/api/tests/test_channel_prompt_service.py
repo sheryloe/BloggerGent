@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -233,6 +234,21 @@ def test_build_prompt_flow_syncs_cloudflare_backups_to_channel_name_dir(
     assert (
         tmp_path / "prompts" / "channels" / "cloudflare" / "dongri-archive" / "mystery" / "publishing.md"
     ).read_text(encoding="utf-8").startswith("[Cloudflare System Step Backup]\n")
+    root_channel = json.loads(
+        (tmp_path / "prompts" / "channels" / "cloudflare" / "dongri-archive" / "channel.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    category_channel = json.loads(
+        (tmp_path / "prompts" / "channels" / "cloudflare" / "dongri-archive" / "mystery" / "channel.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert root_channel["channel_id"] == "cloudflare:dongriarchive"
+    assert category_channel["channel_id"] == "cloudflare:dongriarchive::mystery"
+    assert category_channel["root_channel_id"] == "cloudflare:dongriarchive"
+    assert category_channel["backup_directory"] == "channels/cloudflare/dongri-archive/mystery"
+    assert category_channel["steps"][0]["backup_relative_path"] == "channels/cloudflare/dongri-archive/mystery/topic_discovery.md"
 
 
 def test_travel_blogger_backup_includes_profile_prompt_files_and_inline_prompt(db: Session, tmp_path: Path) -> None:

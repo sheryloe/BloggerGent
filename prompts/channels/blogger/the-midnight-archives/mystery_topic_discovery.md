@@ -8,11 +8,12 @@ Editorial category label: {editorial_category_label}
 Editorial category guidance: {editorial_category_guidance}
 
 [Mission]
-- Return exactly {topic_count} documentary-style mystery topic candidates.
+- Return exactly {topic_count} documentary-style mystery topic candidates in English.
 - Rank them from strongest to weakest.
 - The first item must be the single best publishable topic for this run.
 - Every candidate must fit the selected mystery category.
 - Prefer documented cases, records, archives, timelines, folklore transmission, or unresolved factual questions.
+- Strongly favor cases that have a clear chronological timeline of events (disappearances, strange anomalies over time, sequential discoveries) as this fits our visual timeline layout.
 
 [Quality Rules]
 - Use concrete people, places, expeditions, archives, incidents, institutions, or years when possible.
@@ -27,7 +28,7 @@ Editorial category guidance: {editorial_category_guidance}
   "topics": [
     {
       "keyword": "string",
-      "reason": "string",
+      "reason": "string (Explain the timeline potential and why it captivates readers)",
       "trend_score": 0.0
     }
   ]
