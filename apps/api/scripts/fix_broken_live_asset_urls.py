@@ -42,6 +42,8 @@ IMG_URL_RE = re.compile(
     r"https?://[^\s'\"<>)\]]+",
     re.IGNORECASE,
 )
+FORBIDDEN_MEDIA_BLOGGER_TOKEN = "media/blogger"
+ALLOWED_GOOGLE_BLOGGER_PATH_TOKEN = "/assets/media/google-blogger/"
 
 
 @dataclass
@@ -76,6 +78,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--canary-count", type=int, default=10)
     parser.add_argument("--timeout", type=float, default=20.0)
     parser.add_argument("--report-path", default="")
+    parser.add_argument(
+        "--strict-google-blogger",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Allow only /assets/media/google-blogger/ as resolved URL target.",
+    )
     return parser.parse_args()
 
 
@@ -171,11 +179,14 @@ def _candidate_urls(url: str) -> list[str]:
     parsed = urlparse(base)
     if not parsed.scheme or not parsed.netloc:
         return []
+    normalized_path = _safe_str(parsed.path)
+    if "/media/google-blogger/" not in normalized_path:
+        # Keep non-google-blogger paths unresolved by policy.
+        return []
 
     candidates: list[str] = []
     replacements = [
-        ("/assets/media/", "/assets/assets/media/"),
-        ("/assets/assets/media/", "/assets/media/"),
+        ("/assets/assets/media/google-blogger/", "/assets/media/google-blogger/"),
     ]
     for from_token, to_token in replacements:
         candidate = _build_candidate_url(base, from_token, to_token)
@@ -239,6 +250,7 @@ def _resolve_url(
     url: str,
     timeout: float,
     cache: dict[str, dict[str, Any]],
+    strict_google_blogger: bool = True,
 ) -> tuple[str, dict[str, Any], list[dict[str, Any]]]:
     probe = _probe_url(client, url, timeout, cache)
     if probe.get("ok"):
@@ -249,7 +261,11 @@ def _resolve_url(
     for candidate in candidates:
         c_probe = _probe_url(client, candidate, timeout, cache)
         candidate_probes.append(c_probe)
-        if c_probe.get("ok"):
+        candidate_ok = bool(c_probe.get("ok"))
+        if strict_google_blogger:
+            candidate_ok = candidate_ok and (ALLOWED_GOOGLE_BLOGGER_PATH_TOKEN in _safe_str(candidate))
+            candidate_ok = candidate_ok and (FORBIDDEN_MEDIA_BLOGGER_TOKEN not in _safe_str(candidate).lower())
+        if candidate_ok:
             return candidate, probe, candidate_probes
     return _normalize_url(url), probe, candidate_probes
 
@@ -394,6 +410,7 @@ def _report_base(args: argparse.Namespace) -> dict[str, Any]:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "mode": args.mode,
         "canary_count": int(args.canary_count),
+        "strict_google_blogger": bool(args.strict_google_blogger),
         "summary": {
             "scanned_blogger_posts": 0,
             "scanned_cloudflare_posts": 0,
@@ -403,6 +420,7 @@ def _report_base(args: argparse.Namespace) -> dict[str, Any]:
             "candidate_swaps_applied": 0,
             "updated_posts": 0,
             "failed_posts": 0,
+            "strict_violation_count": 0,
         },
         "items": [],
     }
@@ -415,6 +433,7 @@ def _resolve_post_urls(
     cover_url: str,
     timeout: float,
     cache: dict[str, dict[str, Any]],
+    strict_google_blogger: bool,
 ) -> tuple[dict[str, str], list[dict[str, Any]]]:
     replacements: dict[str, str] = {}
     traces: list[dict[str, Any]] = []
@@ -430,6 +449,7 @@ def _resolve_post_urls(
             url=original_url,
             timeout=timeout,
             cache=cache,
+            strict_google_blogger=strict_google_blogger,
         )
         traces.append(
             {
@@ -478,6 +498,7 @@ def main() -> int:
                     cover_url=target.cover_url,
                     timeout=float(args.timeout),
                     cache=url_probe_cache,
+                    strict_google_blogger=bool(args.strict_google_blogger),
                 )
 
                 broken_count = 0
@@ -513,6 +534,31 @@ def main() -> int:
                     "trace": traces,
                     "status": "planned",
                 }
+
+                if bool(args.strict_google_blogger):
+                    strict_violations: list[str] = []
+                    for old_url, new_url in replacements.items():
+                        lowered_new = _safe_str(new_url).lower()
+                        if FORBIDDEN_MEDIA_BLOGGER_TOKEN in lowered_new:
+                            strict_violations.append(f"replacement_forbidden:{old_url}->{new_url}")
+                        if ALLOWED_GOOGLE_BLOGGER_PATH_TOKEN not in _safe_str(new_url):
+                            strict_violations.append(f"replacement_not_allowed_prefix:{old_url}->{new_url}")
+                    payload_chunks = [
+                        _safe_str(updated_content),
+                        _safe_str(updated_cover_url),
+                        _safe_str(target.excerpt if isinstance(target, BloggerTarget) else ""),
+                    ]
+                    payload_blob = "\n".join(payload_chunks).lower()
+                    if FORBIDDEN_MEDIA_BLOGGER_TOKEN in payload_blob:
+                        strict_violations.append("payload_contains_media_blogger")
+                    if strict_violations:
+                        item["status"] = "failed"
+                        item["reason"] = "strict_google_blogger_violation"
+                        item["strict_violations"] = strict_violations
+                        report["summary"]["strict_violation_count"] += 1
+                        report["summary"]["failed_posts"] += 1
+                        report["items"].append(item)
+                        continue
 
                 if apply_mode:
                     if isinstance(target, BloggerTarget):

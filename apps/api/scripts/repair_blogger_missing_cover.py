@@ -434,6 +434,24 @@ def _build_restore_target(target: RepairTarget) -> RestoreTargetPost:
     if not excerpt and synced_post is not None:
         excerpt = _safe_str(synced_post.excerpt_text)
     labels = list(article.labels or []) if article is not None else list((synced_post.labels or []) if synced_post else [])
+    category_key = ""
+    for label in labels:
+        token = _safe_str(label).lower()
+        if token in {"mystery", "travel", "culture", "food"}:
+            category_key = token
+            break
+    if not category_key:
+        profile = _safe_str(target.blog.profile_key).lower()
+        if "mystery" in profile or "midnight" in profile:
+            category_key = "mystery"
+        elif "travel" in profile:
+            category_key = "travel"
+        elif "culture" in profile:
+            category_key = "culture"
+        elif "food" in profile:
+            category_key = "food"
+    if not category_key:
+        category_key = "mystery"
     return RestoreTargetPost(
         source="blogger",
         post_id=_safe_str(target.blogger_post.blogger_post_id),
@@ -444,6 +462,7 @@ def _build_restore_target(target: RepairTarget) -> RestoreTargetPost:
         slug_seed=slug_seed,
         group_name=_safe_str(target.blog.name),
         category_hint=f"{_safe_str(target.blog.primary_language)}:{_safe_str(target.blog.profile_key)}",
+        category_key=category_key,
         cover_alt=title,
         blog_id=target.blog.id,
         labels=labels,
@@ -819,7 +838,6 @@ def run_repair(
                 "score": decision.score,
                 "cover_url": decision.cover_url,
                 "inline1_url": decision.inline1_url,
-                "inline2_url": decision.inline2_url,
                 "candidates": decision.candidates or [],
             }
             if decision.matched:

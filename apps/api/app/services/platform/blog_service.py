@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import logging
@@ -293,16 +293,16 @@ STAGE_DEFINITIONS: dict[WorkflowStageType, WorkflowStageDefinition] = {
 
 def _prompt_roots() -> tuple[Path, ...]:
     resolved = Path(__file__).resolve()
-    candidates: list[Path] = []
-    seed_candidates = [
+    preferred = [
         Path(settings.prompt_root),
         Path.cwd() / "prompts",
     ]
-    seed_candidates.extend(parent / "prompts" for parent in resolved.parents)
-    for candidate in seed_candidates:
-        if candidate not in candidates:
-            candidates.append(candidate)
-    return tuple(candidates)
+    if len(resolved.parents) >= 5:
+        preferred.append(resolved.parents[4] / "prompts")
+    for candidate in preferred:
+        if candidate.exists():
+            return (candidate,)
+    return (preferred[1],)
 
 
 @lru_cache(maxsize=1)
@@ -476,8 +476,8 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 role_name="Global Mystery Research Scout",
                 objective="글로벌 검색 수요가 높은 세계 미스터리 주제를 찾습니다.",
                 prompt_file="mystery_topic_discovery.md",
-                provider_hint=None,
-                provider_model=None,
+                provider_hint=CODEX_TEXT_RUNTIME_KIND,
+                provider_model="gpt-5.4",
                 is_enabled=True,
                 sort_order=10,
             ),
@@ -487,8 +487,8 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 role_name="Investigative documentary storyteller",
                 objective="제목, 검색 설명, 태그, 본문, FAQ, 이미지 프롬프트까지 포함한 미스터리 글쓰기 패키지를 생성합니다.",
                 prompt_file="mystery_article_generation.md",
-                provider_hint=None,
-                provider_model=None,
+                provider_hint=CODEX_TEXT_RUNTIME_KIND,
+                provider_model="gpt-5.4-mini-2026-03-17",
                 is_enabled=True,
                 sort_order=20,
             ),
@@ -498,8 +498,8 @@ PROFILE_DEFINITIONS: dict[str, BlogProfile] = {
                 role_name="Documentary cover prompt designer",
                 objective="사건 분위기에 맞는 3x3 다큐 스타일 hero 이미지 프롬프트를 더 정교하게 다듬습니다.",
                 prompt_file="mystery_collage_prompt.md",
-                provider_hint=None,
-                provider_model=None,
+                provider_hint=CODEX_TEXT_RUNTIME_KIND,
+                provider_model="gpt-5.4-mini-2026-03-17",
                 is_enabled=True,
                 sort_order=30,
             ),
@@ -1006,7 +1006,7 @@ def _blogger_article_prompt_policy(
         lines.extend(
             [
                 "- Use an experience-led travel blog tone with route logic, place context, and practical movement flow.",
-                "- Make the article substantial enough for a full blog read, roughly equivalent to a 4000+ Korean-character post in density.",
+                "- Keep the final article package in the 3200~3600 Korean-character range when assembled.",
                 "- Prefer concrete district names, station areas, markets, museums, festivals, and nearby pairing ideas.",
             ]
         )
@@ -1028,14 +1028,24 @@ def _blogger_image_prompt_policy(blog: Blog) -> str:
     lines = [
         "[Image prompt policy]",
         "- Keep the hero image realistic and grounded in a real usage scene.",
-        "- The hero prompt must describe one 3x3 collage with 9 distinct panels, visible white gutters, and a dominant center panel.",
-        "- The supporting inline prompt must describe one 3x2 collage with 6 distinct panels.",
         "- No text, no logo, no infographic styling.",
     ]
     if profile_key == "korea_travel":
-        lines.append("- Travel visuals must feel like a real place visit and avoid generic stock-photo mood.")
+        lines.extend(
+            [
+                "- The hero prompt must describe one square 1024x1024 8-panel editorial travel collage with thin visible white gutters.",
+                "- Do not request inline collage prompts for travel blogs.",
+                "- Travel visuals must feel like a real place visit and avoid generic stock-photo mood.",
+            ]
+        )
     elif profile_key == "world_mystery":
-        lines.append("- Mystery visuals must feel documentary-like, with archive, place, and evidence atmosphere rather than fantasy poster styling.")
+        lines.extend(
+            [
+                "- The hero prompt must describe one square 1024x1024 collage-style cover image.",
+                "- Keep one main image only. Do not request inline, secondary, or body images.",
+                "- Mystery visuals must feel documentary-like, with archive, place, and evidence atmosphere rather than fantasy poster styling.",
+            ]
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -1658,3 +1668,4 @@ def reorder_workflow_steps(db: Session, blog: Blog, ordered_ids: list[int]) -> l
     db.commit()
     refreshed = get_blog(db, blog.id) or blog
     return list_workflow_steps(refreshed)
+

@@ -19,6 +19,13 @@ DEFAULT_DATABASE_URL = "postgresql://bloggent:bloggent@postgres:5432/bloggent"
 DEFAULT_BLOG_IDS = [34, 35, 36, 37]
 LIVE_STATUSES = {"live", "published", "LIVE", "PUBLISHED"}
 LEGACY_TOKEN = "/assets/media/posts/2026/"
+LEGACY_SCAN_TOKEN = "media/posts/2026/"
+LEGACY_URL_TOKENS = (
+    "/assets/media/posts/2026/",
+    "/assets/assets/media/posts/2026/",
+    "/assets/assets/images/media/posts/2026/",
+)
+ALLOWED_GOOGLE_BLOGGER_PATH_TOKEN = "/assets/media/google-blogger/"
 URL_RE = re.compile(r"https?://[^\s'\"<>)\]]+", re.IGNORECASE)
 
 if "DATABASE_URL" not in os.environ:
@@ -72,6 +79,49 @@ def _extract_urls(content: str) -> list[str]:
             seen.add(value)
             urls.append(value)
     return urls
+
+
+def _is_legacy_url(url: str) -> bool:
+    raw = _safe_str(url)
+    if not raw:
+        return False
+    lowered = raw.lower()
+    if any(token in lowered for token in LEGACY_URL_TOKENS):
+        return True
+    normalized_key = _normalize_legacy_key(_safe_str(normalize_r2_url_to_key(raw))).lower()
+    return normalized_key.startswith("assets/media/posts/2026/")
+
+
+def _ensure_google_blogger_single_assets_url(*, db, url: str) -> str:
+    normalized = _safe_str(url)
+    if not normalized:
+        return ""
+    if "/assets/media/google-blogger/" in normalized and "/assets/assets/media/google-blogger/" not in normalized:
+        return normalized
+    if "/assets/assets/media/google-blogger/" not in normalized:
+        return normalized
+
+    source_key = _safe_str(normalize_r2_url_to_key(normalized)).lstrip("/")
+    if not source_key:
+        return normalized
+    if not source_key.startswith("assets/media/google-blogger/"):
+        return normalized
+
+    target_key = source_key[len("assets/") :]
+    try:
+        binary = cloudflare_r2_download_binary(db, public_key="", key=source_key)
+        public_url, _upload_payload, _delivery_meta = upload_binary_to_cloudflare_r2(
+            db,
+            object_key=target_key,
+            filename=Path(target_key).name,
+            content=binary,
+        )
+        final_url = _safe_str(public_url)
+        if final_url and ALLOWED_GOOGLE_BLOGGER_PATH_TOKEN in final_url:
+            return final_url
+    except Exception:
+        return normalized
+    return normalized
 
 
 def _build_legacy_url_map(db) -> dict[str, str]:
@@ -128,19 +178,21 @@ def _resolve_migrated_url(*, legacy_key: str, legacy_map: dict[str, str]) -> str
 def _replace_legacy_urls(
     content: str,
     *,
+    db,
     legacy_map: dict[str, str],
 ) -> tuple[str, list[dict[str, str]], list[dict[str, str]]]:
     updated = content or ""
     replacements: list[dict[str, str]] = []
     unresolved: list[dict[str, str]] = []
     for url in _extract_urls(updated):
-        if LEGACY_TOKEN not in url:
+        if not _is_legacy_url(url):
             continue
         legacy_key = _normalize_legacy_key(_safe_str(normalize_r2_url_to_key(url)))
         target_url = _resolve_migrated_url(legacy_key=legacy_key, legacy_map=legacy_map)
         if not target_url:
             unresolved.append({"url": url, "legacy_key": legacy_key})
             continue
+        target_url = _ensure_google_blogger_single_assets_url(db=db, url=target_url)
         if target_url == url:
             continue
         updated = updated.replace(url, target_url)
@@ -202,7 +254,7 @@ def _migrate_unresolved_url(*, db, blog_slug: str, legacy_key: str) -> str:
         filename=Path(object_key).name,
         content=binary,
     )
-    return _safe_str(public_url)
+    return _ensure_google_blogger_single_assets_url(db=db, url=_safe_str(public_url))
 
 
 def _resolve_unresolved_items(
@@ -276,7 +328,7 @@ def run(*, mode: str, blog_ids: list[int] | None = None) -> dict[str, Any]:
                     SyncedBloggerPost.blog_id.in_(target_blog_ids),
                     SyncedBloggerPost.status.in_(sorted(LIVE_STATUSES)),
                     SyncedBloggerPost.url.is_not(None),
-                    SyncedBloggerPost.content_html.ilike(f"%{LEGACY_TOKEN}%"),
+                    SyncedBloggerPost.content_html.ilike(f"%{LEGACY_SCAN_TOKEN}%"),
                 )
                 .options(selectinload(SyncedBloggerPost.blog))
                 .order_by(SyncedBloggerPost.blog_id.asc(), SyncedBloggerPost.id.desc())
@@ -307,7 +359,11 @@ def run(*, mode: str, blog_ids: list[int] | None = None) -> dict[str, Any]:
         }
 
         for post in posts:
-            updated_content, replacements, unresolved = _replace_legacy_urls(post.content_html, legacy_map=legacy_map)
+            updated_content, replacements, unresolved = _replace_legacy_urls(
+                post.content_html,
+                db=db,
+                legacy_map=legacy_map,
+            )
             blog_for_fallback = post.blog if post.blog is not None else db.get(Blog, post.blog_id)
             if mode == "apply" and unresolved and blog_for_fallback is not None:
                 updated_content, replacements, unresolved = _resolve_unresolved_items(
@@ -356,7 +412,11 @@ def run(*, mode: str, blog_ids: list[int] | None = None) -> dict[str, Any]:
             blogger_post = blogger_post_map.get((post.blog_id, _safe_str(post.remote_post_id)))
             article = blogger_post.article if blogger_post is not None else None
             if article is not None and _safe_str(article.assembled_html):
-                article_updated, _article_replacements, _article_unresolved = _replace_legacy_urls(article.assembled_html, legacy_map=legacy_map)
+                article_updated, _article_replacements, _article_unresolved = _replace_legacy_urls(
+                    article.assembled_html,
+                    db=db,
+                    legacy_map=legacy_map,
+                )
                 if article_updated != article.assembled_html:
                     article.assembled_html = article_updated
                     db.add(article)
@@ -397,8 +457,8 @@ def run(*, mode: str, blog_ids: list[int] | None = None) -> dict[str, Any]:
                 .where(
                     BloggerPost.blog_id.in_(target_blog_ids),
                     or_(
-                        Article.assembled_html.ilike(f"%{LEGACY_TOKEN}%"),
-                        Article.html_article.ilike(f"%{LEGACY_TOKEN}%"),
+                        Article.assembled_html.ilike(f"%{LEGACY_SCAN_TOKEN}%"),
+                        Article.html_article.ilike(f"%{LEGACY_SCAN_TOKEN}%"),
                     ),
                 )
                 .order_by(Article.id.asc(), BloggerPost.blog_id.asc())
@@ -441,6 +501,7 @@ def run(*, mode: str, blog_ids: list[int] | None = None) -> dict[str, Any]:
             if article_has_assembled_map.get(article_id):
                 assembled_updated, assembled_replacements, assembled_unresolved = _replace_legacy_urls(
                     assembled_updated,
+                    db=db,
                     legacy_map=legacy_map,
                 )
                 if mode == "apply" and assembled_unresolved and blog_row is not None:
@@ -459,6 +520,7 @@ def run(*, mode: str, blog_ids: list[int] | None = None) -> dict[str, Any]:
             if article_has_html_map.get(article_id):
                 html_article_updated, html_replacements, html_unresolved = _replace_legacy_urls(
                     html_article_updated,
+                    db=db,
                     legacy_map=legacy_map,
                 )
                 if mode == "apply" and html_unresolved and blog_row is not None:
@@ -476,6 +538,7 @@ def run(*, mode: str, blog_ids: list[int] | None = None) -> dict[str, Any]:
                     if unresolved_removed:
                         _tmp_html, _tmp_replacements, html_unresolved = _replace_legacy_urls(
                             html_article_updated,
+                            db=db,
                             legacy_map=legacy_map,
                         )
 

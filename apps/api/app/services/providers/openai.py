@@ -13,6 +13,19 @@ from app.services.providers.base import ProviderRuntimeError
 
 NON_ENGLISH_WORD_RE = re.compile(r"[^A-Za-z0-9\s\-/&,:'.()]+")
 MULTISPACE_RE = re.compile(r"\s{2,}")
+ENFORCED_OPENAI_IMAGE_MODEL = "gpt-image-1"
+
+
+def resolve_enforced_openai_image_model(model: str | None) -> str:
+    normalized = str(model or "").strip().casefold()
+    if normalized.startswith("dall-e"):
+        raise ProviderRuntimeError(
+            provider="openai_image",
+            status_code=422,
+            message="DALL-E image models are blocked for this runtime.",
+            detail=f"requested_model={model}",
+        )
+    return ENFORCED_OPENAI_IMAGE_MODEL
 
 
 class OpenAITopicDiscoveryProvider:
@@ -255,24 +268,55 @@ class OpenAIArticleProvider:
         content = data["choices"][0]["message"]["content"].strip()
         return content, data
 
+    def generate_structured_json(self, prompt: str) -> tuple[dict, dict]:
+        response = httpx.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            json={
+                "model": self.model,
+                "temperature": 0.3,
+                "response_format": {"type": "json_object"},
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You generate precise JSON only. Never return markdown fences or commentary.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+            },
+            timeout=120.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+        content = data["choices"][0]["message"]["content"]
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise ProviderRuntimeError(
+                provider="openai_text",
+                status_code=502,
+                message="OpenAI returned an unexpected structured JSON payload.",
+                detail=str(exc),
+            ) from exc
+        return payload, data
+
 
 class OpenAIImageProvider:
     def __init__(self, *, api_key: str, model: str) -> None:
         self.api_key = api_key
-        self.model = model
+        self.requested_model_input = str(model or "").strip()
+        self.model = resolve_enforced_openai_image_model(model)
+        normalized_input = self.requested_model_input.casefold()
+        self.model_policy_overridden = bool(normalized_input and normalized_input != self.model.casefold())
 
     def _default_quality(self, model: str | None = None) -> str | None:
         resolved_model = model or self.model
-        if resolved_model == "dall-e-3":
-            return "hd"
         if resolved_model.startswith("gpt-image-"):
             return "high"
         return None
 
     def _default_size(self, *, is_collage: bool, model: str | None = None) -> str:
         resolved_model = model or self.model
-        if resolved_model == "dall-e-3":
-            return "1024x1792" if is_collage else "1792x1024"
         if resolved_model.startswith("gpt-image-"):
             return "1024x1536" if is_collage else "1536x1024"
         return "1024x1024"
@@ -302,16 +346,15 @@ class OpenAIImageProvider:
     def _request_image_generation(
         self,
         *,
-        model: str,
         prompt: str,
         size: str,
         quality: str | None,
     ) -> dict:
-        payload = {
-            "model": model,
+        payload: dict[str, object] = {
+            "model": self.model,
             "prompt": prompt,
             "size": size,
-            "response_format": "b64_json",
+            "background": "opaque",
         }
         if quality:
             payload["quality"] = quality
@@ -334,50 +377,46 @@ class OpenAIImageProvider:
                 status_code=response.status_code,
                 message="OpenAI image generation request failed.",
                 detail=detail,
-            )
+        )
         return response.json()
 
-    def generate_image(self, prompt: str, slug: str) -> tuple[bytes, dict]:
-        requested_model = self.model
-        models_to_try = [requested_model]
-        if requested_model.startswith("gpt-image-") and requested_model != "dall-e-3":
-            models_to_try.append("dall-e-3")
-
-        last_error: ProviderRuntimeError | None = None
-        for index, model_name in enumerate(models_to_try):
-            prepared_prompt, size = self._prepare_prompt(prompt, model=model_name)
-            quality = self._default_quality(model_name)
-            try:
-                data = self._request_image_generation(
-                    model=model_name,
-                    prompt=prepared_prompt,
-                    size=size,
-                    quality=quality,
-                )
-            except ProviderRuntimeError as exc:
-                last_error = exc
-                if index < len(models_to_try) - 1:
-                    continue
-                raise
-
-            image_b64 = data["data"][0]["b64_json"]
-            width, height = [int(part) for part in size.split("x", maxsplit=1)]
-            data["width"] = width
-            data["height"] = height
-            if quality:
-                data["quality"] = quality
-            data["requested_model"] = requested_model
-            data["actual_model"] = model_name
-            data["normalized_prompt"] = prepared_prompt
-            data["slug"] = slug
-            if model_name != requested_model:
-                data["fallback_used"] = True
-            return base64.b64decode(image_b64), data
-
-        if last_error:
-            raise last_error
+    def _extract_image_bytes(self, payload: dict) -> tuple[bytes, str | None]:
+        for item in payload.get("data") or []:
+            if not isinstance(item, dict):
+                continue
+            image_b64 = str(item.get("b64_json") or "").strip()
+            if image_b64:
+                return base64.b64decode(image_b64), str(item.get("revised_prompt") or "").strip() or None
         raise ProviderRuntimeError(
             provider="openai_image",
             status_code=502,
-            message="OpenAI image generation failed without a concrete error.",
+            message="OpenAI image payload missing image data.",
+            detail=str(payload.get("data") or payload),
         )
+
+    def generate_image(self, prompt: str, slug: str, *, size_override: str | None = None) -> tuple[bytes, dict]:
+        requested_model = self.model
+        prepared_prompt, size = self._prepare_prompt(prompt, model=requested_model)
+        if str(size_override or "").strip():
+            size = str(size_override).strip()
+        quality = self._default_quality(requested_model)
+        data = self._request_image_generation(
+            prompt=prepared_prompt,
+            size=size,
+            quality=quality,
+        )
+        image_bytes, revised_prompt = self._extract_image_bytes(data)
+        width, height = [int(part) for part in size.split("x", maxsplit=1)]
+        data["width"] = width
+        data["height"] = height
+        if quality:
+            data["quality"] = quality
+        data["requested_model"] = requested_model
+        data["actual_model"] = requested_model
+        data["generation_strategy"] = "images_generation_direct"
+        data["normalized_prompt"] = prepared_prompt
+        data["revised_prompt"] = revised_prompt
+        data["slug"] = slug
+        data["model_policy_overridden"] = self.model_policy_overridden
+        data["requested_model_input"] = self.requested_model_input or requested_model
+        return image_bytes, data

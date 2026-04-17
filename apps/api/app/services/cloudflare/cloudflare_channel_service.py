@@ -21,11 +21,21 @@ from slugify import slugify
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.entities import Blog, GoogleIndexUrlState, SyncedBloggerPost, SyncedCloudflarePost
+from app.models.entities import Blog, GoogleIndexUrlState, ManagedChannel, SyncedBloggerPost, SyncedCloudflarePost
+from app.services.cloudflare.cloudflare_asset_policy import (
+    build_cloudflare_r2_object_key,
+    get_cloudflare_asset_policy,
+)
 from app.services.content.article_pattern_service import (
     apply_pattern_defaults,
     build_article_pattern_prompt_block,
     select_cloudflare_article_pattern,
+)
+from app.services.content.article_three_pass_service import generate_three_step_article
+from app.services.content.image_prompt_policy import (
+    is_valid_collage_prompt,
+    normalize_visual_prompt,
+    should_reuse_article_collage_prompts,
 )
 from app.services.ops.audit_service import add_log
 from app.services.ops.dedupe_utils import (
@@ -38,12 +48,14 @@ from app.services.ops.dedupe_utils import (
 from app.services.content.faq_hygiene import strip_generic_faq_leak_html
 from app.services.ops.openai_usage_service import (
     FREE_TIER_DEFAULT_LARGE_TEXT_MODEL,
+    FREE_TIER_DEFAULT_SMALL_TEXT_MODEL,
     route_openai_free_tier_text_model,
 )
 from app.services.ops.model_policy_service import CODEX_TEXT_RUNTIME_KIND, CODEX_TEXT_RUNTIME_MODEL
 from app.services.providers.factory import get_article_provider, get_image_provider, get_runtime_config, get_topic_provider
 from app.services.content.prompt_service import render_prompt_template
 from app.services.content.publish_trust_gate_service import assess_publish_trust_requirements
+from app.services.integrations.storage_service import upload_binary_to_cloudflare_r2
 from app.services.integrations.settings_service import get_settings_map, upsert_settings
 
 DEFAULT_CATEGORY_SCHEDULE_TIME = "00:00"
@@ -72,6 +84,62 @@ CLOUDFLARE_PROMPT_CATEGORY_PATH_MAP: dict[str, str] = {
     "크립토의-흐름": "시장의 기록/keuribtoyi-heureum",
     "축제와-현장": "정보의 기록/cugjewa-hyeonjang",
     "문화와-공간": "정보의 기록/munhwawa-gonggan",
+}
+CLOUDFLARE_LAYOUT_TEMPLATE_BY_CATEGORY: dict[str, str] = {
+    "여행과-기록": "route-hero-card",
+    "축제와-현장": "event-hero",
+    "문화와-공간": "viewing-order-box",
+    "미스테리아-스토리": "case-summary",
+    "동그리의-생각": "reflection-scene",
+    "삶을-유용하게": "checklist-box",
+    "삶의-기름칠": "eligibility-table",
+    "개발과-프로그래밍": "summary-box",
+    "주식의-흐름": "market-summary",
+    "나스닥의-흐름": "company-brief",
+    "크립토의-흐름": "risk-factor-table",
+    "일상과-메모": "scene-intro",
+}
+CLOUDFLARE_LAYOUT_CLASS_STYLES: dict[str, str] = {
+    "route-hero-card": "display:block;background:#f0fdfa;border-left:4px solid #0f766e;padding:18px 20px;margin:0 0 22px 0;text-align:left;",
+    "step-flow": "display:block;background:#fff;border:1px solid #d1d5db;padding:16px 18px;margin:0 0 18px 0;text-align:left;",
+    "timing-box": "display:block;background:#eff6ff;border:1px solid #bfdbfe;padding:16px 18px;margin:0 0 18px 0;text-align:left;",
+    "timing-table": "display:block;margin:0 0 18px 0;text-align:left;",
+    "local-tip-box": "display:block;background:#fefce8;border-left:4px solid #ca8a04;padding:16px 18px;margin:0 0 18px 0;text-align:left;",
+    "summary-box": "display:block;background:#f8fafc;border-left:4px solid #1d4ed8;padding:18px 20px;margin:0 0 22px 0;text-align:left;",
+    "comparison-matrix": "display:block;background:#fff;border:1px solid #cbd5e1;padding:16px 18px;margin:0 0 18px 0;text-align:left;",
+    "workflow-strip": "display:block;background:#eef2ff;border:1px solid #c7d2fe;padding:16px 18px;margin:0 0 18px 0;text-align:left;",
+    "scene-intro": "display:block;background:#fafaf9;border-left:4px solid #57534e;padding:18px 20px;margin:0 0 22px 0;text-align:left;",
+    "scene-divider": "display:block;border-top:2px solid #d6d3d1;padding-top:16px;margin:22px 0 0 0;text-align:left;",
+    "note-block": "display:block;background:#f5f5f4;border:1px solid #d6d3d1;padding:16px 18px;margin:0 0 18px 0;text-align:left;",
+    "note-aside": "display:block;background:#fafaf9;border-left:4px solid #78716c;padding:14px 16px;margin:0 0 18px 0;text-align:left;",
+    "closing-record": "display:block;margin:12px 0 0 0;padding:14px 16px;text-align:left;background:#f8fafc;border:1px solid #e2e8f0;border-left:4px solid #94a3b8;border-radius:10px;box-shadow:none;",
+    "event-hero": "display:block;background:#fff7ed;border-left:4px solid #ea580c;padding:18px 20px;margin:0 0 22px 0;text-align:left;",
+    "crowd-timing-box": "display:block;background:#fff1f2;border:1px solid #fecdd3;padding:16px 18px;margin:0 0 18px 0;text-align:left;",
+    "food-lodging-table": "display:block;margin:0 0 18px 0;text-align:left;",
+    "field-caution-box": "display:block;background:#fef2f2;border-left:4px solid #dc2626;padding:16px 18px;margin:0 0 18px 0;text-align:left;",
+    "viewing-order-box": "display:block;background:#f5f3ff;border-left:4px solid #7c3aed;padding:18px 20px;margin:0 0 22px 0;text-align:left;",
+    "highlight-table": "display:block;margin:0 0 18px 0;text-align:left;",
+    "curator-note": "display:block;background:#faf5ff;border-left:4px solid #9333ea;padding:16px 18px;margin:0 0 18px 0;text-align:left;",
+    "case-summary": "display:block;background:#f8fafc;border-left:4px solid #334155;padding:18px 20px;margin:0 0 22px 0;text-align:left;",
+    "timeline-board": "display:block;background:#fff;border:1px solid #cbd5e1;padding:16px 18px;margin:0 0 18px 0;text-align:left;",
+    "evidence-table": "display:block;margin:0 0 18px 0;text-align:left;",
+    "interpretation-compare": "display:block;background:#fff;border:1px solid #d1d5db;padding:16px 18px;margin:0 0 18px 0;text-align:left;",
+    "checklist-box": "display:block;background:#ecfeff;border-left:4px solid #0891b2;padding:18px 20px;margin:0 0 22px 0;text-align:left;",
+    "step-box": "display:block;background:#fff;border:1px solid #bae6fd;padding:16px 18px;margin:0 0 18px 0;text-align:left;",
+    "friction-table": "display:block;margin:0 0 18px 0;text-align:left;",
+    "eligibility-table": "display:block;background:#eff6ff;border-left:4px solid #2563eb;padding:18px 20px;margin:0 0 22px 0;text-align:left;",
+    "process-strip": "display:block;background:#fff;border:1px solid #bfdbfe;padding:16px 18px;margin:0 0 18px 0;text-align:left;",
+    "document-checklist": "display:block;background:#f8fafc;border:1px solid #cbd5e1;padding:16px 18px;margin:0 0 18px 0;text-align:left;",
+    "market-summary": "display:block;background:#f8fafc;border-left:4px solid #0f172a;padding:18px 20px;margin:0 0 22px 0;text-align:left;",
+    "factor-table": "display:block;margin:0 0 18px 0;text-align:left;",
+    "viewpoint-compare": "display:block;background:#fff;border:1px solid #d1d5db;padding:16px 18px;margin:0 0 18px 0;text-align:left;",
+    "company-brief": "display:block;background:#f8fafc;border-left:4px solid #111827;padding:18px 20px;margin:0 0 22px 0;text-align:left;",
+    "dialogue-thread": "display:block;background:#fff;border:1px solid #cbd5e1;padding:16px 18px;margin:0 0 18px 0;text-align:left;",
+    "checkpoint-box": "display:block;background:#eef2ff;border-left:4px solid #4f46e5;padding:16px 18px;margin:0 0 18px 0;text-align:left;",
+    "checkpoint-strip": "display:block;background:#f8fafc;border:1px solid #cbd5e1;padding:16px 18px;margin:0 0 18px 0;text-align:left;",
+    "risk-factor-table": "display:block;background:#fff7ed;border-left:4px solid #c2410c;padding:18px 20px;margin:0 0 22px 0;text-align:left;",
+    "reflection-scene": "display:block;background:#fafaf9;border-left:4px solid #57534e;padding:18px 20px;margin:0 0 22px 0;text-align:left;",
+    "thought-block": "display:block;background:#fff;border:1px solid #d6d3d1;padding:16px 18px;margin:0 0 18px 0;text-align:left;",
 }
 _CLOUDFLARE_VISIBLE_TRACE_TOKENS: tuple[str, ...] = (
     "quick brief",
@@ -1508,7 +1576,7 @@ def _build_cloudflare_master_article_prompt(
         f"{build_article_pattern_prompt_block(pattern_selection)}\n"
         "[HTML structure policy]\n"
         "- Allowed tags only: <section>, <article>, <div>, <aside>, <blockquote>, <table>, <thead>, <tbody>, <tr>, <th>, <td>, <details>, <summary>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <span>, <br>, <hr>.\n"
-        "- Allowed class presets only: callout, timeline, card-grid, fact-box, caution-box, quote-box, chat-thread, comparison-table, route-steps, event-checklist, policy-summary.\n"
+        "- Allowed class presets only: callout, timeline, card-grid, fact-box, caution-box, quote-box, chat-thread, comparison-table, route-steps, route-hero-card, step-flow, timing-box, timing-table, local-tip-box, event-checklist, event-hero, crowd-timing-box, food-lodging-table, field-caution-box, policy-summary, summary-box, comparison-matrix, workflow-strip, scene-intro, scene-divider, note-block, note-aside, closing-record, viewing-order-box, highlight-table, curator-note, case-summary, timeline-board, evidence-table, interpretation-compare, checklist-box, step-box, friction-table, eligibility-table, process-strip, document-checklist, market-summary, factor-table, viewpoint-compare, company-brief, dialogue-thread, checkpoint-box, checkpoint-strip, risk-factor-table, reflection-scene, thought-block.\n"
         "- Return article_pattern_id and article_pattern_version in the JSON output.\n"
         f"{_article_output_contract()}"
     )
@@ -1999,10 +2067,78 @@ def _ensure_cloudflare_closing_record(body_html: str, *, category_slug: str, tit
     return f"{cleaned}\n<h2>마무리 기록</h2>\n<p>{closing_paragraph}</p>"
 
 
-def _sanitize_cloudflare_public_body(body_html: str, *, category_slug: str, title: str) -> str:
+def _cloudflare_layout_template(category_slug: str, layout_template: str | None = None) -> str:
+    normalized = str(layout_template or "").strip()
+    if normalized:
+        return normalized
+    return CLOUDFLARE_LAYOUT_TEMPLATE_BY_CATEGORY.get(str(category_slug or "").strip(), "summary-box")
+
+
+def _normalize_cloudflare_style(style_value: str) -> str:
+    parts = [segment.strip() for segment in str(style_value or "").split(";") if segment.strip()]
+    kept: list[str] = []
+    for part in parts:
+        lowered = part.casefold()
+        if lowered.startswith("max-width:"):
+            continue
+        if lowered.startswith("margin:") and "auto" in lowered:
+            continue
+        if lowered.startswith("text-align:") and "center" in lowered:
+            continue
+        if lowered.startswith("box-shadow:"):
+            continue
+        if lowered.startswith("border-radius:"):
+            continue
+        kept.append(part)
+    if not any(part.casefold().startswith("text-align:") for part in kept):
+        kept.append("text-align:left")
+    return ";".join(kept).strip("; ")
+
+
+def _apply_cloudflare_class_styles(body_html: str, *, layout_template: str) -> str:
+    def _replace_tag(match: re.Match[str]) -> str:
+        tag = match.group("tag")
+        before = match.group("before") or ""
+        class_value = match.group("class") or ""
+        after = match.group("after") or ""
+        style_match = re.search(r'(?is)\sstyle=(["\'])(?P<style>.*?)\1', f"{before}{after}")
+        existing_style = style_match.group("style") if style_match else ""
+        styles: list[str] = []
+        for token in class_value.split():
+            style = CLOUDFLARE_LAYOUT_CLASS_STYLES.get(token)
+            if style:
+                styles.append(style)
+        if not styles and layout_template in class_value.split():
+            styles.append(CLOUDFLARE_LAYOUT_CLASS_STYLES.get(layout_template, ""))
+        merged_style = _normalize_cloudflare_style(";".join([existing_style, *styles]))
+        attrs = re.sub(r'(?is)\sstyle=(["\']).*?\1', "", f"{before}{after}")
+        if merged_style:
+            attrs = f'{attrs} style="{merged_style}"'
+        return f"<{tag}{attrs} class=\"{class_value}\">"
+
+    cleaned = re.sub(
+        r'(?is)<(?P<tag>[a-z0-9]+)(?P<before>[^>]*?)\sclass=(["\'])(?P<class>[^"\']+)\3(?P<after>[^>]*)>',
+        _replace_tag,
+        body_html,
+    )
+    cleaned = re.sub(r'(?is)<table\b([^>]*)>', lambda m: f'<table{m.group(1)} style="{_normalize_cloudflare_style("width:100%;border-collapse:collapse;margin:0 0 20px 0;text-align:left;") }">', cleaned)
+    cleaned = re.sub(r'(?is)<blockquote\b([^>]*)>', lambda m: f'<blockquote{m.group(1)} style="{_normalize_cloudflare_style("margin:0 0 20px 0;padding:14px 18px;border-left:4px solid #94a3b8;background:#f8fafc;text-align:left;") }">', cleaned)
+    cleaned = re.sub(r'(?is)<details\b([^>]*)>', lambda m: f'<details{m.group(1)} style="{_normalize_cloudflare_style("margin:0 0 20px 0;padding:12px 14px;border:1px solid #d1d5db;background:#fff;text-align:left;") }">', cleaned)
+    cleaned = cleaned.replace("text-align:center", "text-align:left")
+    cleaned = re.sub(r"max-width:\s*860px\s*;?", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"margin:\s*0\s*auto\s*;?", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"box-shadow\s*:[^;]+;?", "", cleaned, flags=re.IGNORECASE)
+    return cleaned
+
+
+def _sanitize_cloudflare_public_body(body_html: str, *, category_slug: str, title: str, layout_template: str | None = None) -> str:
     cleaned = _strip_cloudflare_visible_trace_blocks(body_html)
     cleaned = strip_generic_faq_leak_html(cleaned)
     cleaned = _ensure_cloudflare_closing_record(cleaned, category_slug=category_slug, title=title)
+    cleaned = _apply_cloudflare_class_styles(
+        cleaned,
+        layout_template=_cloudflare_layout_template(category_slug, layout_template),
+    )
     return cleaned.strip()
 
 
@@ -3149,13 +3285,14 @@ def _article_output_contract() -> str:
         '  "inline_collage_prompt": "string"\n'
         "}\n"
         "- html_article must be valid sanitized HTML-ready article content.\n"
+        "- Use the same live layout pattern as the exemplar post: one left-aligned lead section, 4 to 6 H2 sections, optional H3 subsections, at least one bordered table, one inline FAQ section near the end, and a final closing section.\n"
         "- Keep structure SEO-friendly, readable, and blog-like rather than report-like.\n"
         "- Allowed tags only: <section>, <article>, <div>, <aside>, <blockquote>, <table>, <thead>, <tbody>, <tr>, <th>, <td>, <details>, <summary>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <span>, <br>, <hr>.\n"
-        "- Allowed class presets only: callout, timeline, card-grid, fact-box, caution-box, quote-box, chat-thread, comparison-table, route-steps, event-checklist, policy-summary.\n"
-        "- Do not include inline markdown/HTML images in html_article body.\n"
-        "- The system inserts one inline collage image separately in the middle of the article body.\n"
+        "- Allowed class presets only: callout, timeline, card-grid, fact-box, caution-box, quote-box, chat-thread, comparison-table, route-steps, route-hero-card, step-flow, timing-box, timing-table, local-tip-box, event-checklist, event-hero, crowd-timing-box, food-lodging-table, field-caution-box, policy-summary, summary-box, comparison-matrix, workflow-strip, scene-intro, scene-divider, note-block, note-aside, closing-record, viewing-order-box, highlight-table, curator-note, case-summary, timeline-board, evidence-table, interpretation-compare, checklist-box, step-box, friction-table, eligibility-table, process-strip, document-checklist, market-summary, factor-table, viewpoint-compare, company-brief, dialogue-thread, checkpoint-box, checkpoint-strip, risk-factor-table, reflection-scene, thought-block.\n"
+        "- Do not use a centered wrapper, one giant card container, max-width hero box, or visible source/meta block.\n"
+        "- The final live article must end up with exactly one mid-article inline image. If downstream insertion is used, leave a natural gap after the middle table or section break.\n"
         "- meta_description and excerpt must not appear as visible duplicated summary lines inside html_article.\n"
-        "- faq_section may be [] when the category does not need FAQ, and when used it must be one appendix block at the very end.\n"
+        "- The FAQ should read correctly inline as one H2 section near the end of the article body. faq_section is legacy optional only and must not be the sole source of the public FAQ layout.\n"
         "- series_variant/company_name/ticker/exchange/chart_provider/chart_symbol/chart_interval/slide_sections are optional, but must be included when the planner brief explicitly requests a hybrid stock-series post.\n"
         "- image_collage_prompt must be one final English prompt for one hero 3x3 collage with exactly 9 distinct panels.\n"
         "- The center panel must be visually dominant and the panel borders must remain visible.\n"
@@ -3167,10 +3304,10 @@ def _append_no_inline_image_rule(prompt: str) -> str:
     return (
         f"{prompt}\n\n"
         "[Inline image policy]\n"
-        "- Do not insert markdown images or HTML image tags in body content.\n"
-        "- Never include ![...](...), <img>, <figure>, or collage marker text in article body.\n"
-        "- If the schema includes inline_collage_prompt, use that field for one mid-article supporting collage prompt.\n"
-        "- Keep raw image markup out of html_article because the system injects the inline visual later.\n"
+        "- The final live article must contain exactly one mid-article inline image.\n"
+        "- Keep a natural insertion point after the middle table or after the third H2 section.\n"
+        "- Do not use side-by-side galleries, centered figure wrappers, or caption-heavy image blocks.\n"
+        "- If downstream insertion is used, inline_collage_prompt must still describe one supporting image distinct from the cover.\n"
     )
 
 
@@ -3357,9 +3494,26 @@ def _upload_integration_asset(
     alt_text: str,
     filename: str,
     image_bytes: bytes,
+    object_key: str | None = None,
+    enforce_object_key: bool = False,
 ) -> str:
     normalized_filename = str(Path(filename).with_suffix(".webp"))
     normalized_image_bytes = _normalize_integration_asset_image(image_bytes)
+    if object_key:
+        public_url, upload_payload, _delivery_meta = upload_binary_to_cloudflare_r2(
+            db,
+            object_key=object_key,
+            filename=normalized_filename,
+            content=normalized_image_bytes,
+        )
+        resolved_object_key = str(upload_payload.get("object_key") or "").strip()
+        if enforce_object_key and resolved_object_key != str(object_key).strip():
+            raise ValueError(
+                f"Cloudflare asset upload escaped the canonical object key. expected={object_key} actual={resolved_object_key}"
+            )
+        if not public_url:
+            raise ValueError("Cloudflare asset upload returned no public URL.")
+        return public_url
     response = _integration_request(
         db,
         method="POST",
@@ -3576,16 +3730,24 @@ def _resolve_cloudflare_requested_models(*, settings_map: dict[str, str], runtim
     )
     if str(getattr(runtime, "text_runtime_kind", "") or CODEX_TEXT_RUNTIME_KIND).strip().lower() == CODEX_TEXT_RUNTIME_KIND:
         return (codex_model, codex_model, codex_model)
-    large_stage_model = (
-        (settings_map.get("article_generation_model") or "").strip()
-        or (settings_map.get("topic_discovery_model") or runtime.topic_discovery_model or "").strip()
+
+    topic_stage_model = (
+        (settings_map.get("topic_discovery_model") or runtime.topic_discovery_model or "").strip()
         or (settings_map.get("openai_text_model") or runtime.openai_text_model or "").strip()
         or FREE_TIER_DEFAULT_LARGE_TEXT_MODEL
     )
+    article_stage_model = (
+        (settings_map.get("article_generation_model") or "").strip()
+        or FREE_TIER_DEFAULT_SMALL_TEXT_MODEL
+    )
+    image_prompt_stage_model = (
+        (settings_map.get("image_prompt_generation_model") or "").strip()
+        or FREE_TIER_DEFAULT_SMALL_TEXT_MODEL
+    )
     return (
-        large_stage_model,  # topic discovery
-        large_stage_model,  # article generation
-        large_stage_model,  # image prompt generation
+        topic_stage_model,
+        article_stage_model,
+        image_prompt_stage_model,
     )
 
 
@@ -3653,8 +3815,49 @@ SEO_GEO_CTR_STRUCTURE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
             'class="chat-thread"',
             'class="comparison-table"',
             'class="route-steps"',
+            'class="route-hero-card"',
+            'class="step-flow"',
+            'class="timing-box"',
+            'class="timing-table"',
+            'class="local-tip-box"',
             'class="event-checklist"',
+            'class="event-hero"',
+            'class="crowd-timing-box"',
+            'class="food-lodging-table"',
+            'class="field-caution-box"',
             'class="policy-summary"',
+            'class="summary-box"',
+            'class="comparison-matrix"',
+            'class="workflow-strip"',
+            'class="scene-intro"',
+            'class="scene-divider"',
+            'class="note-block"',
+            'class="note-aside"',
+            'class="note-aside closing-record"',
+            'class="closing-record"',
+            'class="viewing-order-box"',
+            'class="highlight-table"',
+            'class="curator-note"',
+            'class="case-summary"',
+            'class="timeline-board"',
+            'class="evidence-table"',
+            'class="interpretation-compare"',
+            'class="checklist-box"',
+            'class="step-box"',
+            'class="friction-table"',
+            'class="eligibility-table"',
+            'class="process-strip"',
+            'class="document-checklist"',
+            'class="market-summary"',
+            'class="factor-table"',
+            'class="viewpoint-compare"',
+            'class="company-brief"',
+            'class="dialogue-thread"',
+            'class="checkpoint-box"',
+            'class="checkpoint-strip"',
+            'class="risk-factor-table"',
+            'class="reflection-scene"',
+            'class="thought-block"',
             "<table",
             "<blockquote",
             "<details",
@@ -3973,7 +4176,11 @@ def generate_cloudflare_posts(
         }
 
     runtime = get_runtime_config(db)
-    inline_images_enabled = _cloudflare_inline_images_enabled(settings_map)
+    cloudflare_channel = db.execute(
+        select(ManagedChannel).where(ManagedChannel.provider == "cloudflare", ManagedChannel.channel_id == "cloudflare:dongriarchive")
+    ).scalar_one_or_none()
+    cloudflare_asset_policy = get_cloudflare_asset_policy(cloudflare_channel)
+    inline_images_enabled = _cloudflare_inline_images_enabled(settings_map) and not cloudflare_asset_policy.hero_only
     require_cover_image = _cloudflare_require_cover_image(settings_map)
     topic_requested_model, article_requested_model, prompt_requested_model = _resolve_cloudflare_requested_models(
         settings_map=settings_map,
@@ -4439,7 +4646,7 @@ def generate_cloudflare_posts(
                     article_model = _route_cloudflare_text_model(
                         db,
                         requested_model=article_requested_model,
-                        allow_large=True,
+                        allow_large=False,
                         stage_name="article_generation",
                         runtime=runtime,
                         provider_hint=getattr(runtime, "text_runtime_kind", CODEX_TEXT_RUNTIME_KIND),
@@ -4448,9 +4655,13 @@ def generate_cloudflare_posts(
                     db,
                     model_override=article_model,
                     provider_hint=getattr(runtime, "text_runtime_kind", CODEX_TEXT_RUNTIME_KIND),
-                    allow_large=True,
+                    allow_large=False,
                 )
-                article_output, _article_raw = article_provider.generate_article(keyword, article_prompt)
+                article_output, _article_raw = generate_three_step_article(
+                    base_prompt=article_prompt,
+                    language="ko",
+                    generate_pass=lambda pass_prompt: article_provider.generate_article(keyword, pass_prompt),
+                )
                 article_output = apply_pattern_defaults(
                     article_output,
                     select_cloudflare_article_pattern(db, category_slug=category_slug),
@@ -4493,7 +4704,7 @@ def generate_cloudflare_posts(
                         retry_model = _route_cloudflare_text_model(
                             db,
                             requested_model=article_requested_model,
-                            allow_large=True,
+                            allow_large=False,
                             stage_name="article_generation_retry",
                             runtime=runtime,
                             provider_hint=getattr(runtime, "text_runtime_kind", CODEX_TEXT_RUNTIME_KIND),
@@ -4502,9 +4713,13 @@ def generate_cloudflare_posts(
                         db,
                         model_override=retry_model,
                         provider_hint=getattr(runtime, "text_runtime_kind", CODEX_TEXT_RUNTIME_KIND),
-                        allow_large=True,
+                        allow_large=False,
                     )
-                    article_output, _article_raw = retry_provider.generate_article(keyword, retry_prompt)
+                    article_output, _article_raw = generate_three_step_article(
+                        base_prompt=retry_prompt,
+                        language="ko",
+                        generate_pass=lambda pass_prompt: retry_provider.generate_article(keyword, pass_prompt),
+                    )
                     article_output = apply_pattern_defaults(
                         article_output,
                         select_cloudflare_article_pattern(db, category_slug=category_slug),
@@ -4587,31 +4802,61 @@ def generate_cloudflare_posts(
                     )
                     continue
 
-                image_prompt_base = _render_prompt_template(
-                    image_prompt_template,
-                    current_date=current_date,
-                    keyword=keyword,
-                    topic_count=requested_for_category,
-                ) + category_gate + planner_brief_block
-                image_prompt_base = _append_hero_only_visual_rule(image_prompt_base)
-                prompt_model = prompt_requested_model
-                if runtime.provider_mode == "live":
-                    prompt_model = _route_cloudflare_text_model(
-                        db,
-                        requested_model=prompt_requested_model,
-                        allow_large=True,
-                        stage_name="image_prompt_generation",
-                        runtime=runtime,
-                        provider_hint=getattr(runtime, "text_runtime_kind", CODEX_TEXT_RUNTIME_KIND),
-                    )
-                prompt_provider = get_article_provider(
-                    db,
-                    model_override=prompt_model,
-                    provider_hint=getattr(runtime, "text_runtime_kind", CODEX_TEXT_RUNTIME_KIND),
-                    allow_large=True,
+                article_visual_prompt = normalize_visual_prompt(article_output.image_collage_prompt)
+                inline_visual_prompt = normalize_visual_prompt(article_output.inline_collage_prompt)
+                reuse_article_prompts, article_visual_prompt_valid, inline_visual_prompt_valid = should_reuse_article_collage_prompts(
+                    hero_prompt=article_visual_prompt,
+                    inline_prompt=inline_visual_prompt,
+                    inline_required=inline_images_enabled,
                 )
-                visual_prompt, _visual_raw = prompt_provider.generate_visual_prompt(image_prompt_base)
-                visual_prompt = _append_hero_only_visual_rule(visual_prompt)
+                visual_prompt = ""
+                visual_prompt_source = "article_generation_reuse"
+
+                if reuse_article_prompts:
+                    visual_prompt = _append_hero_only_visual_rule(article_visual_prompt)
+                else:
+                    image_prompt_base = _render_prompt_template(
+                        image_prompt_template,
+                        current_date=current_date,
+                        keyword=keyword,
+                        topic_count=requested_for_category,
+                    ) + category_gate + planner_brief_block
+                    image_prompt_base = _append_hero_only_visual_rule(image_prompt_base)
+                    prompt_model = prompt_requested_model
+                    if runtime.provider_mode == "live":
+                        prompt_model = _route_cloudflare_text_model(
+                            db,
+                            requested_model=prompt_requested_model,
+                            allow_large=False,
+                            stage_name="image_prompt_generation",
+                            runtime=runtime,
+                            provider_hint=getattr(runtime, "text_runtime_kind", CODEX_TEXT_RUNTIME_KIND),
+                        )
+                    prompt_provider = get_article_provider(
+                        db,
+                        model_override=prompt_model,
+                        provider_hint=getattr(runtime, "text_runtime_kind", CODEX_TEXT_RUNTIME_KIND),
+                        allow_large=False,
+                    )
+                    generated_visual_prompt, _visual_raw = prompt_provider.generate_visual_prompt(image_prompt_base)
+                    generated_visual_prompt = normalize_visual_prompt(generated_visual_prompt)
+                    if is_valid_collage_prompt(generated_visual_prompt):
+                        visual_prompt = _append_hero_only_visual_rule(generated_visual_prompt)
+                        visual_prompt_source = "image_prompt_generation_fallback"
+                    else:
+                        visual_prompt_source = "image_prompt_generation_validation_failed"
+                        add_log(
+                            db,
+                            job=None,
+                            stage="cloudflare:image_prompt_generation",
+                            message="Cloudflare image prompt fallback returned an invalid collage prompt.",
+                            payload={
+                                "keyword": keyword,
+                                "category_slug": category_slug,
+                                "article_prompt_valid": article_visual_prompt_valid,
+                                "inline_prompt_valid": inline_visual_prompt_valid,
+                            },
+                        )
 
                 title = _ensure_unique_title(article_output.title, all_titles)
                 slug_seed = str(article_output.slug or title).strip()
@@ -4626,19 +4871,24 @@ def generate_cloudflare_posts(
                     slug_candidate = f"{original_slug}-{serial}"
                     serial += 1
 
+                cover_object_key = build_cloudflare_r2_object_key(
+                    policy=cloudflare_asset_policy,
+                    category_slug=category_slug,
+                    post_slug=slug_candidate,
+                    published_at=datetime.now(timezone.utc),
+                )
                 cover_alt = (article_output.meta_description or title).strip()[:180]
                 cover_image_url = ""
                 image_warning = ""
                 image_bytes: bytes | None = None
                 cover_hash = ""
-                try:
-                    image_bytes, _image_raw = image_provider.generate_image(visual_prompt, slug_candidate)
-                except Exception as primary_image_exc:
-                    fallback_visual_prompt = _safe_fallback_image_prompt(category_name, keyword)
+                if visual_prompt:
                     try:
-                        image_bytes, _image_raw = image_provider.generate_image(fallback_visual_prompt, slug_candidate)
-                    except Exception as fallback_image_exc:
-                        image_warning = f"image_generation_failed: {primary_image_exc}; fallback_failed: {fallback_image_exc}"
+                        image_bytes, _image_raw = image_provider.generate_image(visual_prompt, slug_candidate)
+                    except Exception as primary_image_exc:
+                        image_warning = f"image_generation_failed: {primary_image_exc}"
+                else:
+                    image_warning = f"image_skipped: visual_prompt_validation_failed ({visual_prompt_source})"
                 cover_hash = _hash_image_bytes(image_bytes)
                 if image_bytes:
                     try:
@@ -4648,6 +4898,8 @@ def generate_cloudflare_posts(
                             alt_text=cover_alt,
                             filename=f"{slug_candidate}.webp",
                             image_bytes=image_bytes,
+                            object_key=cover_object_key,
+                            enforce_object_key=True,
                         )
                     except Exception as asset_exc:  # noqa: BLE001
                         image_warning = f"cover_upload_failed: {asset_exc}"
@@ -4700,8 +4952,8 @@ def generate_cloudflare_posts(
                         title=title,
                     )
                 )
-                inline_prompt = str(getattr(article_output, "inline_collage_prompt", "") or "").strip()
-                if inline_images_enabled and inline_prompt:
+                inline_prompt = normalize_visual_prompt(getattr(article_output, "inline_collage_prompt", "") or "")
+                if inline_images_enabled and is_valid_collage_prompt(inline_prompt, minimum_length=30):
                     try:
                         inline_bytes, _inline_raw = image_provider.generate_image(inline_prompt, f"{slug_candidate}-inline-3x2")
                         if cover_image_url and _is_inline_duplicate(cover_hash, inline_bytes):
@@ -4726,6 +4978,12 @@ def generate_cloudflare_posts(
                             for value in (image_warning, f"inline_collage_failed:{inline_exc}")
                             if value
                         )
+                elif inline_images_enabled and inline_prompt:
+                    image_warning = "; ".join(
+                        value
+                        for value in (image_warning, "inline_collage_skipped:validation_failed")
+                        if value
+                    )
 
                 tag_names: list[str] = []
                 seen_tag_keys: set[str] = set()

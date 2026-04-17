@@ -110,10 +110,16 @@ def merge_response(db: Session, job: Job, key: str, value: object) -> None:
 
 
 def record_failure(db: Session, job: Job, exc: Exception) -> Job:
+    detail = getattr(exc, "detail", None)
+    if detail is None:
+        detail = str(exc)
     errors = list(job.error_logs or [])
     errors.append(
         {
             "message": str(exc),
+            "detail": detail,
+            "provider": getattr(exc, "provider", None),
+            "status_code": getattr(exc, "status_code", None),
             "attempt": job.attempt_count,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
@@ -124,7 +130,18 @@ def record_failure(db: Session, job: Job, exc: Exception) -> Job:
     db.add(job)
     db.commit()
     db.refresh(job)
-    add_log(db, job=job, stage=JobStatus.FAILED.value, message=str(exc), level=LogLevel.ERROR)
+    add_log(
+        db,
+        job=job,
+        stage=JobStatus.FAILED.value,
+        message=str(exc),
+        level=LogLevel.ERROR,
+        payload={
+            "provider": getattr(exc, "provider", None),
+            "status_code": getattr(exc, "status_code", None),
+            "detail": detail,
+        },
+    )
     return job
 
 

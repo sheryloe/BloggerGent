@@ -1,0 +1,46 @@
+from app.services.content.image_prompt_policy import is_valid_collage_prompt, should_reuse_article_collage_prompts
+
+
+def test_valid_collage_prompt_accepts_realistic_article_output_prompt() -> None:
+    prompt = (
+        "Realistic editorial 3x3 collage with nine distinct travel panels, visible white gutters, "
+        "a dominant center panel, natural light, no text, and no logo."
+    )
+
+    assert is_valid_collage_prompt(prompt) is True
+
+
+def test_valid_collage_prompt_rejects_jsonish_payload() -> None:
+    prompt = '{"image_collage_prompt": "travel collage"}'
+
+    assert is_valid_collage_prompt(prompt) is False
+
+
+def test_should_reuse_article_collage_prompts_requires_both_prompts_when_inline_is_enabled() -> None:
+    reuse, hero_valid, inline_valid = should_reuse_article_collage_prompts(
+        hero_prompt=(
+            "Realistic editorial 3x3 collage with nine distinct market panels, visible white gutters, "
+            "dominant center panel, no text, no logo."
+        ),
+        inline_prompt="too short",
+        inline_required=True,
+    )
+
+    assert reuse is False
+    assert hero_valid is True
+    assert inline_valid is False
+
+
+def test_should_reuse_article_collage_prompts_skips_inline_requirement_when_disabled() -> None:
+    reuse, hero_valid, inline_valid = should_reuse_article_collage_prompts(
+        hero_prompt=(
+            "Documentary-style 3x3 collage with nine distinct mystery panels, white gutters, "
+            "dominant center panel, no text, no logo, no gore."
+        ),
+        inline_prompt="",
+        inline_required=False,
+    )
+
+    assert reuse is True
+    assert hero_valid is True
+    assert inline_valid is True

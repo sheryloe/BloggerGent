@@ -7,6 +7,14 @@ __pycache__/
 .venv-api/
 .env
 .env.local
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+secret/
 storage/images/*
 storage/html/*
 !storage/images/.gitkeep
@@ -31,6 +39,7 @@ plugins/
 
 # generated docs article image exports
 docs/assets/images/
+docs/reports/
 
 # local storage snapshots
 storage/reports/
@@ -59,9 +68,15 @@ storage/playwright-browser/
 apps/api/storage/reports/
 apps/api/storage/html/*
 apps/api/storage/reports/*
+apps/storage/
 
 # refactoring workspace artifacts
+refactoring/
 refactoring/reports/
 refactoring/tmp/
 refactoring/output/
 refactoring/codex_write/packages/
+
+# generated codex workspaces
+/codex_write/
+/apps/api/codex_write/

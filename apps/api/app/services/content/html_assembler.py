@@ -38,15 +38,17 @@ def _inject_inline_style(html: str, tag: str, style: str) -> str:
 def _theme_config(category: str) -> dict[str, str]:
     if category == "mystery":
         return {
-            "accent": "#0f172a",
-            "article_background": "#ffffff",
-            "article_border": "#e2e8f0",
-            "article_shadow": "0 20px 60px rgba(15,23,42,0.08)",
-            "heading": "#0f172a",
-            "body": "#1e293b",
-            "muted": "#475569",
-            "faq_background": "#f8fafc",
-            "faq_border": "#e2e8f0",
+            "accent": "#93c5fd",
+            "article_background": "#0b1220",
+            "article_border": "#243247",
+            "article_shadow": "0 24px 72px rgba(2,6,23,0.55)",
+            "heading": "#f3f7ff",
+            "body": "#d5deec",
+            "muted": "#9fb0c9",
+            "faq_background": "#111c2f",
+            "faq_border": "#2a3a52",
+            "table_background": "#111a2a",
+            "table_header_background": "#18243a",
         }
     return {
         "accent": "#0f766e",
@@ -58,6 +60,8 @@ def _theme_config(category: str) -> dict[str, str]:
         "muted": "#475569",
         "faq_background": "#f8fafc",
         "faq_border": "#e2e8f0",
+        "table_background": "#ffffff",
+        "table_header_background": "#f8fafc",
     }
 
 
@@ -132,7 +136,17 @@ def _normalize_english_mystery_faq_section(faq_section: list[dict]) -> list[dict
     return normalized + defaults[: max(0, 2 - len(normalized))]
 
 
-def _style_article_body(html: str, *, accent: str, heading: str, body: str, border: str) -> str:
+def _style_article_body(
+    html: str,
+    *,
+    accent: str,
+    heading: str,
+    body: str,
+    border: str,
+    table_background: str,
+    table_header_background: str,
+    details_background: str,
+) -> str:
     styled = html
     styled = _inject_inline_style(
         styled,
@@ -172,12 +186,12 @@ def _style_article_body(html: str, *, accent: str, heading: str, body: str, bord
     styled = _inject_inline_style(
         styled,
         "table",
-        f"width:100%;border-collapse:collapse;margin:0 0 24px;background:#ffffff;border:1px solid {border};",
+        f"width:100%;border-collapse:collapse;margin:0 0 24px;background:{table_background};border:1px solid {border};",
     )
     styled = _inject_inline_style(
         styled,
         "th",
-        f"border:1px solid {border};padding:12px 14px;background:#f8fafc;color:{heading};text-align:left;font-size:15px;",
+        f"border:1px solid {border};padding:12px 14px;background:{table_header_background};color:{heading};text-align:left;font-size:15px;",
     )
     styled = _inject_inline_style(
         styled,
@@ -187,7 +201,7 @@ def _style_article_body(html: str, *, accent: str, heading: str, body: str, bord
     styled = _inject_inline_style(
         styled,
         "details",
-        f"margin:0 0 12px;border:1px solid {border};border-radius:18px;background:#ffffff;padding:0;",
+        f"margin:0 0 12px;border:1px solid {border};border-radius:18px;background:{details_background};padding:0;",
     )
     styled = _inject_inline_style(
         styled,
@@ -388,6 +402,9 @@ def assemble_article_html(
         heading=theme["heading"],
         body=theme["body"],
         border=theme["faq_border"],
+        table_background=theme["table_background"],
+        table_header_background=theme["table_header_background"],
+        details_background=theme["faq_background"],
     )
     if category == "travel":
         travel_inline_media = _resolve_inline_collage_media(article, slot_name="travel-inline-3x2")
@@ -441,16 +458,24 @@ def assemble_article_html(
             'loading="eager" decoding="async" style="width:100%;border-radius:28px;display:block;object-fit:cover;" />'
             "</figure>"
         )
+    article_padding = (
+        "padding:24px 24px 44px;"
+        f"border:1px solid {theme['article_border']};"
+        f"border-radius:24px;background:{theme['article_background']};"
+        f"box-shadow:{theme['article_shadow']};"
+    )
+    header_border = f"border-bottom:1px solid {theme['article_border']};padding-bottom:20px;"
+    content_spacing = "margin-top:28px;"
     return f"""
-<article data-bloggent-meta-description="{escaped_lead_summary}" style="max-width:860px;margin:0 auto;padding:32px 22px 48px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:{theme['heading']};background:{theme['article_background']};border:1px solid {theme['article_border']};border-radius:{'0px' if category == 'mystery' else '32px'};box-shadow:{theme['article_shadow']};">
-  <header style="margin-bottom:28px;display:flex;flex-direction:column;">
+<article data-bloggent-meta-description="{escaped_lead_summary}" style="{article_padding}font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:{theme['heading']};text-align:left;">
+  <header style="margin-bottom:28px;display:flex;flex-direction:column;align-items:flex-start;{header_border}">
     <p style="order:3;font-size:18px;line-height:1.8;color:{theme['muted']};margin:0;">{lead_summary}</p>
     <p style="order:1;font-size:12px;letter-spacing:0.18em;text-transform:uppercase;color:{theme['accent']};font-weight:700;margin:0 0 10px;">{eyebrow}</p>
     <h1 style="order:2;font-size:40px;line-height:1.12;margin:0 0 14px;color:{theme['heading']};">{article_title}</h1>
   </header>
   <div id="bloggent-seo-meta" data-bloggent-meta-source="body" style="display:none!important;visibility:hidden!important;max-height:0;overflow:hidden;">{hidden_lead_summary}</div>
   {hero_figure_html}
-  <section style="font-size:17px;line-height:1.9;color:{theme['body']};">{article_html}</section>
+  <section style="{content_spacing}font-size:17px;line-height:1.9;color:{theme['body']};text-align:left;">{article_html}</section>
   {faq_html}
   {LANGUAGE_SWITCH_START_MARKER}
   {language_switch_block}

@@ -8,8 +8,14 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.schemas.api import ManagedChannelRead, PromptFlowRead, PromptFlowReorderRequest, PromptFlowStepUpdate, WorkflowStepCreate
 from app.services.platform.blog_service import create_workflow_step, delete_workflow_step, get_blog, get_blog_summary_map, list_blogs, reorder_workflow_steps, update_blog_agent
+from app.services.content.travel_blog_policy import (
+    get_travel_blog_policy,
+    normalize_travel_text_generation_route,
+    travel_text_generation_route_setting_key,
+)
 from app.services.content.channel_prompt_service import build_prompt_flow, save_platform_prompt_step
 from app.services.cloudflare.cloudflare_channel_service import save_cloudflare_prompt
+from app.services.integrations.settings_service import upsert_settings
 from app.services.platform.workspace_service import list_managed_channels, serialize_managed_channel
 
 router = APIRouter(prefix="/channels", tags=["channels"])
@@ -111,6 +117,16 @@ def update_channel_prompt_flow_step(
             step = next((item for item in blog.agent_configs if item.id == int(step_id)), None)
             if not step:
                 raise HTTPException(status_code=404, detail="Workflow step not found")
+            travel_policy = get_travel_blog_policy(blog=blog)
+            if travel_policy is not None and payload.text_generation_route is not None:
+                upsert_settings(
+                    db,
+                    {
+                        travel_text_generation_route_setting_key(travel_policy.blog_id): normalize_travel_text_generation_route(
+                            payload.text_generation_route
+                        )
+                    },
+                )
             update_blog_agent(
                 db,
                 step,

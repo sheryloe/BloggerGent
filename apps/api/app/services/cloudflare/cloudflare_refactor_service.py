@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.models.entities import SyncedCloudflarePost
 from app.services.content.article_pattern_service import apply_pattern_defaults, select_cloudflare_article_pattern
+from app.services.content.article_three_pass_service import generate_three_step_article
 from app.services.cloudflare.cloudflare_channel_service import (
     CODEX_TEXT_RUNTIME_KIND,
     CODEX_TEXT_RUNTIME_MODEL,
@@ -258,7 +259,11 @@ def _generate_cloudflare_refactor_draft(
     refactor_thresholds = dict(candidate.get("refactor_thresholds") or {})
 
     provider = _get_cloudflare_refactor_provider(runtime=runtime, model=article_model)
-    article_output, _article_raw = provider.generate_article(existing_title, article_prompt)
+    article_output, _article_raw = generate_three_step_article(
+        base_prompt=article_prompt,
+        language="ko",
+        generate_pass=lambda pass_prompt: provider.generate_article(existing_title, pass_prompt),
+    )
     article_output = apply_pattern_defaults(article_output, pattern_selection)
     article_output.html_article = _sanitize_cloudflare_public_body(
         article_output.html_article,
@@ -293,7 +298,11 @@ def _generate_cloudflare_refactor_draft(
             + "- Do not mention internal scores or quality gates in the visible article.\n"
         )
         retry_provider = _get_cloudflare_refactor_provider(runtime=runtime, model=retry_model)
-        article_output, _article_raw = retry_provider.generate_article(existing_title, retry_prompt)
+        article_output, _article_raw = generate_three_step_article(
+            base_prompt=retry_prompt,
+            language="ko",
+            generate_pass=lambda pass_prompt: retry_provider.generate_article(existing_title, pass_prompt),
+        )
         article_output = apply_pattern_defaults(article_output, pattern_selection)
         article_output.html_article = _sanitize_cloudflare_public_body(
             article_output.html_article,
@@ -952,4 +961,3 @@ def refactor_cloudflare_low_score_posts(
         "summary_after": summary_after,
         "items": items,
     }
-

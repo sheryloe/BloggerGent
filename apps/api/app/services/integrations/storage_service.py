@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import io
 import mimetypes
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +17,12 @@ from PIL import Image
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.services.content.travel_blog_policy import (
+    build_travel_local_backup_relative_dir,
+    build_travel_local_publish_relative_dir,
+    is_valid_travel_canonical_object_key,
+    parse_travel_canonical_object_key,
+)
 from app.services.providers.base import ProviderRuntimeError
 from app.services.integrations.settings_service import get_settings_map
 
@@ -46,6 +53,17 @@ CLOUDFLARE_THUMB_OPTIONS: tuple[tuple[str, str], ...] = (
     ("quality", "70"),
 )
 TRUTHY_VALUES = {"1", "true", "yes", "on", "enabled"}
+MYSTERY_R2_KEY_PREFIX = "assets/the-midnight-archives/"
+MYSTERY_MAIN_SLUG_WEBP_RE = re.compile(
+    r"^assets/the-midnight-archives/[a-z0-9-]+/\d{4}/\d{2}/([a-z0-9-]+)/([a-z0-9-]+)\.webp$",
+    re.IGNORECASE,
+)
+FORBIDDEN_R2_TOKENS = (
+    "assets/assets/",
+    "media/posts",
+    "media/blogger",
+    "assets/media/google-blogger/",
+)
 
 
 def ensure_storage_dirs() -> None:
@@ -99,6 +117,86 @@ def _is_enabled_setting(raw_value: object, *, default: bool = False) -> bool:
     if not normalized:
         return default
     return normalized in TRUTHY_VALUES
+
+
+def _is_mystery_object_key(object_key: str | None) -> bool:
+    normalized = str(object_key or "").strip().lstrip("/")
+    return normalized.lower().startswith(MYSTERY_R2_KEY_PREFIX)
+
+
+def _is_valid_mystery_slug_webp_key(object_key: str) -> bool:
+    normalized = str(object_key or "").strip().lstrip("/")
+    match = MYSTERY_MAIN_SLUG_WEBP_RE.fullmatch(normalized)
+    if match is None:
+        return False
+    return match.group(1).strip().lower() == match.group(2).strip().lower()
+
+
+def _enforce_strict_storage_root(*, destination_path: str, values: dict[str, str], mystery_only: bool) -> None:
+    if not _is_enabled_setting(values.get("strict_storage_root"), default=True):
+        return
+    if not mystery_only:
+        return
+    expected_root = str(values.get("mystery_storage_root_windows") or r"D:\Donggri_Runtime\BloggerGent\storage").strip()
+    normalized_expected = expected_root.replace("\\", "/").rstrip("/").lower()
+    normalized_destination = str(destination_path or "").replace("\\", "/").rstrip("/").lower()
+    if not normalized_destination.startswith(normalized_expected):
+        raise ProviderRuntimeError(
+            provider="storage",
+            status_code=422,
+            message="Strict storage root violation for mystery image.",
+            detail=f"expected_root={expected_root}, actual_path={destination_path}",
+        )
+
+
+def _enforce_strict_r2_schema(*, object_key: str, values: dict[str, str], mystery_only: bool) -> None:
+    if not _is_enabled_setting(values.get("strict_r2_key_schema"), default=True):
+        return
+    normalized = str(object_key or "").strip().lstrip("/")
+    lowered = normalized.lower()
+    travel_key = parse_travel_canonical_object_key(normalized)
+    if not lowered:
+        raise ProviderRuntimeError(
+            provider="cloudflare_r2",
+            status_code=422,
+            message="Strict R2 key schema violation.",
+            detail="Object key is empty.",
+        )
+    if mystery_only and not lowered.startswith(MYSTERY_R2_KEY_PREFIX):
+        raise ProviderRuntimeError(
+            provider="cloudflare_r2",
+            status_code=422,
+            message="Strict R2 key schema violation for mystery image.",
+            detail=f"object_key={object_key}",
+        )
+    if mystery_only and not _is_valid_mystery_slug_webp_key(normalized):
+        raise ProviderRuntimeError(
+            provider="cloudflare_r2",
+            status_code=422,
+            message="Mystery R2 key must follow slug.webp contract.",
+            detail=f"object_key={object_key}; expected=assets/the-midnight-archives/<category>/YYYY/MM/<slug>/<slug>.webp",
+        )
+    if travel_key is not None and not is_valid_travel_canonical_object_key(normalized):
+        raise ProviderRuntimeError(
+            provider="cloudflare_r2",
+            status_code=422,
+            message="Strict R2 key schema violation for travel image.",
+            detail=f"object_key={object_key}",
+        )
+    if any(token in lowered for token in FORBIDDEN_R2_TOKENS):
+        raise ProviderRuntimeError(
+            provider="cloudflare_r2",
+            status_code=422,
+            message="Forbidden token detected in R2 object key.",
+            detail=f"object_key={object_key}",
+        )
+    if not lowered.endswith(".webp"):
+        raise ProviderRuntimeError(
+            provider="cloudflare_r2",
+            status_code=422,
+            message="Strict R2 key schema requires .webp extension.",
+            detail=f"object_key={object_key}",
+        )
 
 
 def _is_cloudflare_transform_enabled(values: Mapping[str, str]) -> bool:
@@ -477,9 +575,30 @@ def delete_cloudinary_asset(
         )
 
 
-def _resolve_cloudflare_r2_configuration(values: dict[str, str]) -> tuple[str, str, str, str, str, str]:
-    configured_public_base_url = _normalize_base_url((values.get("cloudflare_r2_public_base_url") or "").strip())
+def _resolve_cloudflare_r2_configuration(
+    values: dict[str, str],
+    *,
+    object_key: str | None = None,
+) -> tuple[str, str, str, str, str, str]:
+    normalized_object_key = str(object_key or "").strip().lstrip("/")
+    mystery_object = _is_mystery_object_key(normalized_object_key)
+
     integration_base_url, _ = _resolve_cloudflare_integration_upload_configuration(values)
+    if mystery_object:
+        configured_public_base_url = _normalize_base_url((values.get("mystery_cloudflare_r2_public_base_url") or "").strip())
+        resolved_public_base_url = configured_public_base_url
+        if not resolved_public_base_url and integration_base_url:
+            resolved_public_base_url = _join_public_url(integration_base_url, "/assets")
+        return (
+            (values.get("mystery_cloudflare_account_id") or "").strip(),
+            (values.get("mystery_cloudflare_r2_bucket") or "").strip(),
+            (values.get("mystery_cloudflare_r2_access_key_id") or "").strip(),
+            (values.get("mystery_cloudflare_r2_secret_access_key") or "").strip(),
+            resolved_public_base_url,
+            (values.get("mystery_cloudflare_r2_prefix") or MYSTERY_R2_KEY_PREFIX.rstrip("/")).strip().strip("/"),
+        )
+
+    configured_public_base_url = _normalize_base_url((values.get("cloudflare_r2_public_base_url") or "").strip())
     resolved_public_base_url = configured_public_base_url
     if not resolved_public_base_url and integration_base_url:
         resolved_public_base_url = _join_public_url(integration_base_url, "/assets")
@@ -489,7 +608,7 @@ def _resolve_cloudflare_r2_configuration(values: dict[str, str]) -> tuple[str, s
         (values.get("cloudflare_r2_access_key_id") or "").strip(),
         (values.get("cloudflare_r2_secret_access_key") or "").strip(),
         resolved_public_base_url,
-        (values.get("cloudflare_r2_prefix") or "assets/images").strip().strip("/"),
+        (values.get("cloudflare_r2_prefix") or "assets").strip().strip("/"),
     )
 
 
@@ -569,12 +688,14 @@ def cloudflare_r2_object_exists(
     key: str,
 ) -> bool:
     values = get_settings_map(db)
-    account_id, bucket, access_key_id, secret_access_key, _, _ = _resolve_cloudflare_r2_configuration(values)
-    if not account_id or not bucket or not access_key_id or not secret_access_key:
-        return False
-
     object_key = _normalize_cloudflare_object_key(public_key=public_key, key=key)
     if not object_key:
+        return False
+    account_id, bucket, access_key_id, secret_access_key, _, _ = _resolve_cloudflare_r2_configuration(
+        values,
+        object_key=object_key,
+    )
+    if not account_id or not bucket or not access_key_id or not secret_access_key:
         return False
 
     headers = _build_r2_authorization_headers(
@@ -610,12 +731,14 @@ def cloudflare_r2_object_size(
     key: str,
 ) -> int | None:
     values = get_settings_map(db)
-    account_id, bucket, access_key_id, secret_access_key, _, _ = _resolve_cloudflare_r2_configuration(values)
-    if not account_id or not bucket or not access_key_id or not secret_access_key:
-        return None
-
     object_key = _normalize_cloudflare_object_key(public_key=public_key, key=key)
     if not object_key:
+        return None
+    account_id, bucket, access_key_id, secret_access_key, _, _ = _resolve_cloudflare_r2_configuration(
+        values,
+        object_key=object_key,
+    )
+    if not account_id or not bucket or not access_key_id or not secret_access_key:
         return None
 
     headers = _build_r2_authorization_headers(
@@ -655,15 +778,6 @@ def cloudflare_r2_download_binary(
     key: str,
 ) -> bytes:
     values = get_settings_map(db)
-    account_id, bucket, access_key_id, secret_access_key, _, _ = _resolve_cloudflare_r2_configuration(values)
-    if not account_id or not bucket or not access_key_id or not secret_access_key:
-        raise ProviderRuntimeError(
-            provider="cloudflare_r2",
-            status_code=422,
-            message="Cloudflare R2 download requested without credentials.",
-            detail="Set cloudflare_account_id, cloudflare_r2_bucket, cloudflare_r2_access_key_id, and cloudflare_r2_secret_access_key.",
-        )
-
     object_key = _normalize_cloudflare_object_key(public_key=public_key, key=key)
     if not object_key:
         raise ProviderRuntimeError(
@@ -671,6 +785,17 @@ def cloudflare_r2_download_binary(
             status_code=422,
             message="Cloudflare R2 object key is missing.",
             detail="Pass a valid R2 object key.",
+        )
+    account_id, bucket, access_key_id, secret_access_key, _, _ = _resolve_cloudflare_r2_configuration(
+        values,
+        object_key=object_key,
+    )
+    if not account_id or not bucket or not access_key_id or not secret_access_key:
+        raise ProviderRuntimeError(
+            provider="cloudflare_r2",
+            status_code=422,
+            message="Cloudflare R2 download requested without credentials.",
+            detail="Set mystery or default R2 credentials for the requested object key.",
         )
 
     headers = _build_r2_authorization_headers(
@@ -935,13 +1060,49 @@ def _upload_to_cloudflare_r2(
     filename: str,
     content: bytes,
 ) -> tuple[str, dict]:
-    account_id, bucket, access_key_id, secret_access_key, public_base_url, prefix = _resolve_cloudflare_r2_configuration(values)
+    normalized_requested_key = str(object_key or "").strip().lstrip("/")
+    account_id, bucket, access_key_id, secret_access_key, public_base_url, prefix = _resolve_cloudflare_r2_configuration(
+        values,
+        object_key=normalized_requested_key,
+    )
     integration_base_url, integration_token = _resolve_cloudflare_integration_upload_configuration(values)
     object_key = (
-        _normalize_cloudflare_object_key(public_key=prefix, key=object_key)
-        if object_key
+        _normalize_cloudflare_object_key(public_key=prefix, key=normalized_requested_key)
+        if normalized_requested_key
         else _cloudflare_r2_object_key(filename=filename, prefix=prefix)
     )
+    mystery_object = _is_mystery_object_key(object_key)
+    mystery_bucket = (values.get("mystery_cloudflare_r2_bucket") or "").strip()
+    if mystery_object:
+        if mystery_bucket and bucket and bucket != mystery_bucket:
+            raise ProviderRuntimeError(
+                provider="cloudflare_r2",
+                status_code=422,
+                message="Mystery object key must use mystery-only R2 bucket.",
+                detail=f"object_key={object_key}; resolved_bucket={bucket}; expected_bucket={mystery_bucket}",
+            )
+        if not account_id or not bucket or not access_key_id or not secret_access_key:
+            raise ProviderRuntimeError(
+                provider="cloudflare_r2",
+                status_code=422,
+                message="Mystery R2 upload requested without mystery credentials.",
+                detail="Set mystery_cloudflare_account_id, mystery_cloudflare_r2_bucket, mystery_cloudflare_r2_access_key_id, and mystery_cloudflare_r2_secret_access_key.",
+            )
+        if not public_base_url:
+            raise ProviderRuntimeError(
+                provider="cloudflare_r2",
+                status_code=422,
+                message="Mystery R2 public base URL is missing.",
+                detail="Set mystery_cloudflare_r2_public_base_url to the MysteryArchive public domain.",
+            )
+    elif mystery_bucket and bucket and bucket == mystery_bucket:
+        raise ProviderRuntimeError(
+            provider="cloudflare_r2",
+            status_code=422,
+            message="Non-mystery object key cannot access mystery-only R2 bucket.",
+            detail=f"object_key={object_key}; mystery_bucket={mystery_bucket}",
+        )
+
     ext = Path(filename).suffix.lower()
     content_type = mimetypes.guess_type(filename)[0] or {
         ".webp": "image/webp",
@@ -997,7 +1158,7 @@ def _upload_to_cloudflare_r2(
                 message="Cloudflare R2 upload failed.",
                 detail=response.text,
             )
-            if not integration_base_url or not integration_token or response.status_code not in {401, 403}:
+            if mystery_object or not integration_base_url or not integration_token or response.status_code not in {401, 403}:
                 raise direct_upload_error
 
     if not integration_base_url or not integration_token:
@@ -1117,7 +1278,7 @@ def upload_binary_to_cloudflare_r2(
 ) -> tuple[str, dict, dict]:
     values = get_settings_map(db)
     transform_enabled = _is_cloudflare_transform_enabled(values)
-    _, bucket, _, _, public_base_url, _ = _resolve_cloudflare_r2_configuration(values)
+    _, bucket, _, _, public_base_url, _ = _resolve_cloudflare_r2_configuration(values, object_key=object_key)
     _, upload_payload = _upload_to_cloudflare_r2(
         values=values,
         object_key=object_key,
@@ -1150,7 +1311,10 @@ def delete_cloudflare_r2_asset(
         return
 
     values = get_settings_map(db)
-    account_id, bucket, access_key_id, secret_access_key, _, _ = _resolve_cloudflare_r2_configuration(values)
+    account_id, bucket, access_key_id, secret_access_key, _, _ = _resolve_cloudflare_r2_configuration(
+        values,
+        object_key=object_key,
+    )
     if not account_id or not bucket or not access_key_id or not secret_access_key:
         return
 
@@ -1456,6 +1620,23 @@ def save_binary(
     return str(destination), public_url
 
 
+def _save_binary_with_root(
+    *,
+    storage_root: str,
+    subdir: str,
+    filename: str,
+    content: bytes,
+    public_base_url: str | None = None,
+) -> tuple[str, str]:
+    base_root = Path(str(storage_root or settings.storage_root))
+    relative = Path(subdir) / filename
+    destination = base_root / relative
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(content)
+    public_url = build_storage_public_url(relative, public_base_url)
+    return str(destination), public_url
+
+
 def _base_delivery_metadata(*, provider: str, local_public_url: str) -> dict:
     return {
         "provider": provider,
@@ -1484,6 +1665,17 @@ def _normalize_binary_for_filename(*, content: bytes, filename: str, force_webp:
         return content
 
 
+def _convert_binary_to_png(content: bytes) -> bytes:
+    try:
+        with Image.open(io.BytesIO(content)) as loaded:
+            output = io.BytesIO()
+            converted = loaded.convert("RGBA") if loaded.mode not in {"RGB", "RGBA"} else loaded
+            converted.save(output, format="PNG")
+            return output.getvalue()
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError("Failed to convert image to PNG.") from exc
+
+
 def save_public_binary(
     db: Session,
     *,
@@ -1495,24 +1687,61 @@ def save_public_binary(
 ) -> tuple[str, str, dict]:
     values = get_settings_map(db)
     provider = (provider_override or values.get("public_image_provider") or "local").strip().lower()
+    mystery_object = _is_mystery_object_key(object_key)
+    travel_object = parse_travel_canonical_object_key(object_key) is not None
+    travel_parts = parse_travel_canonical_object_key(object_key)
     local_base_url = _resolve_local_public_base_url(values)
+    storage_root_override = str(values.get("storage_root") or settings.storage_root).strip()
     normalized_filename = filename
+    resolved_subdir = subdir
     force_webp = False
     if provider == "cloudflare_r2":
         normalized_filename = _ensure_webp_filename(filename)
         force_webp = True
+        if mystery_object or travel_object:
+            _enforce_strict_r2_schema(object_key=str(object_key or ""), values=values, mystery_only=mystery_object)
+            resolved_subdir = str(values.get("mystery_storage_subdir") or "images/mystery").strip().replace("\\", "/")
+            if travel_object:
+                normalized_filename = "cover.webp"
+                resolved_subdir = build_travel_local_publish_relative_dir(
+                    category_key=str(travel_parts.get("category_key") or "uncategorized"),
+                    post_slug=str(travel_parts.get("post_slug") or "post"),
+                )
     normalized_content = _normalize_binary_for_filename(
         content=content,
         filename=normalized_filename,
         force_webp=force_webp,
     )
-    file_path, local_public_url = save_binary(
-        subdir=subdir,
+    local_png_path = ""
+    if provider == "cloudflare_r2" and (mystery_object or travel_object):
+        png_filename = "cover.png" if travel_object else f"{Path(normalized_filename).stem}-{datetime.now(timezone.utc):%Y%m%d%H%M%S}.png"
+        png_subdir = resolved_subdir
+        if travel_object:
+            png_subdir = build_travel_local_backup_relative_dir(
+                category_key=str(travel_parts.get("category_key") or "uncategorized"),
+                post_slug=str(travel_parts.get("post_slug") or "post"),
+            )
+        png_bytes = _convert_binary_to_png(content)
+        local_png_path, _ = _save_binary_with_root(
+            storage_root=storage_root_override,
+            subdir=png_subdir,
+            filename=png_filename,
+            content=png_bytes,
+            public_base_url=local_base_url,
+        )
+        _enforce_strict_storage_root(destination_path=local_png_path, values=values, mystery_only=mystery_object)
+
+    file_path, local_public_url = _save_binary_with_root(
+        storage_root=storage_root_override,
+        subdir=resolved_subdir,
         filename=normalized_filename,
         content=normalized_content,
         public_base_url=local_base_url,
     )
+    _enforce_strict_storage_root(destination_path=file_path, values=values, mystery_only=mystery_object)
     delivery_meta = _base_delivery_metadata(provider=provider, local_public_url=local_public_url)
+    if local_png_path:
+        delivery_meta["local_png_path"] = local_png_path
 
     if provider == "cloudflare_r2":
         public_url, _, provider_delivery = upload_binary_to_cloudflare_r2(
@@ -1521,6 +1750,15 @@ def save_public_binary(
             filename=normalized_filename,
             content=normalized_content,
         )
+        if _is_enabled_setting(values.get("strict_r2_key_schema"), default=True):
+            lowered_public = str(public_url or "").lower()
+            if any(token in lowered_public for token in FORBIDDEN_R2_TOKENS):
+                raise ProviderRuntimeError(
+                    provider="cloudflare_r2",
+                    status_code=422,
+                    message="Forbidden token detected in public URL.",
+                    detail=f"public_url={public_url}",
+                )
         provider_delivery.update(delivery_meta)
         provider_delivery["public_url"] = public_url
         return file_path, public_url, provider_delivery

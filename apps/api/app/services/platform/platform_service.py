@@ -20,6 +20,7 @@ from app.models.entities import (
     PlatformCredential,
     PublicationRecord,
 )
+from app.services.cloudflare.cloudflare_asset_policy import ensure_cloudflare_channel_metadata
 from app.services.integrations.secret_service import decrypt_secret_value, encrypt_secret_value
 from app.services.integrations.settings_service import get_settings_map
 
@@ -435,10 +436,13 @@ def ensure_managed_channels(db: Session) -> list[ManagedChannel]:
             "capabilities": ["archive_publish", "analytics", "seo_feedback", "indexing"],
             "oauth_state": "connected" if cloudflare_is_connected else "not_configured",
             "quota_state": {},
-            "channel_metadata": {
-                "api_base_url": cloudflare_api_base_url or None,
-                "token_configured": cloudflare_token_configured,
-            },
+            "channel_metadata": ensure_cloudflare_channel_metadata(
+                {
+                    **dict(getattr(cloudflare_channel, "channel_metadata", {}) or {}),
+                    "api_base_url": cloudflare_api_base_url or None,
+                    "token_configured": cloudflare_token_configured,
+                }
+            ),
             "is_enabled": cloudflare_is_enabled,
         }
         if cloudflare_channel is None:

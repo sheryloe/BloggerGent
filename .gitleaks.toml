@@ -1,0 +1,10 @@
+title = "BloggerGent gitleaks config"
+
+[allowlist]
+description = "Ignore generated local artifacts and reports"
+paths = [
+  '''^docs/reports/''',
+  '''^storage/''',
+  '''^backup/''',
+  '''^output/''',
+]

@@ -1,0 +1,312 @@
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+import re
+
+from slugify import slugify
+
+
+TRAVEL_IMAGE_POLICY_VERSION = "2025-04-23"
+TRAVEL_IMAGE_LAYOUT_POLICY = "travel_editorial_8panel_mar2026"
+TRAVEL_LOCKED_IMAGE_MODEL = "gpt-image-1"
+TRAVEL_PANEL_COUNT = 8
+TRAVEL_CANONICAL_PREFIX = "assets/Travel/"
+TRAVEL_TEXT_ROUTE_CODEX = "codex_cli"
+TRAVEL_TEXT_ROUTE_API = "api"
+TRAVEL_DEFAULT_TEXT_ROUTE = TRAVEL_TEXT_ROUTE_CODEX
+TRAVEL_CODEX_PLANNER_MODEL = "gpt-5.4"
+TRAVEL_CODEX_PASS_MODEL = "gpt-5.4-mini"
+TRAVEL_CODEX_IMAGE_PROMPT_MODEL = "gpt-5.4-mini"
+TRAVEL_API_PLANNER_MODEL = "gpt-5.4-2026-03-05"
+TRAVEL_API_PASS_MODEL = "gpt-5.4-mini-2026-03-17"
+TRAVEL_API_IMAGE_PROMPT_MODEL = "gpt-4.1-mini"
+TRAVEL_IMAGE_SIZE = "1024x1024"
+TRAVEL_ALLOWED_CATEGORIES = frozenset({"travel", "culture", "food", "uncategorized"})
+TRAVEL_ALLOWED_ROLE_RE = re.compile(r"^cover\.webp$", re.IGNORECASE)
+
+
+@dataclass(frozen=True, slots=True)
+class TravelBlogPolicy:
+    blog_id: int
+    channel_id: str
+    primary_language: str
+    prompt_folder: str
+    locked_image_model: str = TRAVEL_LOCKED_IMAGE_MODEL
+    image_policy_version: str = TRAVEL_IMAGE_POLICY_VERSION
+    image_layout_policy: str = TRAVEL_IMAGE_LAYOUT_POLICY
+    panel_count: int = TRAVEL_PANEL_COUNT
+    layout: str = "8_panel_grid"
+    visible_gutters: bool = True
+    single_scene_forbidden: bool = True
+    hero_only: bool = True
+    inline_disabled: bool = True
+    image_size: str = TRAVEL_IMAGE_SIZE
+
+    @property
+    def canonical_prefix(self) -> str:
+        return TRAVEL_CANONICAL_PREFIX
+
+
+TRAVEL_BLOG_POLICIES: dict[int, TravelBlogPolicy] = {
+    34: TravelBlogPolicy(
+        blog_id=34,
+        channel_id="blogger:34",
+        primary_language="en",
+        prompt_folder="donggri-s-hidden-korea-local-travel-culture",
+    ),
+    36: TravelBlogPolicy(
+        blog_id=36,
+        channel_id="blogger:36",
+        primary_language="es",
+        prompt_folder="donggri-el-alma-de-corea",
+    ),
+    37: TravelBlogPolicy(
+        blog_id=37,
+        channel_id="blogger:37",
+        primary_language="ja",
+        prompt_folder="donggri-ri-han-fu-fu-nohan-guo-rokaruan-nei",
+    ),
+}
+
+TRAVEL_BLOG_IDS = frozenset(TRAVEL_BLOG_POLICIES.keys())
+
+
+def get_travel_blog_policy(*, blog=None, blog_id: int | None = None) -> TravelBlogPolicy | None:
+    resolved_blog_id = blog_id
+    if resolved_blog_id is None and blog is not None:
+        try:
+            resolved_blog_id = int(getattr(blog, "id", 0) or 0)
+        except (TypeError, ValueError):
+            resolved_blog_id = 0
+    if not resolved_blog_id:
+        return None
+    return TRAVEL_BLOG_POLICIES.get(int(resolved_blog_id))
+
+
+def is_travel_policy_blog(blog) -> bool:
+    return get_travel_blog_policy(blog=blog) is not None
+
+
+def assert_travel_scope_blog(*, blog=None, blog_id: int | None = None) -> TravelBlogPolicy:
+    policy = get_travel_blog_policy(blog=blog, blog_id=blog_id)
+    if policy is None:
+        raise ValueError("Travel canonical assets are limited to Blogger blogs 34, 36, and 37.")
+    return policy
+
+
+def normalize_travel_text_generation_route(route: str | None) -> str:
+    normalized = str(route or "").strip().lower()
+    if normalized in {TRAVEL_TEXT_ROUTE_CODEX, TRAVEL_TEXT_ROUTE_API}:
+        return normalized
+    return TRAVEL_DEFAULT_TEXT_ROUTE
+
+
+def travel_text_generation_route_setting_key(blog_id: int) -> str:
+    return f"travel_text_generation_route__blogger_{int(blog_id)}"
+
+
+def resolve_travel_text_generation_route(
+    *,
+    policy: TravelBlogPolicy | None = None,
+    blog_id: int | None = None,
+    values: Mapping[str, str] | None = None,
+) -> str:
+    resolved_policy = policy or get_travel_blog_policy(blog_id=blog_id)
+    if resolved_policy is None:
+        return TRAVEL_DEFAULT_TEXT_ROUTE
+    if values is None:
+        return TRAVEL_DEFAULT_TEXT_ROUTE
+    raw_value = values.get(travel_text_generation_route_setting_key(resolved_policy.blog_id))
+    return normalize_travel_text_generation_route(raw_value)
+
+
+def normalize_travel_category_key(category_key: str | None) -> str:
+    normalized = str(category_key or "").strip().lower()
+    if normalized in TRAVEL_ALLOWED_CATEGORIES:
+        return normalized
+    return "uncategorized"
+
+
+def normalize_travel_asset_role(asset_role: str | None) -> str:
+    lowered = str(asset_role or "").strip().lower()
+    if lowered in {"cover", "hero", "hero-retry", "hero-refresh", "main", "primary"}:
+        return "cover.webp"
+    raise ValueError(f"Travel canonical assets only allow the cover role, got '{asset_role}'.")
+
+
+def build_travel_asset_object_key(*, policy: TravelBlogPolicy, category_key: str, post_slug: str, asset_role: str) -> str:
+    slug_token = slugify(str(post_slug or "").strip(), separator="-") or "post"
+    file_name = normalize_travel_asset_role(asset_role)
+    resolved_category = normalize_travel_category_key(category_key)
+    return f"{policy.canonical_prefix}{resolved_category}/{slug_token}/{file_name}"
+
+
+def is_travel_canonical_prefix(object_key: str | None) -> bool:
+    normalized = str(object_key or "").strip().lstrip("/")
+    return normalized.lower().startswith(TRAVEL_CANONICAL_PREFIX.lower())
+
+
+def parse_travel_canonical_object_key(object_key: str | None) -> dict[str, str] | None:
+    normalized = str(object_key or "").strip().lstrip("/")
+    if not is_travel_canonical_prefix(normalized):
+        return None
+    remainder = normalized[len(TRAVEL_CANONICAL_PREFIX) :]
+    parts = [segment for segment in remainder.split("/") if segment]
+    if len(parts) != 3:
+        return None
+    category_key, post_slug, role_name = parts
+    category_key = normalize_travel_category_key(category_key)
+    if not slugify(post_slug, separator="-"):
+        return None
+    if not TRAVEL_ALLOWED_ROLE_RE.fullmatch(role_name):
+        return None
+    return {
+        "category_key": category_key,
+        "post_slug": post_slug,
+        "role_name": role_name,
+        "object_key": normalized,
+    }
+
+
+def resolve_travel_policy_from_object_key(object_key: str | None) -> TravelBlogPolicy | None:
+    parsed = parse_travel_canonical_object_key(object_key)
+    if parsed is None:
+        return None
+    return TRAVEL_BLOG_POLICIES[34]
+
+
+def is_valid_travel_canonical_object_key(object_key: str | None, *, policy: TravelBlogPolicy | None = None) -> bool:
+    normalized = str(object_key or "").strip().lstrip("/")
+    if not normalized:
+        return False
+    if policy is not None and policy.blog_id not in TRAVEL_BLOG_IDS:
+        return False
+    return parse_travel_canonical_object_key(normalized) is not None
+
+
+def build_travel_local_backup_relative_dir(*, category_key: str, post_slug: str) -> str:
+    return f"images/TravelBackup/{normalize_travel_category_key(category_key)}/{slugify(str(post_slug or '').strip(), separator='-') or 'post'}"
+
+
+def build_travel_local_publish_relative_dir(*, category_key: str, post_slug: str) -> str:
+    return f"images/Travel/{normalize_travel_category_key(category_key)}/{slugify(str(post_slug or '').strip(), separator='-') or 'post'}"
+
+
+def build_travel_policy_config(
+    policy: TravelBlogPolicy | None,
+    *,
+    stage_type: str,
+    values: Mapping[str, str] | None = None,
+) -> dict[str, object] | None:
+    if policy is None:
+        return None
+    normalized_stage = str(stage_type or "").strip()
+    route = resolve_travel_text_generation_route(policy=policy, values=values)
+    if route == TRAVEL_TEXT_ROUTE_API:
+        planner_provider_hint = "openai_text"
+        planner_provider_model = TRAVEL_API_PLANNER_MODEL
+        pass_provider_hint = "openai_text"
+        pass_provider_model = TRAVEL_API_PASS_MODEL
+        image_prompt_provider_hint = "openai_text"
+        image_prompt_provider_model = TRAVEL_API_IMAGE_PROMPT_MODEL
+    else:
+        planner_provider_hint = TRAVEL_TEXT_ROUTE_CODEX
+        planner_provider_model = TRAVEL_CODEX_PLANNER_MODEL
+        pass_provider_hint = TRAVEL_TEXT_ROUTE_CODEX
+        pass_provider_model = TRAVEL_CODEX_PASS_MODEL
+        image_prompt_provider_hint = TRAVEL_TEXT_ROUTE_CODEX
+        image_prompt_provider_model = TRAVEL_CODEX_IMAGE_PROMPT_MODEL
+
+    if normalized_stage == "article_generation":
+        return {
+            "text_generation_route": route,
+            "planner_provider_hint": planner_provider_hint,
+            "planner_provider_model": planner_provider_model,
+            "pass_provider_hint": pass_provider_hint,
+            "pass_provider_model": pass_provider_model,
+            "structure_mode": "kisungjeongyeol_4beat",
+            "structure_segments": 4,
+        }
+    if normalized_stage == "image_prompt_generation":
+        return {
+            "text_generation_route": route,
+            "provider_hint": image_prompt_provider_hint,
+            "provider_model": image_prompt_provider_model,
+            "image_layout_policy": policy.image_layout_policy,
+            "hero_only": policy.hero_only,
+            "panel_count": policy.panel_count,
+        }
+    if normalized_stage == "image_generation":
+        return {
+            "locked_image_model": policy.locked_image_model,
+            "image_policy_version": policy.image_policy_version,
+            "image_layout_policy": policy.image_layout_policy,
+            "panel_count": policy.panel_count,
+            "hero_only": policy.hero_only,
+            "inline_disabled": policy.inline_disabled,
+            "image_size": policy.image_size,
+        }
+    return None
+
+
+def travel_panel_prompt_missing_requirements(prompt: str | None) -> list[str]:
+    lowered = str(prompt or "").strip().lower()
+    missing: list[str] = []
+    if not any(token in lowered for token in ("8-panel", "8 panel", "eight-panel", "eight panel")):
+        missing.append("missing_8panel_layout")
+    if not any(token in lowered for token in ("collage", "grid", "contact sheet", "panel")):
+        missing.append("missing_collage_terms")
+    if "gutter" not in lowered and "border" not in lowered:
+        missing.append("missing_visible_gutters")
+    if "1024x1024" not in lowered and "square" not in lowered:
+        missing.append("missing_square_cover_direction")
+    if "no text" not in lowered and "no logo" not in lowered:
+        missing.append("missing_no_text_logo_rule")
+    return missing
+
+
+def travel_panel_size_missing_requirements(width: int, height: int) -> list[str]:
+    missing: list[str] = []
+    if width <= 0 or height <= 0:
+        missing.append("invalid_dimensions")
+    elif width != 1024 or height != 1024:
+        missing.append("not_1024_square")
+    return missing
+
+
+def build_travel_8panel_retry_prompt(
+    *,
+    policy: TravelBlogPolicy,
+    keyword: str,
+    title: str,
+    original_prompt: str,
+) -> str:
+    persona = {
+        "en": "US-first and global English travelers who want route clarity and trendy but authentic Korea scenes.",
+        "es": "Spanish-speaking travelers who need practical route cues, timing decisions, and believable on-site scenes.",
+        "ja": "Japanese independent travelers who prioritize route flow, crowd control, time savings, and clean realistic scenes.",
+    }.get(policy.primary_language, "International Korea travel readers who need practical route clarity.")
+    return (
+        "Create one square editorial travel collage cover at 1024x1024 with exactly 8 distinct rectangular photo panels. "
+        "Use thin visible white gutters between panels so every panel reads as a separate photo. "
+        "Do not blend the panels into one panorama or one seamless scene. "
+        "Use realistic Korea travel photography only, no text, no logos, no infographic styling. "
+        f"Audience direction: {persona} "
+        f"Topic: {keyword}. Title context: {title}. Story direction: {original_prompt}"
+    )
+
+
+def build_travel_collage_context(*, title: str, excerpt: str, labels: list[str] | None, image_seed: str | None, planner_summary: str | None) -> str:
+    lines = [
+        f"Title: {str(title or '').strip()}",
+        f"Excerpt: {str(excerpt or '').strip()}",
+        f"Labels: {', '.join(str(item).strip() for item in (labels or []) if str(item).strip())}",
+    ]
+    seed = str(image_seed or "").strip()
+    if seed:
+        lines.append(f"Initial image direction: {seed}")
+    summary = str(planner_summary or "").strip()
+    if summary:
+        lines.append(f"Planner structure summary: {summary}")
+    return "\n".join(line for line in lines if line.strip())

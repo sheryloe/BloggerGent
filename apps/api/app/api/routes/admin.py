@@ -11,11 +11,18 @@ from app.db.session import get_db
 from app.schemas.api import (
     BloggerEditorialLabelBackfillRead,
     BloggerEditorialLabelBackfillRequest,
+    CloudflareAssetRebuildRead,
+    CloudflareAssetRebuildReportRead,
+    CloudflareAssetRebuildRequest,
     CloudflareR2MigrationRead,
     CloudflareR2MigrationRequest,
 )
 from app.services.platform.blog_service import list_visible_blog_ids
 from app.services.blogger.blogger_label_backfill_service import dry_run_blogger_editorial_label_backfill
+from app.services.cloudflare.cloudflare_asset_rebuild_service import (
+    get_latest_cloudflare_asset_rebuild_report,
+    rebuild_cloudflare_assets,
+)
 from app.services.ops.ops_health_service import generate_ops_health_report
 from app.services.cloudflare.cloudflare_r2_migration_service import run_cloudflare_r2_image_migration
 from app.services.providers.base import ProviderRuntimeError
@@ -137,6 +144,38 @@ def migrate_generated_article_images_to_cloudflare_r2(
     except ProviderRuntimeError as exc:
         db.rollback()
         raise HTTPException(status_code=exc.status_code or 502, detail=exc.detail or exc.message) from exc
+
+
+@router.post("/cloudflare-assets/rebuild", response_model=CloudflareAssetRebuildRead)
+def rebuild_cloudflare_channel_assets(
+    payload: CloudflareAssetRebuildRequest | None = Body(default=None),
+    db: Session = Depends(get_db),
+) -> dict:
+    request_payload = payload or CloudflareAssetRebuildRequest()
+    try:
+        return rebuild_cloudflare_assets(
+            db,
+            mode=request_payload.mode,
+            channel_id=request_payload.channel_id,
+            category_slugs=list(request_payload.category_slugs or []),
+            limit=request_payload.limit,
+            purge_target=request_payload.purge_target,
+            use_fallback_heuristic=request_payload.use_fallback_heuristic,
+        )
+    except ProviderRuntimeError as exc:
+        db.rollback()
+        raise HTTPException(status_code=exc.status_code or 502, detail=exc.detail or exc.message) from exc
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/cloudflare-assets/reports/latest", response_model=CloudflareAssetRebuildReportRead)
+def get_latest_cloudflare_asset_rebuild_report_route(db: Session = Depends(get_db)) -> dict:
+    try:
+        return get_latest_cloudflare_asset_rebuild_report(db)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/blogger-editorial-label-backfill", response_model=BloggerEditorialLabelBackfillRead)

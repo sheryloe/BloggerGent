@@ -5,6 +5,7 @@ from typing import Iterable
 
 FREE_MODEL_POLICY = {
     "large": [
+        "gpt-5.4-2026-03-05",
         "gpt-5-codex",
         "gpt-5-2025-08-07",
         "gpt-5-chat-latest",
@@ -18,6 +19,7 @@ FREE_MODEL_POLICY = {
         "o1-2024-12-17",
     ],
     "small": [
+        "gpt-5.4-mini-2026-03-17",
         "gpt-5-mini-2025-08-07",
         "gpt-5-nano-2025-08-07",
         "gpt-4.1-mini-2025-04-14",
@@ -30,12 +32,13 @@ FREE_MODEL_POLICY = {
 }
 
 DEPRECATED_MODELS = ["gpt-4.5-preview-2025-02-27"]
-DEFAULT_TEXT_MODEL = "gpt-4.1-2025-04-14"
-DEFAULT_LIGHTWEIGHT_MODEL = "gpt-4.1-mini-2025-04-14"
+DEFAULT_TEXT_MODEL = "gpt-5.4-2026-03-05"
+DEFAULT_LIGHTWEIGHT_MODEL = "gpt-5.4-mini-2026-03-17"
 OPENAI_TEXT_RUNTIME_KIND = "openai"
 CODEX_TEXT_RUNTIME_KIND = "codex_cli"
 CODEX_TEXT_RUNTIME_MODEL = "gpt-5.4"
 OPENAI_IMAGE_RUNTIME_KIND = "openai_image"
+OPENAI_IMAGE_RUNTIME_MODEL = "gpt-image-1"
 BANNED_TEXT_MODEL_PREFIXES = (
     "gpt-5-mini",
     "gpt-5-nano",
@@ -87,7 +90,7 @@ def build_model_policy() -> ModelPolicy:
         text_runtime_kind=OPENAI_TEXT_RUNTIME_KIND,
         text_runtime_model=DEFAULT_TEXT_MODEL,
         image_runtime_kind=OPENAI_IMAGE_RUNTIME_KIND,
-        image_runtime_model="gpt-image-1",
+        image_runtime_model=OPENAI_IMAGE_RUNTIME_MODEL,
         openai_usage_hard_cap_enabled=True,
         banned_text_model_prefixes=list(BANNED_TEXT_MODEL_PREFIXES),
     )

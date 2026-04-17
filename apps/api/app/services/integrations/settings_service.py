@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.entities import Setting
+from app.services.ops.model_policy_service import OPENAI_IMAGE_RUNTIME_MODEL
 from app.services.integrations.secret_service import decrypt_secret_value, encrypt_secret_value, is_encrypted_secret
 
 
@@ -95,6 +96,32 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
         settings.cloudflare_r2_prefix,
         "Object key prefix inside the R2 bucket. Files are stored as <prefix>/<slug>.webp",
     ),
+    "mystery_cloudflare_account_id": DefaultSetting(
+        settings.mystery_cloudflare_account_id,
+        "Cloudflare account ID dedicated to mystery assets",
+    ),
+    "mystery_cloudflare_r2_bucket": DefaultSetting(
+        settings.mystery_cloudflare_r2_bucket,
+        "Cloudflare R2 bucket name dedicated to mystery assets",
+    ),
+    "mystery_cloudflare_r2_access_key_id": DefaultSetting(
+        settings.mystery_cloudflare_r2_access_key_id,
+        "Cloudflare R2 access key ID dedicated to mystery assets",
+        True,
+    ),
+    "mystery_cloudflare_r2_secret_access_key": DefaultSetting(
+        settings.mystery_cloudflare_r2_secret_access_key,
+        "Cloudflare R2 secret access key dedicated to mystery assets",
+        True,
+    ),
+    "mystery_cloudflare_r2_public_base_url": DefaultSetting(
+        settings.mystery_cloudflare_r2_public_base_url,
+        "Public base URL for mystery-only R2 bucket",
+    ),
+    "mystery_cloudflare_r2_prefix": DefaultSetting(
+        settings.mystery_cloudflare_r2_prefix,
+        "Object key prefix for mystery-only R2 bucket",
+    ),
     "cloudflare_cdn_transform_enabled": DefaultSetting(
         str(settings.cloudflare_cdn_transform_enabled).lower(),
         "Enable Cloudflare /cdn-cgi/image transform URLs. Keep false when transform is unavailable.",
@@ -125,6 +152,10 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
     "article_generation_model": DefaultSetting(
         settings.article_generation_model,
         "?λЦ 蹂몃Ц ?앹꽦怨?由щ씪?댄듃???ъ슜?섎뒗 二쇰젰 OpenAI 紐⑤뜽",
+    ),
+    "image_prompt_generation_model": DefaultSetting(
+        settings.image_prompt_generation_model,
+        "이미지 프롬프트 fallback 정제에 사용하는 OpenAI 모델",
     ),
     "openai_image_model": DefaultSetting(settings.openai_image_model, "Default OpenAI image model"),
     "openai_request_saver_mode": DefaultSetting(
@@ -286,9 +317,13 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
         str(settings.travel_inline_collage_enabled).lower(),
         "Enable travel inline body collage image generation.",
     ),
+    "mystery_single_main_image_only": DefaultSetting(
+        str(settings.mystery_single_main_image_only).lower(),
+        "Enforce single hero image only for mystery blog.",
+    ),
     "mystery_inline_collage_enabled": DefaultSetting(
         str(settings.mystery_inline_collage_enabled).lower(),
-        "Enable mystery inline body collage image generation.",
+        "Enable mystery inline body collage image generation (deprecated; keep false).",
     ),
     "last_schedule_run_on_travel": DefaultSetting(
         "",
@@ -510,6 +545,12 @@ SETTING_DESCRIPTION_OVERRIDES_KO: dict[str, str] = {
     "cloudflare_account_id": "Cloudflare 계정 ID",
     "cloudflare_r2_bucket": "Cloudflare R2 버킷명",
     "cloudflare_r2_public_base_url": "Cloudflare R2 공개 기본 URL",
+    "mystery_cloudflare_account_id": "미스터리 전용 Cloudflare 계정 ID",
+    "mystery_cloudflare_r2_bucket": "미스터리 전용 R2 버킷명",
+    "mystery_cloudflare_r2_access_key_id": "미스터리 전용 R2 액세스 키 ID",
+    "mystery_cloudflare_r2_secret_access_key": "미스터리 전용 R2 시크릿 키",
+    "mystery_cloudflare_r2_public_base_url": "미스터리 전용 R2 공개 기본 URL",
+    "mystery_cloudflare_r2_prefix": "미스터리 전용 R2 오브젝트 prefix",
     "github_pages_owner": "GitHub Pages 소유자",
     "github_pages_repo": "GitHub Pages 저장소",
     "github_pages_branch": "GitHub Pages 브랜치",
@@ -539,6 +580,7 @@ SETTING_DESCRIPTION_OVERRIDES_KO: dict[str, str] = {
     "schedule_timezone": "전역 스케줄 시간대",
     "travel_schedule_time": "여행 채널 시작 시간(HH:MM)",
     "travel_schedule_interval_hours": "여행 채널 실행 간격(시간)",
+    "mystery_single_main_image_only": "미스터리 채널 메인 이미지 1장 강제",
     "mystery_schedule_time": "미스터리 채널 시작 시간(HH:MM)",
     "mystery_schedule_interval_hours": "미스터리 채널 실행 간격(시간)",
     "cloudflare_daily_publish_enabled": "Cloudflare 일일 자동 발행 사용",
@@ -684,6 +726,8 @@ def upsert_settings(db: Session, values: dict[str, str]) -> list[Setting]:
     normalized_values = dict(values)
     if "openai_usage_hard_cap_enabled" in normalized_values:
         normalized_values["openai_usage_hard_cap_enabled"] = "true"
+    if "openai_image_model" in normalized_values:
+        normalized_values["openai_image_model"] = OPENAI_IMAGE_RUNTIME_MODEL
     if "google_sheet_url" in normalized_values:
         normalized_values["google_sheet_id"] = _extract_google_sheet_id(normalized_values.get("google_sheet_url", ""))
     existing = {item.key: item for item in db.execute(select(Setting)).scalars().all()}
@@ -735,5 +779,3 @@ def get_blogger_config(db: Session) -> dict:
             for blog in blogs
         ],
     }
-
-

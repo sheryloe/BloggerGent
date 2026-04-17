@@ -12,6 +12,7 @@ export const OPENAI_DATA_SHARING_FREE_TIERS: ModelGroup[] = [
     description:
       "Input + output combined. Usage tiers 1-2: 250K tokens. Deprecated: gpt-4.5-preview-2025-02-27 (shut down 2025-07-14).",
     models: [
+      "gpt-5.4-2026-03-05",
       "gpt-5-codex",
       "gpt-5-2025-08-07",
       "gpt-5-chat-latest",
@@ -30,6 +31,7 @@ export const OPENAI_DATA_SHARING_FREE_TIERS: ModelGroup[] = [
     title: "Free tier 10M token group",
     description: "Input + output combined. Usage tiers 1-2: 2.5M tokens.",
     models: [
+      "gpt-5.4-mini-2026-03-17",
       "gpt-5-mini-2025-08-07",
       "gpt-5-nano-2025-08-07",
       "gpt-4.1-mini-2025-04-14",
@@ -56,10 +58,7 @@ export const OPENAI_TEXT_MODEL_SUGGESTIONS = Array.from(
 );
 
 export const OPENAI_IMAGE_MODEL_SUGGESTIONS = [
-  "gpt-image-1.5",
-  "gpt-image-1-mini",
   "gpt-image-1",
-  "dall-e-3",
 ];
 
 export const GEMINI_MODEL_SUGGESTIONS = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"];

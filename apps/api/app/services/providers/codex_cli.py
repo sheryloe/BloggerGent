@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from app.schemas.ai import ArticleGenerationOutput, TopicDiscoveryPayload
 from app.services.platform.codex_cli_queue_service import submit_codex_text_job
 from app.services.providers.base import ProviderRuntimeError, RuntimeProviderConfig
@@ -72,3 +74,38 @@ class CodexCLITextProvider:
                 detail="image_prompt_generation response was empty",
             )
         return content, response
+
+    def generate_structured_json(self, prompt: str) -> tuple[dict, dict]:
+        response = submit_codex_text_job(
+            runtime=self.runtime,
+            stage_name="structured_generation",
+            model=self.model,
+            prompt=prompt,
+            response_kind="text",
+            inline=True,
+        )
+        content = str(response.get("content") or "").strip()
+        if not content:
+            raise ProviderRuntimeError(
+                provider="codex_cli",
+                status_code=502,
+                message="Codex CLI returned an empty structured payload.",
+                detail="structured_generation response was empty",
+            )
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise ProviderRuntimeError(
+                provider="codex_cli",
+                status_code=502,
+                message="Codex CLI returned invalid structured JSON payload.",
+                detail=str(exc),
+            ) from exc
+        if not isinstance(payload, dict):
+            raise ProviderRuntimeError(
+                provider="codex_cli",
+                status_code=502,
+                message="Codex CLI structured payload must be a JSON object.",
+                detail=f"received_type={type(payload).__name__}",
+            )
+        return payload, response

@@ -1,57 +1,66 @@
 ---
-title: 보안
+title: 보안 운영 기준
 ---
 
-# 보안
+# 보안 운영 기준
 
-Bloggent는 운영 도구이기 때문에, 코드 수준 보호와 워크플로 수준 보호가 둘 다 중요합니다.
+이 문서는 BloggerGent 저장소의 보안 기준을 코드/운영으로 분리해 관리하기 위한 기준이다.
 
-## 빠른 답변
+## 1. 레포 코드로 강제되는 보안
 
-현재 제품은 민감정보 암호화, 수동 발행 보호, 일부 발행 안전장치를 이미 가지고 있고, 공개 전 검토가 반드시 개입되도록 설계되어 있습니다.
+다음 항목은 저장소에 포함된 파일로 자동 강제된다.
 
-## 현재 보호 장치
+- CI 보안 게이트: `.github/workflows/ci-security.yml`
+  - Dependency Review
+  - Secret Scan(gitleaks)
+  - API/Web 빌드 및 기본 테스트
+- 정적 분석(CodeQL): `.github/workflows/codeql.yml`
+- 종속성 자동 업데이트: `.github/dependabot.yml`
+- PR 보안 체크리스트: `.github/pull_request_template.md`
+- 코드 오너 승인 경로: `.github/CODEOWNERS`
+- 로컬/CI 시크릿 스캔 규칙:
+  - `.gitleaks.toml`
+  - `.pre-commit-config.yaml`
 
-### 민감정보 저장
+## 2. GitHub UI/API에서만 가능한 보안
 
-API 키와 리프레시 토큰 같은 값은 저장 전에 암호화됩니다.
+다음 항목은 저장소 파일만으로는 강제되지 않는다.
 
-대표 예시:
+- 브랜치 보호(직접 푸시 금지, 필수 상태 체크, 리뷰 필수)
+- Secret Scanning / Push Protection 활성화
+- Dependabot Alerts 정책
+- 코드 스캐닝 경고 dismiss 정책
 
-- OpenAI API 키
-- Gemini API 키
-- GitHub 토큰
-- Blogger 리프레시 토큰
+이 항목은 `scripts/apply_github_security_baseline.ps1`로 자동 적용할 수 있다.
 
-### 발행 보호
+## 3. 인프라 자격증명 기준
 
-서비스 구조 자체가 수동 발행 기준입니다.
-그래서 약한 초안이 사람 검토 없이 바로 공개될 위험을 줄입니다.
+`docker-compose.yml`은 약한 기본 비밀번호를 허용하지 않는다.
 
-### 덮어쓰기 방지
+- `POSTGRES_PASSWORD` 필수
+- `MINIO_ROOT_USER` 필수
+- `MINIO_ROOT_PASSWORD` 필수
 
-파이프라인은 이미 공개된 Blogger 포스트를 무작정 덮어쓰지 않도록 설계되어 있습니다.
+환경변수가 없으면 `docker compose config` 단계에서 즉시 실패한다.
 
-### 중복 주제 방지
+## 4. 시크릿 관리 원칙
 
-같은 블로그에서 비슷한 주제를 반복 생성할 확률을 낮추기 위해 중복 주제 체크를 둡니다.
+- API 키/토큰/암호는 코드에 하드코딩하지 않는다.
+- `.env`, `secrets/`, 인증서(`*.pem`, `*.key`, `*.p12`, `*.pfx`)는 git 추적 금지.
+- 유출이 의심되면 즉시 폐기(revoke) 후 교체한다.
 
-## 운영상 보안 메모
+## 5. 운영 점검 절차
 
-실사용 환경에서는 아래를 꼭 신경 써야 합니다.
+### 로컬
 
-- 강한 `SETTINGS_ENCRYPTION_SECRET` 사용
-- 대시보드 접근 제어
-- Blogger OAuth 자격증명 보호
-- 발행 후 공개 메타 재검증
+```powershell
+Set-Location D:\Donggri_Platform\BloggerGent
+docker compose config
+pre-commit run --all-files
+```
 
-## 남아 있는 한계
+### GitHub
 
-일부 한계는 코드보다 플랫폼 쪽 문제입니다.
-Blogger 메타는 여전히 테마 패치와 라이브 검증이 필요한 경우가 있습니다.
-
-그래서 Bloggent는 아래를 계속 강조합니다.
-
-- 수동 검토
-- 생성과 발행의 분리
-- 실제 공개 메타 검증
+- PR에서 `CI Security Gate`, `CodeQL` 상태 확인
+- Dependabot PR 자동 생성 확인
+- 브랜치 보호 규칙에 상태 체크 필수 연결 확인

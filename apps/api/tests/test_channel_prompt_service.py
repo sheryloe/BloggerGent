@@ -12,8 +12,9 @@ from app.db.base import Base
 from app.models.entities import Blog, BlogAgentConfig, PublishMode, WorkflowStageType
 from app.schemas.api import PromptFlowStepUpdate
 from app.services import channel_prompt_service
+from app.services.content.travel_blog_policy import travel_text_generation_route_setting_key
 from app.services.platform.platform_service import ensure_managed_channels
-from app.services.integrations.settings_service import get_settings_map
+from app.services.integrations.settings_service import get_settings_map, upsert_settings
 
 
 @pytest.fixture()
@@ -122,6 +123,46 @@ def test_build_prompt_flow_syncs_blogger_backups(db: Session, tmp_path: Path) ->
     assert (
         tmp_path / "prompts" / "channels" / "blogger" / "hidden-korea" / "article_generation.md"
     ).read_text(encoding="utf-8") == "Write the article\n"
+
+
+def test_build_prompt_flow_exposes_travel_text_generation_route(db: Session) -> None:
+    blog = _create_blog(
+        db,
+        blog_id=34,
+        slug="hidden-korea-travel",
+        name="Hidden Korea Travel",
+        profile_key="korea_travel",
+        content_category="travel",
+    )
+    _create_step(
+        db,
+        blog_id=blog.id,
+        agent_key="article_generation",
+        stage_type=WorkflowStageType.ARTICLE_GENERATION,
+        prompt_template="Write the travel article",
+        sort_order=20,
+        is_required=True,
+    )
+    _create_step(
+        db,
+        blog_id=blog.id,
+        agent_key="image_prompt_generation",
+        stage_type=WorkflowStageType.IMAGE_PROMPT_GENERATION,
+        prompt_template="Refine the travel image prompt",
+        sort_order=30,
+        is_required=False,
+    )
+    upsert_settings(db, {travel_text_generation_route_setting_key(blog.id): "api"})
+
+    flow = channel_prompt_service.build_prompt_flow(db, f"blogger:{blog.id}", sync_backup=False)
+    by_stage = {step.stage_type: step for step in flow.steps}
+
+    assert by_stage["article_generation"].text_generation_route == "api"
+    assert by_stage["article_generation"].planner_provider_hint == "openai_text"
+    assert by_stage["article_generation"].planner_provider_model == "gpt-5.4-2026-03-05"
+    assert by_stage["article_generation"].pass_provider_model == "gpt-5.4-mini-2026-03-17"
+    assert by_stage["image_prompt_generation"].text_generation_route == "api"
+    assert by_stage["image_prompt_generation"].provider_model == "gpt-4.1-mini"
 
 
 def test_save_platform_prompt_step_persists_and_syncs_backup(db: Session, tmp_path: Path) -> None:
@@ -251,9 +292,7 @@ def test_build_prompt_flow_syncs_cloudflare_backups_to_channel_name_dir(
     assert category_channel["steps"][0]["backup_relative_path"] == "channels/cloudflare/dongri-archive/mystery/topic_discovery.md"
 
 
-def test_travel_blogger_backup_includes_profile_prompt_files_and_inline_prompt(db: Session, tmp_path: Path) -> None:
-    (tmp_path / "prompts" / "travel_inline_collage_prompt.md").write_text("Inline travel prompt\n", encoding="utf-8")
-
+def test_travel_blogger_backup_excludes_inline_prompt_file(db: Session, tmp_path: Path) -> None:
     blog = _create_blog(
         db,
         blog_id=303,
@@ -299,6 +338,6 @@ def test_travel_blogger_backup_includes_profile_prompt_files_and_inline_prompt(d
     assert (
         tmp_path / "prompts" / "channels" / "blogger" / "travel-korea" / "travel_collage_prompt.md"
     ).read_text(encoding="utf-8") == "Travel collage prompt\n"
-    assert (
+    assert not (
         tmp_path / "prompts" / "channels" / "blogger" / "travel-korea" / "travel_inline_collage_prompt.md"
-    ).read_text(encoding="utf-8") == "Inline travel prompt\n"
+    ).exists()

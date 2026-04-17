@@ -1057,6 +1057,62 @@ class CloudflareR2MigrationRead(BaseModel):
     items: list[CloudflareR2MigrationItemRead] = Field(default_factory=list)
 
 
+class CloudflareAssetRebuildRequest(BaseModel):
+    mode: str = Field(default="dry_run", pattern="^(dry_run|execute)$")
+    channel_id: str = "cloudflare:dongriarchive"
+    category_slugs: list[str] = Field(default_factory=list)
+    limit: int | None = Field(default=None, ge=1, le=1000)
+    purge_target: bool = True
+    use_fallback_heuristic: bool = True
+
+
+class CloudflareAssetRebuildItemRead(BaseModel):
+    status: str
+    remote_post_id: str | None = None
+    slug: str | None = None
+    title: str | None = None
+    category_slug: str | None = None
+    match_source: str | None = None
+    confidence: float | None = None
+    legacy_url_scheme: str | None = None
+    resolved_local_source: str | None = None
+    resolved_target_path: str | None = None
+    resolved_object_key: str | None = None
+    resolved_public_url: str | None = None
+    error: str | None = None
+    reason: str | None = None
+
+
+class CloudflareAssetRebuildRead(BaseModel):
+    status: str
+    mode: str
+    channel_id: str
+    generated_at: str
+    post_count: int = 0
+    candidate_count: int = 0
+    matched_count: int = 0
+    heuristic_matched_count: int = 0
+    unresolved_count: int = 0
+    updated_count: int = 0
+    failed_count: int = 0
+    purged_categories: list[str] = Field(default_factory=list)
+    legacy_scheme_breakdown: dict[str, int] = Field(default_factory=dict)
+    sync_result: dict | None = None
+    report_path: str | None = None
+    manifest_path: str | None = None
+    csv_path: str | None = None
+    items: list[CloudflareAssetRebuildItemRead] = Field(default_factory=list)
+    unresolved: list[dict] = Field(default_factory=list)
+
+
+class CloudflareAssetRebuildReportRead(BaseModel):
+    status: str
+    channel_id: str
+    report_path: str = ""
+    manifest_path: str = ""
+    report: dict | None = None
+
+
 class BloggerEditorialLabelBackfillRequest(BaseModel):
     mode: str = Field(default="dry_run", pattern="^(dry_run|execute)$")
     profile_keys: list[str] = Field(default_factory=lambda: ["korea_travel", "world_mystery"])
@@ -1927,6 +1983,17 @@ class PromptFlowStepRead(BaseModel):
     sort_order: int
     backup_relative_path: str | None = None
     backup_exists: bool = False
+    planner_provider_hint: str | None = None
+    planner_provider_model: str | None = None
+    pass_provider_hint: str | None = None
+    pass_provider_model: str | None = None
+    structure_mode: str | None = None
+    structure_segments: int | None = None
+    locked_image_model: str | None = None
+    image_policy_version: str | None = None
+    image_layout_policy: str | None = None
+    text_generation_route: str | None = None
+    policy_config: dict | None = None
 
 
 class PromptFlowRead(BaseModel):
@@ -1948,6 +2015,17 @@ class PromptFlowStepUpdate(BaseModel):
     provider_hint: str | None = None
     provider_model: str | None = None
     is_enabled: bool | None = None
+    planner_provider_hint: str | None = None
+    planner_provider_model: str | None = None
+    pass_provider_hint: str | None = None
+    pass_provider_model: str | None = None
+    structure_mode: str | None = None
+    structure_segments: int | None = None
+    locked_image_model: str | None = None
+    image_policy_version: str | None = None
+    image_layout_policy: str | None = None
+    text_generation_route: str | None = None
+    policy_config: dict | None = None
 
 
 class PromptFlowReorderRequest(BaseModel):

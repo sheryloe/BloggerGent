@@ -28,6 +28,7 @@ FREE_TIER_DEFAULT_LARGE_TEXT_MODEL = DEFAULT_TEXT_MODEL
 FREE_TIER_DEFAULT_SMALL_TEXT_MODEL = DEFAULT_LIGHTWEIGHT_MODEL
 
 FREE_TIER_LARGE_MODEL_ALIASES = {
+    "gpt-5.4": "gpt-5.4-2026-03-05",
     "gpt-5": "gpt-5-2025-08-07",
     "gpt-5-chat-latest": "gpt-5-chat-latest",
     "gpt-4.1": "gpt-4.1-2025-04-14",
@@ -37,6 +38,7 @@ FREE_TIER_LARGE_MODEL_ALIASES = {
 }
 
 FREE_TIER_SMALL_MODEL_ALIASES = {
+    "gpt-5.4-mini": "gpt-5.4-mini-2026-03-17",
     "gpt-5-mini": "gpt-5-mini-2025-08-07",
     "gpt-5-nano": "gpt-5-nano-2025-08-07",
     "gpt-4.1-mini": "gpt-4.1-mini-2025-04-14",
@@ -49,6 +51,8 @@ FREE_TIER_SMALL_MODEL_ALIASES = {
 
 FREE_TIER_LARGE_MODELS = set(FREE_MODEL_POLICY["large"])
 FREE_TIER_SMALL_MODELS = set(FREE_MODEL_POLICY["small"])
+FREE_TIER_LARGE_MODEL_PREFIXES = ("gpt-5.4",)
+FREE_TIER_SMALL_MODEL_PREFIXES = ("gpt-5.4-mini",)
 
 _LAST_USAGE_CACHE: OpenAIFreeUsageRead | None = None
 _LAST_USAGE_CACHE_AT: datetime | None = None
@@ -115,10 +119,18 @@ def _normalize_model_name(model: str | None) -> str:
     return (model or "").strip().lower()
 
 
+def _matches_model_prefix(model: str, prefix: str) -> bool:
+    return model == prefix or model.startswith(f"{prefix}-")
+
+
 def _is_large_model(model: str) -> bool:
     normalized = _normalize_model_name(model)
     if not normalized:
         return False
+    if any(_matches_model_prefix(normalized, prefix) for prefix in FREE_TIER_SMALL_MODEL_PREFIXES):
+        return False
+    if any(_matches_model_prefix(normalized, prefix) for prefix in FREE_TIER_LARGE_MODEL_PREFIXES):
+        return True
     return normalized in FREE_TIER_LARGE_MODELS or normalized in FREE_TIER_LARGE_MODEL_ALIASES
 
 
@@ -126,6 +138,8 @@ def _is_small_model(model: str) -> bool:
     normalized = _normalize_model_name(model)
     if not normalized:
         return False
+    if any(_matches_model_prefix(normalized, prefix) for prefix in FREE_TIER_SMALL_MODEL_PREFIXES):
+        return True
     return normalized in FREE_TIER_SMALL_MODELS or normalized in FREE_TIER_SMALL_MODEL_ALIASES
 
 
@@ -144,6 +158,13 @@ def _canonical_free_tier_text_model(model: str | None) -> tuple[str | None, str 
     normalized = _normalize_model_name(model)
     if not normalized:
         return None, None
+
+    for prefix in FREE_TIER_SMALL_MODEL_PREFIXES:
+        if _matches_model_prefix(normalized, prefix):
+            return FREE_TIER_DEFAULT_SMALL_TEXT_MODEL, "small"
+    for prefix in FREE_TIER_LARGE_MODEL_PREFIXES:
+        if _matches_model_prefix(normalized, prefix):
+            return FREE_TIER_DEFAULT_LARGE_TEXT_MODEL, "large"
 
     if normalized in FREE_TIER_SMALL_MODELS:
         return normalized, "small"

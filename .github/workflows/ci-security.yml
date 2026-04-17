@@ -1,0 +1,87 @@
+name: CI Security Gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  dependency-review:
+    name: Dependency Review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Dependency review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+
+  secret-scan:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks scan
+        uses: gitleaks/gitleaks-action@v2
+        with:
+          args: --config .gitleaks.toml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  api-check:
+    name: API Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: apps/api/requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r apps/api/requirements.txt pytest
+      - name: Static import check
+        run: python -m compileall apps/api/app
+      - name: Targeted tests
+        env:
+          PYTHONPATH: apps/api
+        run: |
+          pytest -q apps/api/tests/test_related_posts_renderer.py
+          pytest -q apps/api/tests/test_cleanup_blogger_related_onerror.py
+          pytest -q apps/api/tests/test_r2_cleanup_legacy_unused.py
+          pytest -q apps/api/tests/test_verify_legacy_prefix_live_refs.py
+
+  web-check:
+    name: Web Build Check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build

@@ -15,6 +15,16 @@ from app.models.entities import Article, ContentPlanSlot, Job, Topic
 from app.schemas.ai import ArticleGenerationOutput
 from app.services.content.content_guard_service import assert_article_not_duplicate
 from app.services.content.faq_hygiene import strip_generic_faq_leak_html
+from app.services.content.travel_blog_policy import (
+    build_travel_asset_object_key,
+    build_travel_collage_context,
+    get_travel_blog_policy,
+    normalize_travel_category_key,
+)
+from app.services.cloudflare.cloudflare_asset_policy import (
+    build_cloudflare_r2_object_key,
+    build_default_cloudflare_asset_policy,
+)
 
 
 TAG_RE = re.compile(r"<[^>]+>")
@@ -62,6 +72,29 @@ CLASS_TOKEN_PREFIXES = (
     "route-",
     "event-",
     "policy-",
+    "summary-",
+    "timing-",
+    "local-",
+    "scene-",
+    "note-",
+    "workflow-",
+    "eligibility-",
+    "process-",
+    "document-",
+    "market-",
+    "company-",
+    "checkpoint-",
+    "viewing-",
+    "highlight-",
+    "curator-",
+    "case-",
+    "evidence-",
+    "interpretation-",
+    "friction-",
+    "risk-",
+    "reflection-",
+    "thought-",
+    "dialogue-",
 )
 ALLOWED_CLASS_TOKENS = {
     "callout",
@@ -75,6 +108,45 @@ ALLOWED_CLASS_TOKENS = {
     "route-steps",
     "event-checklist",
     "policy-summary",
+    "route-hero-card",
+    "step-flow",
+    "timing-box",
+    "timing-table",
+    "local-tip-box",
+    "summary-box",
+    "comparison-matrix",
+    "workflow-strip",
+    "scene-intro",
+    "scene-divider",
+    "note-block",
+    "note-aside",
+    "event-hero",
+    "crowd-timing-box",
+    "food-lodging-table",
+    "field-caution-box",
+    "viewing-order-box",
+    "highlight-table",
+    "curator-note",
+    "case-summary",
+    "timeline-board",
+    "evidence-table",
+    "interpretation-compare",
+    "checklist-box",
+    "step-box",
+    "friction-table",
+    "eligibility-table",
+    "process-strip",
+    "document-checklist",
+    "market-summary",
+    "factor-table",
+    "viewpoint-compare",
+    "company-brief",
+    "dialogue-thread",
+    "checkpoint-box",
+    "checkpoint-strip",
+    "risk-factor-table",
+    "reflection-scene",
+    "thought-block",
     "table-wrap",
     "cover",
     "inline",
@@ -180,15 +252,19 @@ def _normalize_slug_token(value: str | None, *, fallback: str) -> str:
 def resolve_r2_blog_group(
     *,
     profile_key: str | None,
+    blog_id: int | None = None,
     primary_language: str | None = None,
     channel_provider: str | None = None,
 ) -> str:
     normalized_profile = (profile_key or "").strip().lower()
     normalized_provider = (channel_provider or "").strip().lower()
+    travel_policy = get_travel_blog_policy(blog_id=blog_id)
 
     if normalized_provider == "cloudflare":
         return "cloudflare/dongri-archive"
 
+    if travel_policy is not None:
+        return "Travel"
     if normalized_profile == "korea_travel":
         return "google-blogger/korea-travel"
     if normalized_profile == "world_mystery":
@@ -260,9 +336,12 @@ def resolve_r2_category_key(
             title=title,
             summary=summary,
         )
-        if inferred_key in TRAVEL_EDITORIAL_CANONICAL_KEYS:
+        if inferred_key in TRAVEL_EDITORIAL_CANONICAL_KEYS and any(
+            token.strip()
+            for token in [title, summary, *(labels or []), editorial_category_label or "", category_slug or ""]
+        ):
             return inferred_key
-        return "travel"
+        return "uncategorized"
 
     if normalized_profile == "world_mystery":
         if normalized_key in MYSTERY_EDITORIAL_CANONICAL_KEYS:
@@ -277,6 +356,11 @@ def resolve_r2_category_key(
             return "casefile"
         return "mystery"
 
+    if normalized_profile in {"archive", "cloudflare_archive"}:
+        raw_category_slug = str(category_slug or "").strip()
+        if raw_category_slug:
+            return raw_category_slug
+
     slug_candidate = _normalize_slug_token(category_slug, fallback="")
     return slug_candidate or "uncategorized"
 
@@ -284,6 +368,7 @@ def resolve_r2_category_key(
 def build_r2_asset_object_key(
     *,
     profile_key: str | None,
+    blog_id: int | None = None,
     primary_language: str | None = None,
     blog_slug: str | None = None,
     channel_slug: str | None = None,
@@ -302,19 +387,55 @@ def build_r2_asset_object_key(
     resolved_time = timestamp.astimezone(timezone.utc) if timestamp else datetime.now(timezone.utc)
     normalized_blog_slug = _normalize_slug_token(blog_slug, fallback="")
     normalized_channel_slug = _normalize_slug_token(channel_slug, fallback="")
-    blog_group = (
-        f"google-blogger/{normalized_blog_slug}"
-        if normalized_blog_slug
-        else (
-            f"cloudflare/{normalized_channel_slug}"
-            if normalized_channel_slug
-            else resolve_r2_blog_group(
+    normalized_profile = (profile_key or "").strip().lower()
+    normalized_provider = (channel_provider or "").strip().lower()
+    travel_policy = get_travel_blog_policy(blog_id=blog_id)
+    if travel_policy is not None:
+        category_key = normalize_travel_category_key(
+            resolve_r2_category_key(
                 profile_key=profile_key,
                 primary_language=primary_language,
-                channel_provider=channel_provider,
+                editorial_category_key=editorial_category_key,
+                editorial_category_label=editorial_category_label,
+                labels=labels,
+                title=title,
+                summary=summary,
+                category_slug=category_slug,
             )
         )
-    )
+        return build_travel_asset_object_key(
+            policy=travel_policy,
+            category_key=category_key,
+            post_slug=post_slug,
+            asset_role=asset_role,
+        )
+    if normalized_provider == "cloudflare" or normalized_profile in {"archive", "cloudflare_archive"}:
+        category_key = resolve_r2_category_key(
+            profile_key=profile_key,
+            primary_language=primary_language,
+            editorial_category_key=editorial_category_key,
+            editorial_category_label=editorial_category_label,
+            labels=labels,
+            title=title,
+            summary=summary,
+            category_slug=category_slug,
+        )
+        return build_cloudflare_r2_object_key(
+            policy=build_default_cloudflare_asset_policy(),
+            category_slug=category_key,
+            post_slug=post_slug,
+            published_at=resolved_time,
+        )
+    else:
+        blog_group = (
+            normalized_blog_slug
+            if normalized_blog_slug
+            else (
+                normalized_channel_slug
+                if normalized_channel_slug
+                else "default-blog"
+            )
+        )
     category_key = resolve_r2_category_key(
         profile_key=profile_key,
         primary_language=primary_language,
@@ -326,6 +447,12 @@ def build_r2_asset_object_key(
         category_slug=category_slug,
     )
     slug_token = _normalize_slug_token(post_slug, fallback="post")
+    if normalized_profile == "world_mystery":
+        return (
+            f"assets/the-midnight-archives/{category_key}/"
+            f"{resolved_time:%Y}/{resolved_time:%m}/{slug_token}/{slug_token}.webp"
+        )
+
     role_token = _normalize_slug_token(asset_role, fallback="asset")
     hash_source = (
         content
@@ -349,6 +476,7 @@ def build_article_r2_asset_object_key(
     blog = article.blog
     return build_r2_asset_object_key(
         profile_key=str(getattr(blog, "profile_key", "") or ""),
+        blog_id=int(getattr(blog, "id", 0) or 0),
         primary_language=str(getattr(blog, "primary_language", "") or ""),
         blog_slug=str(getattr(blog, "slug", "") or ""),
         editorial_category_key=article.editorial_category_key,
@@ -822,6 +950,29 @@ def save_article(db: Session, *, job: Job, topic: Topic | None, output: ArticleG
 
 
 def build_collage_article_context(article: Article) -> str:
+    travel_policy = get_travel_blog_policy(blog=article.blog)
+    if travel_policy is not None:
+        planner_summary = ""
+        render_metadata = article.render_metadata if isinstance(article.render_metadata, dict) else {}
+        planner = render_metadata.get("travel_planner") if isinstance(render_metadata, dict) else None
+        if isinstance(planner, dict):
+            beat_lines: list[str] = []
+            for beat in planner.get("beats") or []:
+                if not isinstance(beat, dict):
+                    continue
+                label = str(beat.get("label") or beat.get("key") or "").strip()
+                goal = str(beat.get("goal") or "").strip()
+                if label and goal:
+                    beat_lines.append(f"{label}: {goal}")
+            planner_summary = " | ".join(beat_lines[:4])
+        return build_travel_collage_context(
+            title=article.title,
+            excerpt=article.excerpt,
+            labels=list(article.labels or []),
+            image_seed=article.image_collage_prompt,
+            planner_summary=planner_summary,
+        )
+
     labels = ", ".join(article.labels or [])
     return "\n".join(
         [
@@ -840,8 +991,30 @@ def build_collage_prompt(article: Article, prompt_template: str | None = None) -
         article_context = build_collage_article_context(article)
         return prompt_template.replace("{article_context}", article_context).strip()
 
+    base_prompt = str(article.image_collage_prompt or "").strip()
+    prefix = f"{base_prompt}. " if base_prompt else ""
+    travel_policy = get_travel_blog_policy(blog=article.blog)
+    if travel_policy is not None:
+        return (
+            f"{prefix}"
+            "Create one vertical editorial travel collage with exactly 8 distinct rectangular photo panels. "
+            "Use thin visible white gutters between panels. "
+            "Do not blend the panels into one seamless panorama. "
+            "Realistic Korea travel photography only, no text, no logos."
+        )
+    is_mystery = (
+        getattr(article.blog, "profile_key", "") == "world_mystery"
+        or str(getattr(article.blog, "content_category", "") or "").strip().lower() == "mystery"
+    )
+    if is_mystery:
+        return (
+            f"{prefix}"
+            'Rewrite into one "8-panel collage" hero prompt with clear panel separation, visible white gutters, '
+            "clean grid layout, center-focused or balanced composition, 2-4 grouped visual categories, realistic "
+            "documentary mood, no text/logo/watermark, no gore, under 60 words."
+        )
     return (
-        f"{article.image_collage_prompt.strip()}. "
+        f"{prefix}"
         "Create one hero-cover collage with exactly 9 distinct panels in a clear 3x3 grid, visible white gutters, "
         "a visually dominant center panel, realistic photography, no text overlay, and no logos."
     )

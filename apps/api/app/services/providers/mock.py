@@ -71,6 +71,26 @@ class MockArticleProvider:
             return self._generate_mystery_article(keyword)
         return self._generate_travel_article(keyword)
 
+    def generate_structured_json(self, prompt: str) -> tuple[dict, dict]:
+        keyword_match = re.search(r'Topic:\s*"?([^\n"]+)', prompt)
+        keyword = keyword_match.group(1).strip() if keyword_match else "Korea travel route"
+        payload = {
+            "title_direction": f"{keyword} practical local route guide",
+            "meta_description_direction": f"Action-first planning guide for {keyword}.",
+            "slug_basis": slugify(keyword) or "korea-travel-route",
+            "labels": ["Travel", "Korea", "Guide", "Route", "Local"],
+            "faq_intent": f"What readers should decide before visiting {keyword}.",
+            "image_seed": f"8-panel editorial Korea travel collage for {keyword} with thin white gutters.",
+            "route_place_key_cues": ["arrival", "main route", "timing decision", "local detail"],
+            "beats": [
+                {"key": "gi", "label": "기", "goal": "Answer the search intent and set the route context.", "must_include": ["hook", "core promise"], "avoid": ["long intro"]},
+                {"key": "seung", "label": "승", "goal": "Explain movement, timing, reservations, and practical decisions.", "must_include": ["transit", "timing"], "avoid": ["generic filler"]},
+                {"key": "jeon", "label": "전", "goal": "Add local insight, scene contrast, and selection criteria.", "must_include": ["local angle", "why this route"], "avoid": ["repetition"]},
+                {"key": "gyeol", "label": "결", "goal": "Close with checklist, FAQ bridge, and final recommendation.", "must_include": ["summary", "FAQ bridge"], "avoid": ["new topic"]},
+            ],
+        }
+        return payload, {"mock": True, "source": "mock_structured_json"}
+
     def generate_visual_prompt(self, prompt: str) -> tuple[str, dict]:
         keyword_match = re.search(r"\[Topic\]\s*-\s*(.+)", prompt)
         keyword = keyword_match.group(1).strip() if keyword_match else "Korea travel story"
@@ -210,8 +230,13 @@ class MockArticleProvider:
 
 
 class MockImageProvider:
-    def generate_image(self, prompt: str, slug: str) -> tuple[bytes, dict]:
+    def generate_image(self, prompt: str, slug: str, *, size_override: str | None = None) -> tuple[bytes, dict]:
         width, height = 1536, 1024
+        if str(size_override or "").strip():
+            try:
+                width, height = [int(part) for part in str(size_override).split("x", maxsplit=1)]
+            except (TypeError, ValueError):
+                width, height = 1536, 1024
         image = Image.new("RGB", (width, height), "#f6efe7")
         draw = ImageDraw.Draw(image)
         panel_width = width // 5

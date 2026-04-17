@@ -31,7 +31,7 @@ def upgrade() -> None:
             SET provider_model = CASE
                 WHEN provider_hint = 'gemini' THEN 'gemini-2.5-flash'
                 WHEN provider_hint = 'openai_text' THEN 'gpt-4.1-mini'
-                WHEN provider_hint = 'openai_image' THEN 'dall-e-3'
+                WHEN provider_hint = 'openai_image' THEN 'gpt-image-1'
                 WHEN provider_hint = 'blogger' THEN 'blogger-v3'
                 ELSE NULL
             END

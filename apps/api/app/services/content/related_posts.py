@@ -388,10 +388,18 @@ def render_related_cards_html(
     empty_message: str = "Relevant posts will appear here once this blog has more published content.",
 ) -> str:
     category = (category or "").lower()
-    card_background = "#f8fafc"
-    card_border = "#e2e8f0"
-    heading_color = "#0f172a"
-    body_color = "#475569"
+    if category == "mystery":
+        card_background = "#111c2f"
+        card_border = "#2a3a52"
+        heading_color = "#f3f7ff"
+        body_color = "#c7d3e6"
+        link_color = "#e2e8f0"
+    else:
+        card_background = "#f8fafc"
+        card_border = "#e2e8f0"
+        heading_color = "#0f172a"
+        body_color = "#475569"
+        link_color = "#1f2937"
 
     filtered_posts: list[dict[str, Any]] = []
     seen_links: set[str] = set()
@@ -423,7 +431,7 @@ def render_related_cards_html(
             else ""
         )
         cards.append(
-            f"<a href='{link}' style='display:block;text-decoration:none;color:#1f2937;'>"
+            f"<a href='{link}' style='display:block;text-decoration:none;color:{link_color};'>"
             f"<div style='border:1px solid {card_border};border-radius:18px;padding:14px;background:{card_background};backdrop-filter:blur(8px);'>"
             f"{thumbnail}"
             f"<h3 style='font-size:18px;margin:12px 0 8px;color:{heading_color};'>{title}</h3>"

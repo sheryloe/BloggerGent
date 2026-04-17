@@ -3,7 +3,6 @@
 import json
 import math
 from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from celery import Task
@@ -30,7 +29,26 @@ from app.services.content.article_service import (
     ensure_article_editorial_labels,
     save_article,
 )
+from app.services.content.article_three_pass_service import (
+    generate_mystery_four_part_article,
+    generate_three_step_article,
+    generate_travel_four_beat_article,
+)
 from app.services.content.article_pattern_service import apply_pattern_defaults, select_blogger_article_pattern
+from app.services.content.image_prompt_policy import (
+    is_valid_collage_prompt,
+    normalize_visual_prompt,
+    should_reuse_article_collage_prompts,
+)
+from app.services.content.travel_blog_policy import (
+    TRAVEL_IMAGE_POLICY_VERSION,
+    build_travel_policy_config,
+    build_travel_8panel_retry_prompt,
+    get_travel_blog_policy,
+    is_travel_policy_blog,
+    travel_panel_prompt_missing_requirements,
+    travel_panel_size_missing_requirements,
+)
 from app.services.ops.audit_service import add_log, count_logs_since
 from app.services.platform.blog_service import get_blog, get_workflow_step, render_agent_prompt, stage_label
 from app.services.content.content_guard_service import (
@@ -87,6 +105,7 @@ from app.services.content.publish_trust_gate_service import (
 )
 from app.services.ops.openai_usage_service import (
     FREE_TIER_DEFAULT_LARGE_TEXT_MODEL,
+    FREE_TIER_DEFAULT_SMALL_TEXT_MODEL,
     route_openai_free_tier_text_model,
     resolve_free_tier_text_model,
 )
@@ -104,16 +123,12 @@ from app.services.content.topic_guard_service import (
     rebuild_topic_memories_for_blog,
 )
 from app.services.content.topic_service import upsert_topics
-from app.services.content.wikimedia_service import fetch_wikimedia_media
 
 OPENAI_TOPIC_REQUEST_STAGE = "OPENAI_TOPIC_REQUEST"
 GEMINI_TOPIC_REQUEST_STAGE = "GEMINI_TOPIC_REQUEST"
 GEMINI_TOPIC_LIMIT_BLOCKED_STAGE = "GEMINI_TOPIC_LIMIT_BLOCKED"
 PIPELINE_CONTROL_KEY = "pipeline_control"
 PIPELINE_SCHEDULE_KEY = "pipeline_schedule"
-TRAVEL_INLINE_PROMPT_TEMPLATE_PATH = Path(__file__).resolve().parents[2] / "prompts" / "travel_inline_collage_prompt.md"
-MYSTERY_INLINE_PROMPT_TEMPLATE_PATH = Path(__file__).resolve().parents[2] / "prompts" / "mystery_inline_collage_prompt.md"
-
 PIPELINE_STOP_ALLOWED = {
     JobStatus.GENERATING_ARTICLE,
     JobStatus.GENERATING_IMAGE_PROMPT,
@@ -187,8 +202,6 @@ def _get_optional_enabled_step(blog, stage_type: WorkflowStageType):
 def _stage_allows_large_text_model(stage_type: WorkflowStageType) -> bool:
     return stage_type in {
         WorkflowStageType.TOPIC_DISCOVERY,
-        WorkflowStageType.ARTICLE_GENERATION,
-        WorkflowStageType.IMAGE_PROMPT_GENERATION,
     }
 
 
@@ -198,7 +211,7 @@ def _default_stage_text_model(*, stage_type: WorkflowStageType, runtime) -> str:
     if stage_type == WorkflowStageType.TOPIC_DISCOVERY:
         return runtime.topic_discovery_model or FREE_TIER_DEFAULT_LARGE_TEXT_MODEL
     if stage_type == WorkflowStageType.ARTICLE_GENERATION:
-        return FREE_TIER_DEFAULT_LARGE_TEXT_MODEL
+        return FREE_TIER_DEFAULT_SMALL_TEXT_MODEL
     return runtime.openai_text_model
 
 
@@ -247,6 +260,127 @@ def _resolve_stage_text_model_for_call(
 
 def _is_travel_blog(blog) -> bool:
     return blog.profile_key == "korea_travel" or (blog.content_category or "").lower() == "travel"
+
+
+def _travel_blog_policy(blog):
+    return get_travel_blog_policy(blog=blog)
+
+
+def _generate_article_output_for_blog(
+    db,
+    *,
+    blog,
+    job,
+    base_prompt: str,
+    article_language: str | None,
+    article_provider_hint: str | None,
+    article_provider_model: str | None,
+    runtime,
+) -> tuple[object, dict]:
+    travel_policy = _travel_blog_policy(blog)
+    if travel_policy is not None:
+        values = get_settings_map(db)
+        policy_config = build_travel_policy_config(
+            travel_policy,
+            stage_type=WorkflowStageType.ARTICLE_GENERATION.value,
+            values=values,
+        ) or {}
+        planner_provider = get_article_provider(
+            db,
+            model_override=str(policy_config.get("planner_provider_model") or ""),
+            provider_hint=str(policy_config.get("planner_provider_hint") or ""),
+            allow_large=True,
+        )
+        pass_provider = get_article_provider(
+            db,
+            model_override=str(policy_config.get("pass_provider_model") or ""),
+            provider_hint=str(policy_config.get("pass_provider_hint") or ""),
+            allow_large=False,
+        )
+        article_output, article_raw = generate_travel_four_beat_article(
+            base_prompt=base_prompt,
+            language=article_language,
+            generate_planner=lambda planner_prompt: planner_provider.generate_structured_json(planner_prompt),
+            generate_pass=lambda pass_prompt: pass_provider.generate_article(job.keyword_snapshot, pass_prompt),
+        )
+        article_raw["models"] = {
+            "text_generation_route": str(policy_config.get("text_generation_route") or ""),
+            "planner_provider_hint": str(policy_config.get("planner_provider_hint") or ""),
+            "planner_provider_model": str(policy_config.get("planner_provider_model") or ""),
+            "pass_provider_hint": str(policy_config.get("pass_provider_hint") or ""),
+            "pass_provider_model": str(policy_config.get("pass_provider_model") or ""),
+        }
+        return article_output, article_raw
+
+    is_mystery_blog = blog.profile_key == "world_mystery" or (blog.content_category or "").lower() == "mystery"
+    if is_mystery_blog:
+        planner_model = _resolve_stage_text_model_for_call(
+            db,
+            stage_type=WorkflowStageType.TOPIC_DISCOVERY,
+            configured_model=runtime.topic_discovery_model,
+            runtime=runtime,
+            job=job,
+            provider_hint=CODEX_TEXT_RUNTIME_KIND,
+        )
+        pass_model = _resolve_stage_text_model_for_call(
+            db,
+            stage_type=WorkflowStageType.ARTICLE_GENERATION,
+            configured_model=article_provider_model or FREE_TIER_DEFAULT_SMALL_TEXT_MODEL,
+            runtime=runtime,
+            job=job,
+            provider_hint=CODEX_TEXT_RUNTIME_KIND,
+        )
+        planner_provider = get_article_provider(
+            db,
+            model_override=planner_model,
+            provider_hint=CODEX_TEXT_RUNTIME_KIND,
+            allow_large=True,
+        )
+        pass_provider = get_article_provider(
+            db,
+            model_override=pass_model,
+            provider_hint=CODEX_TEXT_RUNTIME_KIND,
+            allow_large=False,
+        )
+        article_output, article_raw = generate_mystery_four_part_article(
+            base_prompt=base_prompt,
+            language=article_language,
+            generate_planner=lambda planner_prompt: planner_provider.generate_structured_json(planner_prompt),
+            generate_pass=lambda pass_prompt: pass_provider.generate_article(job.keyword_snapshot, pass_prompt),
+        )
+        article_raw["models"] = {
+            "text_generation_route": "mystery_codex_planner_plus_pass4",
+            "planner_provider_hint": CODEX_TEXT_RUNTIME_KIND,
+            "planner_provider_model": planner_model,
+            "pass_provider_hint": CODEX_TEXT_RUNTIME_KIND,
+            "pass_provider_model": pass_model,
+        }
+        return article_output, article_raw
+
+    article_model = _resolve_stage_text_model_for_call(
+        db,
+        stage_type=WorkflowStageType.ARTICLE_GENERATION,
+        configured_model=article_provider_model,
+        runtime=runtime,
+        job=job,
+        provider_hint=article_provider_hint,
+    )
+    article_provider = get_article_provider(
+        db,
+        model_override=article_model,
+        provider_hint=article_provider_hint,
+        allow_large=False,
+    )
+    article_output, article_raw = generate_three_step_article(
+        base_prompt=base_prompt,
+        language=article_language,
+        generate_pass=lambda pass_prompt: article_provider.generate_article(job.keyword_snapshot, pass_prompt),
+    )
+    article_raw["models"] = {
+        "provider_hint": article_provider_hint,
+        "provider_model": article_model,
+    }
+    return article_output, article_raw
 
 
 def _parse_float_setting(raw_value: str | float | int | None, fallback: float) -> float:
@@ -411,63 +545,6 @@ def _resolve_editorial_guidance(
     return key, label, guidance
 
 
-def _travel_3x3_prompt_missing_requirements(prompt: str) -> list[str]:
-    lowered = (prompt or "").strip().lower()
-    missing: list[str] = []
-    if not any(token in lowered for token in ("3x3", "3 x 3", "9-panel", "nine-panel")):
-        missing.append("missing_3x3_or_9panel")
-    if not any(token in lowered for token in ("collage", "grid", "panel")):
-        missing.append("missing_collage_grid_terms")
-    if "center panel" not in lowered and "middle panel" not in lowered:
-        missing.append("missing_center_panel_emphasis")
-    if "gutter" not in lowered and "border" not in lowered:
-        missing.append("missing_visible_gutter_or_border")
-    return missing
-
-
-def _travel_3x3_size_missing_requirements(width: int, height: int) -> list[str]:
-    missing: list[str] = []
-    if width <= 0 or height <= 0:
-        missing.append("invalid_dimensions")
-    elif width >= height:
-        missing.append("not_portrait_ratio")
-    return missing
-
-
-def _build_travel_3x3_retry_prompt(*, keyword: str, title: str, original_prompt: str) -> str:
-    return (
-        "Create one composite editorial 3x3 travel collage with exactly 9 distinct rectangular photo panels. "
-        "The center panel must be visually dominant and noticeably larger than each surrounding panel. "
-        "Use clean visible white gutters between panels. "
-        "Do not blend panels into one continuous scene. "
-        "No text overlays, no logos. "
-        f"Topic: {keyword}. Title context: {title}. "
-        f"Story direction: {original_prompt}"
-    )
-
-
-def _build_travel_inline_3x2_prompt(*, keyword: str, title: str, original_prompt: str) -> str:
-    try:
-        template = TRAVEL_INLINE_PROMPT_TEMPLATE_PATH.read_text(encoding="utf-8").strip()
-    except OSError:
-        template = ""
-    if template:
-        return (
-            template.replace("{keyword}", keyword)
-            .replace("{title}", title)
-            .replace("{story_direction}", original_prompt)
-            .strip()
-        )
-    return (
-        "Create one supporting travel collage image for in-article placement. "
-        "Layout must be a 3x2 grid with exactly 6 distinct rectangular panels. "
-        "Use visible white gutters between panels and coherent documentary-style travel photography. "
-        "No text overlays, no logos, no watermark. "
-        f"Topic: {keyword}. Title context: {title}. "
-        f"Story direction: {original_prompt}"
-    )
-
-
 def _build_blogger_inline_3x2_prompt(
     *,
     blog,
@@ -513,9 +590,11 @@ def _build_blogger_inline_3x2_prompt(
 
 def _blogger_inline_collage_enabled(settings_map: dict[str, str], blog) -> bool:
     if blog.profile_key == "world_mystery" or (blog.content_category or "").lower() == "mystery":
-        return _is_enabled_setting(settings_map.get("mystery_inline_collage_enabled"), default=True)
+        return False
+    if _travel_blog_policy(blog) is not None:
+        return False
     if _is_travel_blog(blog):
-        return _is_enabled_setting(settings_map.get("travel_inline_collage_enabled"), default=True)
+        return _is_enabled_setting(settings_map.get("travel_inline_collage_enabled"), default=False)
     return False
 
 
@@ -547,12 +626,28 @@ def _append_no_inline_image_rule(prompt: str) -> str:
         "[Inline image policy]\n"
         "- Do not output inline image tags or markdown image syntax in article body.\n"
         "- Never include <img>, <figure>, ![...](...) or collage marker text in body content.\n"
-        "- If the output schema includes inline_collage_prompt, use that separate field for one mid-article supporting collage.\n"
+        "- If inline_collage_prompt exists in the output schema, set it to null/empty unless an explicit profile policy enables inline visuals.\n"
         "- Keep raw image markup out of body content because the system inserts visuals after generation.\n"
     )
 
 
-def _append_hero_only_visual_rule(prompt: str) -> str:
+def _append_hero_only_visual_rule(
+    prompt: str,
+    *,
+    is_mystery: bool = False,
+) -> str:
+    if is_mystery:
+        return (
+            f"{prompt}\n\n"
+            "[Hero image policy]\n"
+            "- Generate one hero-cover image prompt only.\n"
+            '- Enforce "8-panel collage" with clear panel separation.\n'
+            '- Include "visible white gutters" and "clean grid layout".\n'
+            "- Keep composition center-focused or balanced.\n"
+            "- Keep wording concise for lightweight/free models (under 60 words).\n"
+            "- Limit scene direction to 2-4 grouped visual categories.\n"
+            "- Do not request inline, middle, secondary, or body images.\n"
+        )
     return (
         f"{prompt}\n\n"
         "[Hero image policy]\n"
@@ -893,6 +988,7 @@ def _run_blogger_quality_gate(
     article_provider_hint: str | None,
     runtime,
     base_prompt: str,
+    article_language: str | None,
     thresholds: dict[str, float],
 ):
     if not bool(thresholds.get("enabled", 1.0)):
@@ -923,21 +1019,16 @@ def _run_blogger_quality_gate(
 
         retry_prompt = _build_quality_gate_retry_prompt(base_prompt=base_prompt, failed_assessment=assessment)
         merge_prompt(db, job, "quality_gate_retry_prompt", retry_prompt)
-        retry_model = _resolve_stage_text_model_for_call(
+        retry_output, retry_raw = _generate_article_output_for_blog(
             db,
-            stage_type=WorkflowStageType.ARTICLE_GENERATION,
-            configured_model=article_configured_model,
-            runtime=runtime,
+            blog=blog,
             job=job,
-            provider_hint=article_provider_hint,
+            base_prompt=retry_prompt,
+            article_language=article_language,
+            article_provider_hint=article_provider_hint,
+            article_provider_model=article_configured_model,
+            runtime=runtime,
         )
-        retry_provider = get_article_provider(
-            db,
-            model_override=retry_model,
-            provider_hint=article_provider_hint,
-            allow_large=True,
-        )
-        retry_output, retry_raw = retry_provider.generate_article(job.keyword_snapshot, retry_prompt)
         retry_output = apply_pattern_defaults(
             retry_output,
             select_blogger_article_pattern(
@@ -959,6 +1050,37 @@ def _run_blogger_quality_gate(
         working_article = save_article(db, job=job, topic=topic, output=retry_output)
         working_output = retry_output
         working_article.inline_media = []
+        if _travel_blog_policy(blog) is not None and isinstance(working_article.render_metadata, dict):
+            working_article.render_metadata = {
+                **dict(working_article.render_metadata or {}),
+                "travel_planner": retry_raw.get("planner") if isinstance(retry_raw.get("planner"), dict) else {},
+                "travel_planner_summary": str(retry_raw.get("planner_summary") or "").strip(),
+                "travel_models": dict(retry_raw.get("models") or {}) if isinstance(retry_raw, dict) else {},
+            }
+        elif (blog.profile_key == "world_mystery" or (blog.content_category or "").lower() == "mystery") and isinstance(
+            working_article.render_metadata,
+            dict,
+        ):
+            planner = retry_raw.get("planner") if isinstance(retry_raw, dict) else None
+            passes = retry_raw.get("passes") if isinstance(retry_raw, dict) else None
+            validation = retry_raw.get("validation") if isinstance(retry_raw, dict) else None
+            normalized_mystery_passes = list(passes or []) if isinstance(passes, list) else []
+            mystery_pass_slots: dict[str, dict] = {f"mystery_pass{index}": {} for index in range(1, 5)}
+            for entry in normalized_mystery_passes:
+                if not isinstance(entry, dict):
+                    continue
+                index = int(entry.get("index") or 0)
+                if 1 <= index <= 4:
+                    mystery_pass_slots[f"mystery_pass{index}"] = dict(entry)
+            working_article.render_metadata = {
+                **dict(working_article.render_metadata or {}),
+                "mystery_planner": planner if isinstance(planner, dict) else {},
+                "mystery_planner_summary": str(retry_raw.get("planner_summary") or "").strip() if isinstance(retry_raw, dict) else "",
+                "mystery_passes": normalized_mystery_passes,
+                **mystery_pass_slots,
+                "mystery_validation": dict(validation or {}) if isinstance(validation, dict) else {},
+                "mystery_models": dict(retry_raw.get("models") or {}) if isinstance(retry_raw, dict) else {},
+            }
         db.add(working_article)
         db.commit()
         db.refresh(working_article)
@@ -1593,6 +1715,8 @@ def discover_topics_and_enqueue(
 
     topic_step = _require_enabled_step(blog, WorkflowStageType.TOPIC_DISCOVERY)
     runtime = get_runtime_config(db)
+    is_mystery_profile = blog.profile_key == "world_mystery" or (blog.content_category or "").lower() == "mystery"
+    resolved_topic_provider_hint = CODEX_TEXT_RUNTIME_KIND if is_mystery_profile else topic_step.provider_hint
     topic_model = _resolve_stage_text_model(
         stage_type=WorkflowStageType.TOPIC_DISCOVERY,
         configured_model=topic_step.provider_model or runtime.topic_discovery_model,
@@ -1607,7 +1731,7 @@ def discover_topics_and_enqueue(
     topic_provider_name = _enforce_topic_provider_limits(
         db,
         blog=blog,
-        provider_hint=topic_step.provider_hint,
+        provider_hint=resolved_topic_provider_hint,
         model_override=topic_model,
     )
     base_exclusion_prompt = build_duplicate_exclusion_prompt(db, blog_id=blog.id)
@@ -1724,12 +1848,12 @@ def discover_topics_and_enqueue(
                 stage_type=WorkflowStageType.TOPIC_DISCOVERY,
                 configured_model=topic_step.provider_model or runtime.topic_discovery_model,
                 runtime=runtime,
-                provider_hint=topic_step.provider_hint,
+                provider_hint=resolved_topic_provider_hint,
             )
 
         provider = get_topic_provider(
             db,
-            provider_hint=topic_step.provider_hint,
+            provider_hint=resolved_topic_provider_hint,
             model_override=topic_model,
         )
         payload, raw_response = provider.discover_topics(prompt)
@@ -2163,6 +2287,7 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
     planner_brief_payload = _extract_planner_brief_payload(job)
     planner_brief_text = _format_planner_brief_for_prompt(planner_brief_payload)
     bundle_key = str(planner_brief_payload.get("bundle_key") or "").strip()
+    article_language = resolve_blog_bundle_language(blog) or blog.primary_language
 
     article_step = _require_enabled_step(blog, WorkflowStageType.ARTICLE_GENERATION)
     image_generation_step = _require_enabled_step(blog, WorkflowStageType.IMAGE_GENERATION)
@@ -2206,25 +2331,51 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
     )
     rendered_article_prompt = _append_no_inline_image_rule(rendered_article_prompt)
     merge_prompt(db, job, article_step.stage_type.value, rendered_article_prompt)
-    article_model = _resolve_stage_text_model_for_call(
+    article_output, article_raw = _generate_article_output_for_blog(
         db,
-        stage_type=WorkflowStageType.ARTICLE_GENERATION,
-        configured_model=article_step.provider_model,
-        runtime=runtime,
+        blog=blog,
         job=job,
-        provider_hint=article_step.provider_hint,
+        base_prompt=rendered_article_prompt,
+        article_language=article_language,
+        article_provider_hint=article_step.provider_hint,
+        article_provider_model=article_step.provider_model,
+        runtime=runtime,
     )
-    article_provider = get_article_provider(
-        db,
-        model_override=article_model,
-        provider_hint=article_step.provider_hint,
-        allow_large=True,
-    )
-    article_output, article_raw = article_provider.generate_article(job.keyword_snapshot, rendered_article_prompt)
     article_output = apply_pattern_defaults(article_output, article_pattern_selection)
     merge_response(db, job, article_step.stage_type.value, article_raw)
     article = save_article(db, job=job, topic=topic, output=article_output)
     article.inline_media = []
+    if _travel_blog_policy(blog) is not None and isinstance(article.render_metadata, dict):
+        planner = article_raw.get("planner") if isinstance(article_raw, dict) else None
+        planner_summary = article_raw.get("planner_summary") if isinstance(article_raw, dict) else None
+        article.render_metadata = {
+            **dict(article.render_metadata or {}),
+            "travel_planner": planner if isinstance(planner, dict) else {},
+            "travel_planner_summary": str(planner_summary or "").strip(),
+            "travel_models": dict(article_raw.get("models") or {}) if isinstance(article_raw, dict) else {},
+        }
+    elif is_mystery_blog and isinstance(article.render_metadata, dict):
+        planner = article_raw.get("planner") if isinstance(article_raw, dict) else None
+        planner_summary = article_raw.get("planner_summary") if isinstance(article_raw, dict) else None
+        passes = article_raw.get("passes") if isinstance(article_raw, dict) else None
+        validation = article_raw.get("validation") if isinstance(article_raw, dict) else None
+        normalized_mystery_passes = list(passes or []) if isinstance(passes, list) else []
+        mystery_pass_slots: dict[str, dict] = {f"mystery_pass{index}": {} for index in range(1, 5)}
+        for entry in normalized_mystery_passes:
+            if not isinstance(entry, dict):
+                continue
+            index = int(entry.get("index") or 0)
+            if 1 <= index <= 4:
+                mystery_pass_slots[f"mystery_pass{index}"] = dict(entry)
+        article.render_metadata = {
+            **dict(article.render_metadata or {}),
+            "mystery_planner": planner if isinstance(planner, dict) else {},
+            "mystery_planner_summary": str(planner_summary or "").strip(),
+            "mystery_passes": normalized_mystery_passes,
+            **mystery_pass_slots,
+            "mystery_validation": dict(validation or {}) if isinstance(validation, dict) else {},
+            "mystery_models": dict(article_raw.get("models") or {}) if isinstance(article_raw, dict) else {},
+        }
     db.add(article)
     db.commit()
     db.refresh(article)
@@ -2244,6 +2395,7 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
             article_provider_hint=article_step.provider_hint,
             runtime=runtime,
             base_prompt=rendered_article_prompt,
+            article_language=article_language,
             thresholds=quality_gate_thresholds,
         )
     except QualityGateError as exc:
@@ -2269,24 +2421,44 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
         f"{blog.name} preparing visual prompt.",
     )
 
-    if is_mystery_blog:
-        rendered_visual_prompt = (
-            (article.image_collage_prompt or "").strip()
-            or f"Documentary style mystery cover image for {job.keyword_snapshot}."
+    hero_prompt_from_article = normalize_visual_prompt(article.image_collage_prompt or final_article_output.image_collage_prompt)
+    inline_collage_prompt_value = normalize_visual_prompt(getattr(final_article_output, "inline_collage_prompt", "") or "")
+    reuse_article_prompts, hero_prompt_valid, inline_prompt_valid = should_reuse_article_collage_prompts(
+        hero_prompt=hero_prompt_from_article,
+        inline_prompt=inline_collage_prompt_value,
+        inline_required=inline_collage_enabled,
+    )
+    travel_policy = _travel_blog_policy(blog)
+    travel_planner_summary = ""
+    if travel_policy is not None and isinstance(article.render_metadata, dict):
+        travel_planner_summary = str(article.render_metadata.get("travel_planner_summary") or "").strip()
+
+    if reuse_article_prompts:
+        rendered_visual_prompt = _append_hero_only_visual_rule(
+            hero_prompt_from_article,
+            is_mystery=is_mystery_blog,
         )
-        rendered_visual_prompt = _append_hero_only_visual_rule(rendered_visual_prompt)
+        if image_prompt_step:
+            merge_prompt(
+                db,
+                job,
+                image_prompt_step.stage_type.value,
+                "[prompt_reuse] Reused article-provided collage prompts. Fallback image prompt stage was skipped.",
+            )
         merge_response(
             db,
             job,
             WorkflowStageType.IMAGE_PROMPT_GENERATION.value,
             {
                 "prompt": rendered_visual_prompt,
-                "source": "wikimedia_mode",
+                "source": "article_generation_reuse",
                 "skipped": True,
-                "reason": "Mystery profile uses Wikimedia Commons images instead of generated collage.",
+                "request_saver_mode": request_saver_mode,
+                "article_prompt_valid": hero_prompt_valid,
+                "inline_prompt_valid": inline_prompt_valid,
             },
         )
-    elif image_prompt_step and not request_saver_mode:
+    elif image_prompt_step:
         rendered_visual_prompt_request = render_agent_prompt(
             db,
             blog,
@@ -2294,6 +2466,7 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
             keyword=job.keyword_snapshot,
             article_title=article.title,
             article_excerpt=article.excerpt,
+            original_prompt=hero_prompt_from_article,
             planner_brief=planner_brief_text,
             editorial_category_key=topic_editorial_key,
             editorial_category_label=topic_editorial_label,
@@ -2303,55 +2476,88 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
                     f"Title: {article.title}",
                     f"Excerpt: {article.excerpt}",
                     f"Labels: {', '.join(article.labels or [])}",
-                    f"Article HTML: {article.html_article}",
+                    f"Planner structure summary: {travel_planner_summary}",
+                    f"Topic key cues: {job.keyword_snapshot}",
                 ]
             ),
         )
-        rendered_visual_prompt_request = _append_hero_only_visual_rule(rendered_visual_prompt_request)
+        rendered_visual_prompt_request = _append_hero_only_visual_rule(
+            rendered_visual_prompt_request,
+            is_mystery=is_mystery_blog,
+        )
         merge_prompt(db, job, image_prompt_step.stage_type.value, rendered_visual_prompt_request)
-        prompt_refinement_model = _resolve_stage_text_model_for_call(
-            db,
-            stage_type=WorkflowStageType.IMAGE_PROMPT_GENERATION,
-            configured_model=image_prompt_step.provider_model,
-            runtime=runtime,
-            job=job,
-            provider_hint=image_prompt_step.provider_hint,
+        travel_image_prompt_config = (
+            build_travel_policy_config(
+                travel_policy,
+                stage_type=WorkflowStageType.IMAGE_PROMPT_GENERATION.value,
+                values=settings_map,
+            )
+            if travel_policy is not None
+            else None
+        )
+        prompt_refinement_model = (
+            str(travel_image_prompt_config.get("provider_model") or "")
+            if isinstance(travel_image_prompt_config, dict)
+            else _resolve_stage_text_model_for_call(
+                db,
+                stage_type=WorkflowStageType.IMAGE_PROMPT_GENERATION,
+                configured_model=image_prompt_step.provider_model,
+                runtime=runtime,
+                job=job,
+                provider_hint=image_prompt_step.provider_hint,
+            )
         )
         prompt_refinement_provider = get_article_provider(
             db,
             model_override=prompt_refinement_model,
-            provider_hint=image_prompt_step.provider_hint,
+            provider_hint=(
+                str(travel_image_prompt_config.get("provider_hint") or "")
+                if isinstance(travel_image_prompt_config, dict)
+                else image_prompt_step.provider_hint
+            ),
             allow_large=False,
         )
         rendered_visual_prompt, visual_prompt_raw = prompt_refinement_provider.generate_visual_prompt(
             rendered_visual_prompt_request
         )
-        rendered_visual_prompt = _append_hero_only_visual_rule(rendered_visual_prompt)
+        rendered_visual_prompt = normalize_visual_prompt(rendered_visual_prompt)
+        prompt_validation_failed = not is_valid_collage_prompt(rendered_visual_prompt)
+        if prompt_validation_failed:
+            rendered_visual_prompt = normalize_visual_prompt(build_collage_prompt(article))
+        rendered_visual_prompt = _append_hero_only_visual_rule(
+            rendered_visual_prompt,
+            is_mystery=is_mystery_blog,
+        )
         merge_response(
             db,
             job,
             image_prompt_step.stage_type.value,
-            {"prompt": rendered_visual_prompt, "raw": visual_prompt_raw, "source": "agent"},
+            {
+                "prompt": rendered_visual_prompt,
+                "raw": visual_prompt_raw,
+                "source": "image_prompt_generation_fallback" if not prompt_validation_failed else "local_collage_fallback",
+                "request_saver_mode": request_saver_mode,
+                "article_prompt_valid": hero_prompt_valid,
+                "inline_prompt_valid": inline_prompt_valid,
+                "validation_failed": prompt_validation_failed,
+            },
         )
     else:
-        rendered_visual_prompt = (article.image_collage_prompt or "").strip() or build_collage_prompt(article)
-        rendered_visual_prompt = _append_hero_only_visual_rule(rendered_visual_prompt)
-        source = "article_generation_request_saver" if request_saver_mode else "article_fallback"
-        if image_prompt_step and request_saver_mode:
-            merge_prompt(
-                db,
-                job,
-                image_prompt_step.stage_type.value,
-                "[request_saver_mode] Reused article.image_collage_prompt without extra LLM call.",
-            )
+        rendered_visual_prompt = hero_prompt_from_article or normalize_visual_prompt(build_collage_prompt(article))
+        rendered_visual_prompt = _append_hero_only_visual_rule(
+            rendered_visual_prompt,
+            is_mystery=is_mystery_blog,
+        )
         merge_response(
             db,
             job,
             WorkflowStageType.IMAGE_PROMPT_GENERATION.value,
             {
                 "prompt": rendered_visual_prompt,
-                "source": source,
-                "request_saved": request_saver_mode,
+                "source": "local_collage_fallback_no_stage",
+                "request_saver_mode": request_saver_mode,
+                "article_prompt_valid": hero_prompt_valid,
+                "inline_prompt_valid": inline_prompt_valid,
             },
         )
 
@@ -2359,13 +2565,12 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
     db.add(article)
     db.commit()
     db.refresh(article)
-    inline_collage_prompt_value = str(getattr(final_article_output, "inline_collage_prompt", "") or "").strip()
     inline_article_context = "\n".join(
         [
             f"Title: {article.title}",
             f"Excerpt: {article.excerpt}",
             f"Labels: {', '.join(article.labels or [])}",
-            f"Article HTML: {article.html_article}",
+            f"Planner structure summary: {travel_planner_summary}",
         ]
     )
     if _complete_early_if_needed(db, job, completed_stage=JobStatus.GENERATING_IMAGE_PROMPT, blog=blog):
@@ -2375,19 +2580,41 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
         db,
         job,
         JobStatus.GENERATING_IMAGE,
-        f"{blog.name} preparing hero/inline images.",
+        f"{blog.name} preparing {'hero image' if (travel_policy is not None or is_mystery_blog) else 'hero/inline images'}.",
     )
 
     def _generate_and_store(prompt_value: str, *, asset_role: str = "hero") -> tuple[Image, str]:
-        image_bytes, image_raw = image_provider.generate_image(prompt_value, article.slug)
+        image_bytes, image_raw = image_provider.generate_image(
+            prompt_value,
+            article.slug,
+            size_override=(
+                travel_policy.image_size
+                if travel_policy is not None
+                else "1024x1024"
+                if is_mystery_blog
+                else None
+            ),
+        )
+        if travel_policy is not None:
+            image_raw = {
+                **dict(image_raw or {}),
+                "requested_model": travel_policy.locked_image_model,
+                "actual_model": travel_policy.locked_image_model,
+                "policy_version": TRAVEL_IMAGE_POLICY_VERSION,
+                "image_layout_policy": travel_policy.image_layout_policy,
+                "panel_count": travel_policy.panel_count,
+                "hero_only": travel_policy.hero_only,
+                "inline_disabled": travel_policy.inline_disabled,
+            }
         object_key = build_article_r2_asset_object_key(
             article,
             asset_role=asset_role,
             content=image_bytes,
         )
+        image_subdir = "images/mystery" if is_mystery_blog else "images"
         file_path, public_url, delivery_meta = save_public_binary(
             db,
-            subdir="images",
+            subdir=image_subdir,
             filename=f"{article.slug}.webp",
             content=image_bytes,
             object_key=object_key,
@@ -2405,54 +2632,89 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
         )
         return image, public_url
 
-    hero_image_url = ""
-    if is_mystery_blog:
-        media_target = _coerce_non_negative_int(settings_map.get("wikimedia_image_count"), 3) or 3
-        media_items = fetch_wikimedia_media(job.keyword_snapshot, count=media_target)
-        article.inline_media = []
-        db.add(article)
-        db.commit()
-        db.refresh(article)
-        hero_image_url = (
-            str(media_items[0].get("image_url") or media_items[0].get("thumb_url") or "")
-            if media_items
-            else ""
-        )
+    generation_attempts: list[dict] = []
+    image, hero_image_url = _generate_and_store(rendered_visual_prompt, asset_role="hero")
+    generation_attempts.append(
+        {
+            "attempt": 1,
+            "prompt": rendered_visual_prompt,
+            "width": image.width,
+            "height": image.height,
+            "provider": image.provider,
+        }
+    )
 
-        fallback_image_payload: dict | None = None
-        if not hero_image_url:
-            fallback_prompt = (
-                (rendered_visual_prompt or "").strip()
-                or f"Documentary style mystery cover image for {job.keyword_snapshot}."
+    panel_gate_payload: dict | None = None
+    inline_collage_payload: dict | None = None
+    if travel_policy is not None:
+        prompt_missing = travel_panel_prompt_missing_requirements(rendered_visual_prompt)
+        size_missing = travel_panel_size_missing_requirements(int(image.width or 0), int(image.height or 0))
+        panel_gate_payload = {
+            "policy": travel_policy.image_layout_policy,
+            "policy_version": travel_policy.image_policy_version,
+            "passed": not prompt_missing and not size_missing,
+            "prompt_missing": prompt_missing,
+            "size_missing": size_missing,
+        }
+        if not panel_gate_payload["passed"]:
+            retry_prompt = build_travel_8panel_retry_prompt(
+                policy=travel_policy,
+                keyword=job.keyword_snapshot,
+                title=article.title,
+                original_prompt=rendered_visual_prompt,
             )
-            fallback_image, fallback_public_url = _generate_and_store(fallback_prompt, asset_role="hero")
-            hero_image_url = fallback_public_url
-            fallback_image_payload = {
-                "reason": "wikimedia_empty_result",
-                "prompt": fallback_prompt,
-                "public_url": fallback_public_url,
-                "provider": fallback_image.provider,
-                "width": fallback_image.width,
-                "height": fallback_image.height,
-                "delivery": (
-                    fallback_image.image_metadata.get("delivery")
-                    if isinstance(fallback_image.image_metadata, dict)
-                    else None
-                ),
+            retry_image, retry_public_url = _generate_and_store(retry_prompt, asset_role="hero-retry")
+            retry_prompt_missing = travel_panel_prompt_missing_requirements(retry_prompt)
+            retry_size_missing = travel_panel_size_missing_requirements(
+                int(retry_image.width or 0),
+                int(retry_image.height or 0),
+            )
+            retry_passed = not retry_prompt_missing and not retry_size_missing
+
+            generation_attempts.append(
+                {
+                    "attempt": 2,
+                    "prompt": retry_prompt,
+                    "width": retry_image.width,
+                    "height": retry_image.height,
+                    "provider": retry_image.provider,
+                }
+            )
+            panel_gate_payload["retry"] = {
+                "passed": retry_passed,
+                "prompt_missing": retry_prompt_missing,
+                "size_missing": retry_size_missing,
             }
 
-        merge_response(
-            db,
-            job,
-            image_generation_step.stage_type.value,
-            {
-                "provider": "wikimedia_commons",
-                "collected": len(media_items),
-                "hero_image_url": hero_image_url or None,
-                "items": media_items,
-                "fallback_generated_image": fallback_image_payload,
-            },
-        )
+            image = retry_image
+            hero_image_url = retry_public_url
+            rendered_visual_prompt = retry_prompt
+            article.image_collage_prompt = retry_prompt
+            db.add(article)
+            db.commit()
+            db.refresh(article)
+
+            if not retry_passed:
+                merge_response(
+                    db,
+                    job,
+                    image_generation_step.stage_type.value,
+                    {
+                        "public_url": hero_image_url,
+                        "provider": image.provider,
+                        "delivery": (
+                            image.image_metadata.get("delivery")
+                            if isinstance(image.image_metadata, dict)
+                            else None
+                        ),
+                        "attempts": generation_attempts,
+                        "panel_gate": panel_gate_payload,
+                    },
+                )
+                raise ValueError(
+                    "travel_8panel_panel_gate_failed: generated image did not satisfy 8-panel travel requirements."
+                )
+
         if inline_collage_enabled:
             inline_prompt = _build_blogger_inline_3x2_prompt(
                 blog=blog,
@@ -2480,7 +2742,7 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
                 )
                 article.inline_media = [
                     {
-                        "slot": "mystery-inline-3x2",
+                        "slot": "travel-inline-3x2",
                         "kind": "collage",
                         "image_url": inline_public_url,
                         "file_path": inline_file_path,
@@ -2493,209 +2755,36 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
                 db.add(article)
                 db.commit()
                 db.refresh(article)
-                merge_response(
-                    db,
-                    job,
-                    image_generation_step.stage_type.value,
-                    {
-                        "inline_collage": {
-                            "status": "created",
-                            "slot": "mystery-inline-3x2",
-                            "public_url": inline_public_url,
-                            "prompt": inline_prompt,
-                            "width": int(inline_raw.get("width", 0) or 0),
-                            "height": int(inline_raw.get("height", 0) or 0),
-                            "delivery": inline_delivery,
-                        }
-                    },
-                )
+                inline_collage_payload = {
+                    "status": "created",
+                    "slot": "travel-inline-3x2",
+                    "public_url": inline_public_url,
+                    "prompt": inline_prompt,
+                    "width": int(inline_raw.get("width", 0) or 0),
+                    "height": int(inline_raw.get("height", 0) or 0),
+                    "delivery": inline_delivery,
+                }
             except Exception as inline_exc:  # noqa: BLE001
                 article.inline_media = []
                 db.add(article)
                 db.commit()
                 db.refresh(article)
-                merge_response(
-                    db,
-                    job,
-                    image_generation_step.stage_type.value,
-                    {
-                        "inline_collage": {
-                            "status": "failed",
-                            "slot": "mystery-inline-3x2",
-                            "prompt": inline_prompt,
-                            "reason": str(inline_exc),
-                        }
-                    },
-                )
+                inline_collage_payload = {
+                    "status": "failed",
+                    "slot": "travel-inline-3x2",
+                    "prompt": inline_prompt,
+                    "reason": str(inline_exc),
+                }
         else:
             article.inline_media = []
             db.add(article)
             db.commit()
             db.refresh(article)
-            merge_response(
-                db,
-                job,
-                image_generation_step.stage_type.value,
-                {
-                    "inline_collage": {
-                        "status": "skipped",
-                        "slot": "mystery-inline-3x2",
-                        "reason": "policy_disabled",
-                    }
-                },
-            )
-    else:
-        generation_attempts: list[dict] = []
-        image, hero_image_url = _generate_and_store(rendered_visual_prompt, asset_role="hero")
-        generation_attempts.append(
-            {
-                "attempt": 1,
-                "prompt": rendered_visual_prompt,
-                "width": image.width,
-                "height": image.height,
-                "provider": image.provider,
+            inline_collage_payload = {
+                "status": "skipped",
+                "slot": "travel-inline-3x2",
+                "reason": "policy_disabled",
             }
-        )
-
-        panel_gate_payload: dict | None = None
-        inline_collage_payload: dict | None = None
-        if _is_travel_blog(blog):
-            prompt_missing = _travel_3x3_prompt_missing_requirements(rendered_visual_prompt)
-            size_missing = _travel_3x3_size_missing_requirements(int(image.width or 0), int(image.height or 0))
-            panel_gate_payload = {
-                "policy": "travel_3x3_center_emphasis",
-                "passed": not prompt_missing and not size_missing,
-                "prompt_missing": prompt_missing,
-                "size_missing": size_missing,
-            }
-            if not panel_gate_payload["passed"]:
-                retry_prompt = _build_travel_3x3_retry_prompt(
-                    keyword=job.keyword_snapshot,
-                    title=article.title,
-                    original_prompt=rendered_visual_prompt,
-                )
-                retry_image, retry_public_url = _generate_and_store(retry_prompt, asset_role="hero-retry")
-                retry_prompt_missing = _travel_3x3_prompt_missing_requirements(retry_prompt)
-                retry_size_missing = _travel_3x3_size_missing_requirements(
-                    int(retry_image.width or 0),
-                    int(retry_image.height or 0),
-                )
-                retry_passed = not retry_prompt_missing and not retry_size_missing
-
-                generation_attempts.append(
-                    {
-                        "attempt": 2,
-                        "prompt": retry_prompt,
-                        "width": retry_image.width,
-                        "height": retry_image.height,
-                        "provider": retry_image.provider,
-                    }
-                )
-                panel_gate_payload["retry"] = {
-                    "passed": retry_passed,
-                    "prompt_missing": retry_prompt_missing,
-                    "size_missing": retry_size_missing,
-                }
-
-                image = retry_image
-                hero_image_url = retry_public_url
-                rendered_visual_prompt = retry_prompt
-                article.image_collage_prompt = retry_prompt
-                db.add(article)
-                db.commit()
-                db.refresh(article)
-
-                if not retry_passed:
-                    merge_response(
-                        db,
-                        job,
-                        image_generation_step.stage_type.value,
-                        {
-                            "public_url": hero_image_url,
-                            "provider": image.provider,
-                            "delivery": (
-                                image.image_metadata.get("delivery")
-                                if isinstance(image.image_metadata, dict)
-                                else None
-                            ),
-                            "attempts": generation_attempts,
-                            "panel_gate": panel_gate_payload,
-                        },
-                    )
-                    raise ValueError(
-                        "travel_3x3_panel_gate_failed: generated image did not satisfy 3x3/center-emphasis requirements."
-                    )
-
-            if inline_collage_enabled:
-                inline_prompt = _build_blogger_inline_3x2_prompt(
-                    blog=blog,
-                    keyword=job.keyword_snapshot,
-                    article_title=article.title,
-                    article_excerpt=article.excerpt,
-                    article_context=inline_article_context,
-                    original_prompt=rendered_visual_prompt,
-                    editorial_category_label=topic_editorial_label,
-                    inline_collage_prompt=inline_collage_prompt_value,
-                )
-                try:
-                    inline_bytes, inline_raw = image_provider.generate_image(inline_prompt, f"{article.slug}-inline-3x2")
-                    inline_object_key = build_article_r2_asset_object_key(
-                        article,
-                        asset_role="inline-3x2",
-                        content=inline_bytes,
-                    )
-                    inline_file_path, inline_public_url, inline_delivery = save_public_binary(
-                        db,
-                        subdir="images",
-                        filename=f"{article.slug}-inline-3x2.webp",
-                        content=inline_bytes,
-                        object_key=inline_object_key,
-                    )
-                    article.inline_media = [
-                        {
-                            "slot": "travel-inline-3x2",
-                            "kind": "collage",
-                            "image_url": inline_public_url,
-                            "file_path": inline_file_path,
-                            "prompt": inline_prompt,
-                            "width": int(inline_raw.get("width", 0) or 0),
-                            "height": int(inline_raw.get("height", 0) or 0),
-                            "delivery": inline_delivery,
-                        }
-                    ]
-                    db.add(article)
-                    db.commit()
-                    db.refresh(article)
-                    inline_collage_payload = {
-                        "status": "created",
-                        "slot": "travel-inline-3x2",
-                        "public_url": inline_public_url,
-                        "prompt": inline_prompt,
-                        "width": int(inline_raw.get("width", 0) or 0),
-                        "height": int(inline_raw.get("height", 0) or 0),
-                        "delivery": inline_delivery,
-                    }
-                except Exception as inline_exc:  # noqa: BLE001
-                    article.inline_media = []
-                    db.add(article)
-                    db.commit()
-                    db.refresh(article)
-                    inline_collage_payload = {
-                        "status": "failed",
-                        "slot": "travel-inline-3x2",
-                        "prompt": inline_prompt,
-                        "reason": str(inline_exc),
-                    }
-            else:
-                article.inline_media = []
-                db.add(article)
-                db.commit()
-                db.refresh(article)
-                inline_collage_payload = {
-                    "status": "skipped",
-                    "slot": "travel-inline-3x2",
-                    "reason": "policy_disabled",
-                }
 
         merge_response(
             db,
@@ -2883,6 +2972,8 @@ def run_job(self: Task, job_id: int, force_retry: bool = False) -> dict:
                 {
                     "message": str(exc),
                     "detail": getattr(exc, "detail", None),
+                    "provider": getattr(exc, "provider", None),
+                    "status_code": getattr(exc, "status_code", None),
                     "attempt": job.attempt_count,
                     "temporary": True,
                     "timestamp": datetime.now(timezone.utc).isoformat(),

@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     public_api_base_url: str = "http://localhost:8000"
     public_web_base_url: str = "http://localhost:3000"
     storage_root: str = "/app/storage"
+    strict_storage_root: bool = True
+    strict_r2_key_schema: bool = True
+    mystery_single_main_image_only: bool = True
+    mystery_storage_subdir: str = "images/mystery"
+    mystery_storage_root_windows: str = r"D:\Donggri_Runtime\BloggerGent\storage"
     public_image_provider: str = "cloudflare_r2"
     public_asset_base_url: str = ""
     cloudflare_account_id: str = ""
@@ -22,6 +27,12 @@ class Settings(BaseSettings):
     cloudflare_r2_secret_access_key: str = ""
     cloudflare_r2_public_base_url: str = ""
     cloudflare_r2_prefix: str = "assets/images"
+    mystery_cloudflare_account_id: str = ""
+    mystery_cloudflare_r2_bucket: str = ""
+    mystery_cloudflare_r2_access_key_id: str = ""
+    mystery_cloudflare_r2_secret_access_key: str = ""
+    mystery_cloudflare_r2_public_base_url: str = ""
+    mystery_cloudflare_r2_prefix: str = "assets/the-midnight-archives"
     cloudflare_cdn_transform_enabled: bool = False
     github_pages_owner: str = ""
     github_pages_repo: str = ""
@@ -39,8 +50,8 @@ class Settings(BaseSettings):
     travel_schedule_time: str = "00:00"
     travel_schedule_interval_hours: int = 2
     travel_topics_per_run: int = 1
-    travel_inline_collage_enabled: bool = True
-    mystery_inline_collage_enabled: bool = True
+    travel_inline_collage_enabled: bool = False
+    mystery_inline_collage_enabled: bool = False
     mystery_schedule_time: str = "01:00"
     mystery_schedule_interval_hours: int = 2
     mystery_topics_per_run: int = 1
@@ -61,8 +72,9 @@ class Settings(BaseSettings):
     publish_min_interval_seconds: int = 300
     openai_api_key: str = ""
     openai_admin_api_key: str = ""
-    openai_text_model: str = "gpt-4.1-2025-04-14"
-    article_generation_model: str = "gpt-4.1-2025-04-14"
+    openai_text_model: str = "gpt-5.4-2026-03-05"
+    article_generation_model: str = "gpt-5.4-mini-2026-03-17"
+    image_prompt_generation_model: str = "gpt-5.4-mini-2026-03-17"
     openai_image_model: str = "gpt-image-1"
     text_runtime_kind: str = "openai"
     text_runtime_model: str = "gpt-5.4"
@@ -71,7 +83,7 @@ class Settings(BaseSettings):
     openai_usage_hard_cap_enabled: bool = True
     openai_request_saver_mode: bool = True
     topic_discovery_provider: str = "openai"
-    topic_discovery_model: str = "gpt-4.1-2025-04-14"
+    topic_discovery_model: str = "gpt-5.4-2026-03-05"
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
     gemini_daily_request_limit: int = 6
@@ -137,4 +149,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-

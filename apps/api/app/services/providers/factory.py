@@ -6,6 +6,7 @@ from app.models.entities import Blog
 from app.services.ops.model_policy_service import (
     CODEX_TEXT_RUNTIME_KIND,
     CODEX_TEXT_RUNTIME_MODEL,
+    DEFAULT_TEXT_MODEL,
     OPENAI_IMAGE_RUNTIME_KIND,
     OPENAI_TEXT_RUNTIME_KIND,
 )
@@ -15,20 +16,27 @@ from app.services.providers.blogger import BloggerPublishingProvider
 from app.services.providers.codex_cli import CodexCLITextProvider
 from app.services.providers.gemini import GeminiTopicDiscoveryProvider
 from app.services.providers.mock import MockArticleProvider, MockBloggerProvider, MockImageProvider, MockTopicDiscoveryProvider
-from app.services.providers.openai import OpenAIArticleProvider, OpenAIImageProvider, OpenAITopicDiscoveryProvider
+from app.services.providers.openai import (
+    ENFORCED_OPENAI_IMAGE_MODEL,
+    OpenAIArticleProvider,
+    OpenAIImageProvider,
+    OpenAITopicDiscoveryProvider,
+    resolve_enforced_openai_image_model,
+)
 from app.services.blogger.blogger_oauth_service import BloggerOAuthError, get_valid_blogger_access_token
 from app.services.integrations.settings_service import get_settings_map
 
 
 def get_runtime_config(db: Session) -> RuntimeProviderConfig:
     values = get_settings_map(db)
+    resolved_image_model = resolve_enforced_openai_image_model(values.get("openai_image_model", ENFORCED_OPENAI_IMAGE_MODEL))
     return RuntimeProviderConfig(
         provider_mode=values.get("provider_mode", "mock"),
         openai_api_key=values.get("openai_api_key", ""),
-        openai_text_model=values.get("openai_text_model", "gpt-4.1-2025-04-14"),
-        openai_image_model=values.get("openai_image_model", "gpt-image-1"),
+        openai_text_model=values.get("openai_text_model", DEFAULT_TEXT_MODEL),
+        openai_image_model=resolved_image_model,
         topic_discovery_provider=values.get("topic_discovery_provider", OPENAI_TEXT_RUNTIME_KIND),
-        topic_discovery_model=values.get("topic_discovery_model", values.get("openai_text_model", "gpt-4.1-2025-04-14")),
+        topic_discovery_model=values.get("topic_discovery_model", values.get("openai_text_model", DEFAULT_TEXT_MODEL)),
         gemini_api_key=values.get("gemini_api_key", ""),
         gemini_model=values.get("gemini_model", "gemini-2.5-flash"),
         blogger_access_token=values.get("blogger_access_token", ""),
@@ -97,8 +105,9 @@ def get_image_provider(db: Session, model_override: str | None = None):
                 message="OpenAI image API key is required for live image generation.",
                 detail="provider_mode=live; openai_api_key is missing",
             )
-        assert_openai_api_stage_allowed(db, stage_name="image_generation")
-        return OpenAIImageProvider(api_key=runtime.openai_api_key, model=model_override or runtime.openai_image_model)
+        assert_openai_api_stage_allowed(db, stage_name="image_generation", bulk_image=True)
+        resolved_model = resolve_enforced_openai_image_model(model_override or runtime.openai_image_model)
+        return OpenAIImageProvider(api_key=runtime.openai_api_key, model=resolved_model)
     return MockImageProvider()
 
 
@@ -107,8 +116,19 @@ def get_blogger_provider(db: Session, blog: Blog):
     if runtime.provider_mode == "live" and (blog.blogger_blog_id or "").strip():
         try:
             access_token = get_valid_blogger_access_token(db)
-        except BloggerOAuthError:
-            access_token = ""
-        if access_token:
-            return BloggerPublishingProvider(access_token=access_token, blog_id=blog.blogger_blog_id or "")
+        except BloggerOAuthError as exc:
+            raise ProviderRuntimeError(
+                provider="blogger",
+                status_code=exc.status_code,
+                message="Blogger OAuth token is unavailable for live publishing.",
+                detail=exc.detail,
+            ) from exc
+        if not access_token:
+            raise ProviderRuntimeError(
+                provider="blogger",
+                status_code=401,
+                message="Blogger access token is unavailable for live publishing.",
+                detail="get_valid_blogger_access_token returned an empty token.",
+            )
+        return BloggerPublishingProvider(access_token=access_token, blog_id=blog.blogger_blog_id or "")
     return MockBloggerProvider()

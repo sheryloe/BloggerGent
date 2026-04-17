@@ -19,7 +19,7 @@
       "role_name": "인스타그램 캡션 에이전트",
       "objective": "게시 캡션과 해시태그 초안을 생성합니다.",
       "provider_hint": "claude_cli",
-      "provider_model": "claude-sonnet",
+      "provider_model": "gpt-5.4-mini-2026-03-17",
       "is_enabled": true,
       "is_required": false,
       "prompt_enabled": true,

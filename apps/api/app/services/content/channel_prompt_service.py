@@ -11,7 +11,7 @@ import stat
 from textwrap import dedent
 
 from slugify import slugify
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from app.core.config import settings
 from app.models.entities import BlogAgentConfig, WorkflowStageType
@@ -34,12 +34,16 @@ from app.services.cloudflare.cloudflare_channel_service import (
 from app.services.platform.platform_service import PLATFORM_PROMPT_STEPS
 from app.services.integrations.settings_service import get_settings_map, upsert_settings
 from app.services.platform.workspace_service import get_managed_channel, list_managed_channels
+from app.services.content.travel_blog_policy import (
+    build_travel_policy_config,
+    get_travel_blog_policy,
+)
 
 _SAFE_SEGMENT_RE = re.compile(r"[^a-zA-Z0-9._-]+")
 _PLATFORM_REQUIRED_STAGE_TYPES = {"platform_publish"}
 _BLOGGER_AUXILIARY_PROMPT_FILES: dict[str, tuple[str, ...]] = {
-    "korea_travel": ("travel_inline_collage_prompt.md",),
-    "world_mystery": ("mystery_inline_collage_prompt.md",),
+    "korea_travel": (),
+    "world_mystery": (),
     "custom": (),
 }
 _CLOUDFLARE_CANONICAL_STAGE_TYPES: tuple[WorkflowStageType, ...] = (
@@ -453,6 +457,46 @@ def save_platform_prompt_step(
 
 
 def _serialize_blogger_step(channel_id: str, step: BlogAgentConfig) -> PromptFlowStepRead:
+    travel_policy = get_travel_blog_policy(blog=step.blog)
+    session = object_session(step)
+    values = get_settings_map(session) if session is not None else {}
+    policy_config = build_travel_policy_config(
+        travel_policy,
+        stage_type=step.stage_type.value if hasattr(step.stage_type, "value") else str(step.stage_type),
+        values=values,
+    ) if travel_policy is not None else None
+    provider_hint = step.provider_hint
+    provider_model = step.provider_model
+    planner_provider_hint = None
+    planner_provider_model = None
+    pass_provider_hint = None
+    pass_provider_model = None
+    structure_mode = None
+    structure_segments = None
+    locked_image_model = None
+    image_policy_version = None
+    image_layout_policy = None
+    text_generation_route = None
+    if travel_policy is not None and isinstance(policy_config, dict):
+        text_generation_route = str(policy_config.get("text_generation_route") or "").strip() or None
+        if step.stage_type == WorkflowStageType.ARTICLE_GENERATION:
+            provider_hint = str(policy_config.get("pass_provider_hint") or provider_hint or "")
+            provider_model = str(policy_config.get("pass_provider_model") or provider_model or "")
+            planner_provider_hint = str(policy_config.get("planner_provider_hint") or "") or None
+            planner_provider_model = str(policy_config.get("planner_provider_model") or "") or None
+            pass_provider_hint = str(policy_config.get("pass_provider_hint") or "") or None
+            pass_provider_model = str(policy_config.get("pass_provider_model") or "") or None
+            structure_mode = str(policy_config.get("structure_mode") or "") or None
+            structure_segments = int(policy_config.get("structure_segments") or 0) or None
+        elif step.stage_type == WorkflowStageType.IMAGE_PROMPT_GENERATION:
+            provider_hint = str(policy_config.get("provider_hint") or provider_hint or "")
+            provider_model = str(policy_config.get("provider_model") or provider_model or "")
+            image_layout_policy = str(policy_config.get("image_layout_policy") or "") or None
+        elif step.stage_type == WorkflowStageType.IMAGE_GENERATION:
+            provider_model = str(policy_config.get("locked_image_model") or provider_model or "")
+            locked_image_model = str(policy_config.get("locked_image_model") or "") or None
+            image_policy_version = str(policy_config.get("image_policy_version") or "") or None
+            image_layout_policy = str(policy_config.get("image_layout_policy") or "") or None
     return PromptFlowStepRead(
         id=str(step.id),
         channel_id=channel_id,
@@ -463,8 +507,8 @@ def _serialize_blogger_step(channel_id: str, step: BlogAgentConfig) -> PromptFlo
         role_name=step.role_name,
         objective=step.objective,
         prompt_template=step.prompt_template,
-        provider_hint=step.provider_hint,
-        provider_model=step.provider_model,
+        provider_hint=provider_hint,
+        provider_model=provider_model,
         is_enabled=step.is_enabled,
         is_required=step.is_required,
         removable=stage_is_removable(step.stage_type),
@@ -473,6 +517,17 @@ def _serialize_blogger_step(channel_id: str, step: BlogAgentConfig) -> PromptFlo
         structure_editable=True,
         content_editable=stage_supports_prompt(step.stage_type),
         sort_order=step.sort_order,
+        planner_provider_hint=planner_provider_hint,
+        planner_provider_model=planner_provider_model,
+        pass_provider_hint=pass_provider_hint,
+        pass_provider_model=pass_provider_model,
+        structure_mode=structure_mode,
+        structure_segments=structure_segments,
+        locked_image_model=locked_image_model,
+        image_policy_version=image_policy_version,
+        image_layout_policy=image_layout_policy,
+        text_generation_route=text_generation_route,
+        policy_config=policy_config,
     )
 
 
@@ -728,6 +783,17 @@ def sync_prompt_flow_backup(db: Session, flow: PromptFlowRead) -> PromptFlowRead
                 "prompt_enabled": step.prompt_enabled,
                 "sort_order": step.sort_order,
                 "backup_relative_path": step.backup_relative_path,
+                "planner_provider_hint": step.planner_provider_hint,
+                "planner_provider_model": step.planner_provider_model,
+                "pass_provider_hint": step.pass_provider_hint,
+                "pass_provider_model": step.pass_provider_model,
+                "structure_mode": step.structure_mode,
+                "structure_segments": step.structure_segments,
+                "locked_image_model": step.locked_image_model,
+                "image_policy_version": step.image_policy_version,
+                "image_layout_policy": step.image_layout_policy,
+                "text_generation_route": step.text_generation_route,
+                "policy_config": step.policy_config,
             }
             for step in flow.steps
         ],
@@ -799,6 +865,17 @@ def _cloudflare_category_metadata_payload(
                 "prompt_enabled": step.prompt_enabled,
                 "sort_order": step.sort_order,
                 "backup_relative_path": step.backup_relative_path,
+                "planner_provider_hint": step.planner_provider_hint,
+                "planner_provider_model": step.planner_provider_model,
+                "pass_provider_hint": step.pass_provider_hint,
+                "pass_provider_model": step.pass_provider_model,
+                "structure_mode": step.structure_mode,
+                "structure_segments": step.structure_segments,
+                "locked_image_model": step.locked_image_model,
+                "image_policy_version": step.image_policy_version,
+                "image_layout_policy": step.image_layout_policy,
+                "text_generation_route": step.text_generation_route,
+                "policy_config": step.policy_config,
             }
             for step in ordered_steps
         ],
@@ -975,6 +1052,17 @@ def sync_prompt_flow_backup(db: Session, flow: PromptFlowRead) -> PromptFlowRead
                 "prompt_enabled": step.prompt_enabled,
                 "sort_order": step.sort_order,
                 "backup_relative_path": step.backup_relative_path,
+                "planner_provider_hint": step.planner_provider_hint,
+                "planner_provider_model": step.planner_provider_model,
+                "pass_provider_hint": step.pass_provider_hint,
+                "pass_provider_model": step.pass_provider_model,
+                "structure_mode": step.structure_mode,
+                "structure_segments": step.structure_segments,
+                "locked_image_model": step.locked_image_model,
+                "image_policy_version": step.image_policy_version,
+                "image_layout_policy": step.image_layout_policy,
+                "text_generation_route": step.text_generation_route,
+                "policy_config": step.policy_config,
             }
             for step in flow.steps
         ],

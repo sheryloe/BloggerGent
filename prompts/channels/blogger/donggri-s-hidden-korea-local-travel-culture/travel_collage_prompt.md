@@ -1,35 +1,32 @@
-Create one final English hero collage prompt for "{blog_name}".
+You are an expert prompt optimizer for lightweight image models.
+
+Your task:
+Rewrite the input prompt into a simplified English prompt optimized for a small/free model while explicitly enforcing one square 8-panel collage cover.
 
 [Input]
 - Topic: {keyword}
-- Primary language: {primary_language}
-- Audience: {target_audience}
-- Planner brief:
-{planner_brief}
 - Editorial category: {editorial_category_label}
 - Title: {article_title}
 - Excerpt: {article_excerpt}
 - Article context:
 {article_context}
 
-[Persona Direction for Image (`en`)]
-- US-first and Global English traveler expectations.
-- Focus on "Trendy K-Travel Expert" aesthetics: Cinematic but highly authentic, premium editorial style. 
-- Highlight practical route flow, modern cafe culture, hidden alleys, and dynamic crowd atmospheres (or peaceful escapes).
+[Persona Direction]
+- US-first and global English traveler expectations.
+- Focus on trendy but authentic Korea travel scenes with clear route logic.
+- Show practical movement, modern cafes, hidden local corners, and useful scene contrast.
 
-[Output Rules]
-- Return plain text only.
-- Return one final prompt for one composite 3x3 travel collage image.
-- Exactly 9 distinct panels in a visible 3x3 grid.
-- The center panel must be dominant and visually larger than surrounding panels.
-- Use visible white gutters.
-- No blended panorama, no seamless split, no text, no logos.
-- Realistic, high-quality editorial travel photography only.
-
-[Content Rules]
-- Match the article's main promise immediately.
-- Reflect the exact route/place logic from the article.
-- Include decision-useful visual cues (transport nodes, practical scene contrasts, trendy spots).
-- Avoid generic tourist postcards. Show what an insider actually sees.
-
-Return one final prompt only.
+Rules:
+- Preserve the core theme and mood.
+- Enforce: 8-panel collage with clear panel separation.
+- Include: visible white gutters and clean grid layout.
+- Keep a simple center-focused or balanced composition if relevant.
+- Reduce detailed descriptions into grouped concepts.
+- Limit to 2-4 main visual categories.
+- Avoid listing many individual objects.
+- Remove overly technical camera or stylistic terms unless critical.
+- Keep it realistic, editorial, and useful for a real travel blog cover.
+- Keep it in English.
+- Keep it under 60 words.
+- Output only the optimized prompt.
+- No explanation.

@@ -11,6 +11,7 @@ from app.services import openai_usage_service
 from app.services.ops.model_policy_service import validate_text_settings_payload
 from app.services.ops.openai_usage_service import (
     FREE_TIER_DEFAULT_LARGE_TEXT_MODEL,
+    FREE_TIER_DEFAULT_SMALL_TEXT_MODEL,
     LARGE_MODEL_LIMIT,
     OPENAI_USAGE_HARD_CAP_PERCENT,
     SMALL_MODEL_LIMIT,
@@ -217,14 +218,38 @@ def test_usage_count_is_strictly_based_on_free_tier_model_lists(monkeypatch: pyt
 
     usage = openai_usage_service.get_openai_free_usage(object())
 
-    assert usage.large.input_tokens == 200
-    assert usage.large.output_tokens == 100
-    assert usage.large.used_tokens == 300
+    assert usage.large.input_tokens == 600
+    assert usage.large.output_tokens == 200
+    assert usage.large.used_tokens == 800
     assert usage.small.input_tokens == 10
     assert usage.small.output_tokens == 20
     assert usage.small.used_tokens == 30
-    assert "gpt-5.4-2026-03-05" not in usage.large.matched_models
+    assert "gpt-5.4-2026-03-05" in usage.large.matched_models
     assert "gpt-5.4-2026-03-05" not in usage.small.matched_models
+
+
+def test_route_maps_gpt_5_4_prefixes_to_large_and_small(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        openai_usage_service,
+        "get_openai_free_usage",
+        lambda _db: _usage(large_used=0, small_used=0),
+    )
+
+    large_decision = route_openai_free_tier_text_model(
+        db=object(),
+        requested_model="gpt-5.4",
+        allow_large=True,
+    )
+    small_decision = route_openai_free_tier_text_model(
+        db=object(),
+        requested_model="gpt-5.4-mini",
+        allow_large=False,
+    )
+
+    assert large_decision.resolved_model == FREE_TIER_DEFAULT_LARGE_TEXT_MODEL
+    assert large_decision.resolved_bucket == "large"
+    assert small_decision.resolved_model == FREE_TIER_DEFAULT_SMALL_TEXT_MODEL
+    assert small_decision.resolved_bucket == "small"
 
 
 def test_empty_usage_snapshot_sets_input_and_output_to_zero() -> None:
@@ -243,10 +268,10 @@ def test_validate_text_settings_payload_keeps_hard_cap_flag_for_compatibility_on
     validate_text_settings_payload({"openai_usage_hard_cap_enabled": "false"})
 
 
-def test_stage_policy_allows_large_for_prompt_stages() -> None:
+def test_stage_policy_allows_large_for_topic_only() -> None:
     assert _stage_allows_large_text_model(WorkflowStageType.TOPIC_DISCOVERY) is True
-    assert _stage_allows_large_text_model(WorkflowStageType.ARTICLE_GENERATION) is True
-    assert _stage_allows_large_text_model(WorkflowStageType.IMAGE_PROMPT_GENERATION) is True
+    assert _stage_allows_large_text_model(WorkflowStageType.ARTICLE_GENERATION) is False
+    assert _stage_allows_large_text_model(WorkflowStageType.IMAGE_PROMPT_GENERATION) is False
 
 
 def test_stage_default_article_model_is_codex_when_runtime_requires_it() -> None:
