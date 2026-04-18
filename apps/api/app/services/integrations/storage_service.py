@@ -596,6 +596,7 @@ def _resolve_cloudflare_r2_configuration(
 ) -> tuple[str, str, str, str, str, str]:
     normalized_object_key = str(object_key or "").strip().lstrip("/")
     mystery_object = _is_mystery_object_key(normalized_object_key)
+    travel_object = parse_travel_canonical_object_key(normalized_object_key)
 
     integration_base_url, _ = _resolve_cloudflare_integration_upload_configuration(values)
     if mystery_object:
@@ -610,6 +611,26 @@ def _resolve_cloudflare_r2_configuration(
             (values.get("mystery_cloudflare_r2_secret_access_key") or "").strip(),
             resolved_public_base_url,
             (values.get("mystery_cloudflare_r2_prefix") or MYSTERY_R2_KEY_PREFIX.rstrip("/")).strip().strip("/"),
+        )
+
+    if travel_object is not None:
+        configured_public_base_url = _normalize_asset_public_origin(
+            (values.get("travel_cloudflare_r2_public_base_url") or "").strip()
+        )
+        resolved_public_base_url = configured_public_base_url
+        if not resolved_public_base_url and integration_base_url:
+            resolved_public_base_url = _normalize_asset_public_origin(integration_base_url)
+        if not resolved_public_base_url:
+            resolved_public_base_url = _normalize_asset_public_origin(
+                (values.get("cloudflare_r2_public_base_url") or "").strip()
+            )
+        return (
+            (values.get("cloudflare_account_id") or "").strip(),
+            (values.get("travel_cloudflare_r2_bucket") or "blogger-travel").strip(),
+            (values.get("cloudflare_r2_access_key_id") or "").strip(),
+            (values.get("cloudflare_r2_secret_access_key") or "").strip(),
+            resolved_public_base_url,
+            "assets",
         )
 
     configured_public_base_url = _normalize_base_url((values.get("cloudflare_r2_public_base_url") or "").strip())
@@ -1983,7 +2004,7 @@ def save_public_binary(
             _enforce_strict_r2_schema(object_key=str(object_key or ""), values=values, mystery_only=mystery_object)
             resolved_subdir = str(values.get("mystery_storage_subdir") or "images/mystery").strip().replace("\\", "/")
             if travel_object:
-                normalized_filename = "cover.webp"
+                normalized_filename = str(travel_parts.get("file_name") or normalized_filename or "post.webp").strip()
                 resolved_subdir = build_travel_local_publish_relative_dir(
                     category_key=str(travel_parts.get("category_key") or "uncategorized"),
                     post_slug=str(travel_parts.get("post_slug") or "post"),
@@ -1995,7 +2016,11 @@ def save_public_binary(
     )
     local_png_path = ""
     if provider == "cloudflare_r2" and (mystery_object or travel_object):
-        png_filename = "cover.png" if travel_object else f"{Path(normalized_filename).stem}-{datetime.now(timezone.utc):%Y%m%d%H%M%S}.png"
+        png_filename = (
+            f"{str(travel_parts.get('post_slug') or 'post').strip() or 'post'}.png"
+            if travel_object
+            else f"{Path(normalized_filename).stem}-{datetime.now(timezone.utc):%Y%m%d%H%M%S}.png"
+        )
         png_subdir = resolved_subdir
         if travel_object:
             png_subdir = build_travel_local_backup_relative_dir(

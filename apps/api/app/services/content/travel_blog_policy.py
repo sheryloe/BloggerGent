@@ -11,7 +11,8 @@ TRAVEL_IMAGE_POLICY_VERSION = "2025-04-23"
 TRAVEL_IMAGE_LAYOUT_POLICY = "travel_editorial_8panel_mar2026"
 TRAVEL_LOCKED_IMAGE_MODEL = "gpt-image-1"
 TRAVEL_PANEL_COUNT = 8
-TRAVEL_CANONICAL_PREFIX = "assets/Travel/"
+TRAVEL_CANONICAL_PREFIX = "assets/travel-blogger/"
+TRAVEL_BLOG_GROUP = "travel-blogger"
 TRAVEL_TEXT_ROUTE_CODEX = "codex_cli"
 TRAVEL_TEXT_ROUTE_API = "api"
 TRAVEL_DEFAULT_TEXT_ROUTE = TRAVEL_TEXT_ROUTE_CODEX
@@ -23,7 +24,7 @@ TRAVEL_API_PASS_MODEL = "gpt-5.4-mini-2026-03-17"
 TRAVEL_API_IMAGE_PROMPT_MODEL = "gpt-4.1-mini"
 TRAVEL_IMAGE_SIZE = "1024x1024"
 TRAVEL_ALLOWED_CATEGORIES = frozenset({"travel", "culture", "food", "uncategorized"})
-TRAVEL_ALLOWED_ROLE_RE = re.compile(r"^cover\.webp$", re.IGNORECASE)
+TRAVEL_ALLOWED_FILENAME_RE = re.compile(r"^(?P<post_slug>[a-z0-9]+(?:-[a-z0-9]+)*)\.webp$", re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,15 +132,15 @@ def normalize_travel_category_key(category_key: str | None) -> str:
 def normalize_travel_asset_role(asset_role: str | None) -> str:
     lowered = str(asset_role or "").strip().lower()
     if lowered in {"cover", "hero", "hero-retry", "hero-refresh", "main", "primary"}:
-        return "cover.webp"
+        return "main"
     raise ValueError(f"Travel canonical assets only allow the cover role, got '{asset_role}'.")
 
 
 def build_travel_asset_object_key(*, policy: TravelBlogPolicy, category_key: str, post_slug: str, asset_role: str) -> str:
     slug_token = slugify(str(post_slug or "").strip(), separator="-") or "post"
-    file_name = normalize_travel_asset_role(asset_role)
+    normalize_travel_asset_role(asset_role)
     resolved_category = normalize_travel_category_key(category_key)
-    return f"{policy.canonical_prefix}{resolved_category}/{slug_token}/{file_name}"
+    return f"{policy.canonical_prefix}{resolved_category}/{slug_token}.webp"
 
 
 def is_travel_canonical_prefix(object_key: str | None) -> bool:
@@ -153,18 +154,20 @@ def parse_travel_canonical_object_key(object_key: str | None) -> dict[str, str] 
         return None
     remainder = normalized[len(TRAVEL_CANONICAL_PREFIX) :]
     parts = [segment for segment in remainder.split("/") if segment]
-    if len(parts) != 3:
+    if len(parts) != 2:
         return None
-    category_key, post_slug, role_name = parts
+    category_key, file_name = parts
     category_key = normalize_travel_category_key(category_key)
-    if not slugify(post_slug, separator="-"):
+    match = TRAVEL_ALLOWED_FILENAME_RE.fullmatch(file_name)
+    if match is None:
         return None
-    if not TRAVEL_ALLOWED_ROLE_RE.fullmatch(role_name):
+    post_slug = slugify(str(match.group("post_slug") or "").strip(), separator="-")
+    if not post_slug:
         return None
     return {
         "category_key": category_key,
         "post_slug": post_slug,
-        "role_name": role_name,
+        "file_name": file_name,
         "object_key": normalized,
     }
 
@@ -186,11 +189,11 @@ def is_valid_travel_canonical_object_key(object_key: str | None, *, policy: Trav
 
 
 def build_travel_local_backup_relative_dir(*, category_key: str, post_slug: str) -> str:
-    return f"images/TravelBackup/{normalize_travel_category_key(category_key)}/{slugify(str(post_slug or '').strip(), separator='-') or 'post'}"
+    return f"images/TravelBackup/{normalize_travel_category_key(category_key)}"
 
 
 def build_travel_local_publish_relative_dir(*, category_key: str, post_slug: str) -> str:
-    return f"images/Travel/{normalize_travel_category_key(category_key)}/{slugify(str(post_slug or '').strip(), separator='-') or 'post'}"
+    return f"images/Travel/{normalize_travel_category_key(category_key)}"
 
 
 def build_travel_policy_config(
