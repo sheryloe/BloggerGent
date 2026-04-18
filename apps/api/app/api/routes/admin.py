@@ -11,18 +11,24 @@ from app.db.session import get_db
 from app.schemas.api import (
     BloggerEditorialLabelBackfillRead,
     BloggerEditorialLabelBackfillRequest,
+    CloudflareAssetBootstrapRead,
+    CloudflareAssetBootstrapRequest,
     CloudflareAssetRebuildRead,
     CloudflareAssetRebuildReportRead,
     CloudflareAssetRebuildRequest,
+    CloudflarePostDedupeRead,
+    CloudflarePostDedupeRequest,
     CloudflareR2MigrationRead,
     CloudflareR2MigrationRequest,
 )
 from app.services.platform.blog_service import list_visible_blog_ids
 from app.services.blogger.blogger_label_backfill_service import dry_run_blogger_editorial_label_backfill
+from app.services.cloudflare.cloudflare_asset_bootstrap_service import bootstrap_cloudflare_assets
 from app.services.cloudflare.cloudflare_asset_rebuild_service import (
     get_latest_cloudflare_asset_rebuild_report,
     rebuild_cloudflare_assets,
 )
+from app.services.cloudflare.cloudflare_post_dedupe_service import dedupe_cloudflare_posts
 from app.services.ops.ops_health_service import generate_ops_health_report
 from app.services.cloudflare.cloudflare_r2_migration_service import run_cloudflare_r2_image_migration
 from app.services.providers.base import ProviderRuntimeError
@@ -161,6 +167,39 @@ def rebuild_cloudflare_channel_assets(
             limit=request_payload.limit,
             purge_target=request_payload.purge_target,
             use_fallback_heuristic=request_payload.use_fallback_heuristic,
+            image_match_strategy=request_payload.image_match_strategy,
+            ignore_filename_patterns=list(request_payload.ignore_filename_patterns or []),
+            allow_thumbnail_fallback=request_payload.allow_thumbnail_fallback,
+            bucket_override=request_payload.bucket_override,
+            source_scope=request_payload.source_scope,
+            update_live_posts=request_payload.update_live_posts,
+            allow_remote_thumbnail_fetch=request_payload.allow_remote_thumbnail_fetch,
+            use_legacy_evidence=request_payload.use_legacy_evidence,
+            legacy_evidence_can_auto_accept=request_payload.legacy_evidence_can_auto_accept,
+        )
+    except ProviderRuntimeError as exc:
+        db.rollback()
+        raise HTTPException(status_code=exc.status_code or 502, detail=exc.detail or exc.message) from exc
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/cloudflare-assets/bootstrap", response_model=CloudflareAssetBootstrapRead)
+def bootstrap_cloudflare_channel_assets(
+    payload: CloudflareAssetBootstrapRequest | None = Body(default=None),
+    db: Session = Depends(get_db),
+) -> dict:
+    request_payload = payload or CloudflareAssetBootstrapRequest()
+    try:
+        return bootstrap_cloudflare_assets(
+            db,
+            channel_id=request_payload.channel_id,
+            bucket_name=request_payload.bucket_name,
+            create_missing_categories=request_payload.create_missing_categories,
+            backfill_channel_metadata=request_payload.backfill_channel_metadata,
+            verify_bucket=request_payload.verify_bucket,
+            create_if_missing=request_payload.create_if_missing,
         )
     except ProviderRuntimeError as exc:
         db.rollback()
@@ -175,6 +214,28 @@ def get_latest_cloudflare_asset_rebuild_report_route(db: Session = Depends(get_d
     try:
         return get_latest_cloudflare_asset_rebuild_report(db)
     except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/cloudflare-posts/dedupe", response_model=CloudflarePostDedupeRead)
+def dedupe_cloudflare_channel_posts(
+    payload: CloudflarePostDedupeRequest | None = Body(default=None),
+    db: Session = Depends(get_db),
+) -> dict:
+    request_payload = payload or CloudflarePostDedupeRequest()
+    try:
+        return dedupe_cloudflare_posts(
+            db,
+            mode=request_payload.mode,
+            channel_id=request_payload.channel_id,
+            delete_scope=request_payload.delete_scope,
+            keep_rule=request_payload.keep_rule,
+        )
+    except ProviderRuntimeError as exc:
+        db.rollback()
+        raise HTTPException(status_code=exc.status_code or 502, detail=exc.detail or exc.message) from exc
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 

@@ -3,14 +3,14 @@
 from collections import Counter, defaultdict
 import csv
 from datetime import datetime, timezone
-from difflib import SequenceMatcher
 import io
 import json
 from pathlib import Path
 import re
 from typing import Any, Iterable
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
+import httpx
 from PIL import Image
 from slugify import slugify
 from sqlalchemy import select
@@ -24,6 +24,7 @@ from app.services.cloudflare.cloudflare_asset_policy import (
     build_cloudflare_local_asset_path,
     build_cloudflare_r2_object_key,
     get_cloudflare_asset_policy,
+    resolve_cloudflare_post_slug,
     resolve_cloudflare_local_asset_root,
 )
 from app.services.cloudflare.cloudflare_channel_service import (
@@ -37,12 +38,31 @@ from app.services.cloudflare.cloudflare_sync_service import sync_cloudflare_post
 from app.services.integrations.storage_service import upload_binary_to_cloudflare_r2
 from app.services.platform.platform_service import ensure_managed_channels
 
+try:
+    from rapidfuzz import fuzz as rapidfuzz_fuzz
+except ImportError:  # pragma: no cover - fallback for environments without rapidfuzz
+    from difflib import SequenceMatcher
+
+    class _RapidFuzzFallback:
+        @staticmethod
+        def ratio(left: str, right: str) -> float:
+            return SequenceMatcher(a=left, b=right).ratio() * 100.0
+
+    rapidfuzz_fuzz = _RapidFuzzFallback()
+
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"}
-INLINE_ROLE_RE = re.compile(r"-(?:inline(?:-[0-9]+x[0-9]+)?)$", re.IGNORECASE)
+INLINE_ROLE_RE = re.compile(r"(?:^|[-_])inline(?:[-_][0-9]+x[0-9]+)?(?:$|[-_])", re.IGNORECASE)
 LEGACY_COVER_RE = re.compile(r"^cover-[a-z0-9]{6,}$", re.IGNORECASE)
-PATH_TOKEN_RE = re.compile(r"[a-z0-9]+", re.IGNORECASE)
-DEFAULT_MATCH_CONFIDENCE = 0.64
-AMBIGUITY_GAP = 0.04
+SIMILARITY_SEPARATOR_RE = re.compile(r"[-_]+")
+SIMILARITY_SPACE_RE = re.compile(r"\s+")
+KNOWN_SUFFIX_TOKENS = {"inline", "3x2", "hero", "main"}
+SIMILARITY_AUTO_THRESHOLD = 92.0
+SIMILARITY_CONDITIONAL_THRESHOLD = 85.0
+SIMILARITY_GAP_THRESHOLD = 5.0
+DEFAULT_IGNORE_FILENAME_PATTERNS = ("cover",)
+DEFAULT_SOURCE_SCOPE = "cloudflare_only_root_pool"
+REMOTE_THUMBNAIL_PREFLIGHT_SAMPLE_SIZE = 20
+REMOTE_THUMBNAIL_PREFLIGHT_MIN_SUCCESS_RATIO = 0.5
 
 
 def _utc_now() -> datetime:
@@ -67,19 +87,6 @@ def _normalize_space(value: Any) -> str:
 
 def _normalize_slug(value: Any) -> str:
     return slugify(str(value or "").strip(), separator="-") or ""
-
-
-def _tokenize(*values: Any) -> set[str]:
-    tokens: set[str] = set()
-    for value in values:
-        raw = _normalize_space(value)
-        if not raw:
-            continue
-        tokens.update(token for token in PATH_TOKEN_RE.findall(raw.lower()) if token)
-        slug_text = _normalize_slug(raw).replace("-", " ").strip()
-        if slug_text:
-            tokens.update(token for token in slug_text.split() if token)
-    return tokens
 
 
 def _legacy_url_scheme(url: str | None) -> str:
@@ -117,6 +124,46 @@ def _asset_slug_from_url(url: str | None) -> str:
     return ""
 
 
+def _legacy_object_slug_from_url(url: str | None) -> str:
+    parsed = urlparse(str(url or "").strip())
+    if not parsed.path:
+        return ""
+    parts = [segment for segment in parsed.path.split("/") if segment]
+    if len(parts) < 2:
+        return ""
+    return _normalize_slug(parts[-2])
+
+
+def _strip_similarity_suffixes(value: str) -> str:
+    tokens = [token for token in SIMILARITY_SPACE_RE.split(value.strip()) if token]
+    while tokens and tokens[-1] in KNOWN_SUFFIX_TOKENS:
+        tokens.pop()
+    return " ".join(tokens)
+
+
+def _normalize_similarity_text(value: Any) -> str:
+    decoded = unquote(str(value or "").strip()).casefold()
+    if not decoded:
+        return ""
+    normalized = SIMILARITY_SEPARATOR_RE.sub(" ", decoded)
+    normalized = SIMILARITY_SPACE_RE.sub(" ", normalized).strip()
+    if not normalized:
+        return ""
+    return _strip_similarity_suffixes(normalized)
+
+
+def _contains_ignored_pattern(path: Path, *, ignore_patterns: list[str]) -> bool:
+    lowered_name = unquote(path.name).casefold()
+    lowered_stem = unquote(path.stem).casefold()
+    for raw_pattern in ignore_patterns:
+        normalized = str(raw_pattern or "").strip().casefold()
+        if not normalized:
+            continue
+        if normalized in lowered_name or normalized in lowered_stem:
+            return True
+    return False
+
+
 def _clean_candidate_stem(path: Path) -> str:
     stem = str(path.stem or "").strip()
     if not stem:
@@ -125,31 +172,29 @@ def _clean_candidate_stem(path: Path) -> str:
         parent_name = _normalize_slug(path.parent.name)
         if parent_name and parent_name not in {"cloudflare", "images"}:
             return parent_name
-    return _normalize_slug(INLINE_ROLE_RE.sub("", stem))
+    return _normalize_slug(_normalize_similarity_text(stem))
 
 
 def _candidate_role(path: Path) -> str:
-    stem = str(path.stem or "").strip().lower()
-    if "inline" in stem:
+    raw_stem = unquote(str(path.stem or "").strip()).casefold()
+    if "inline" in raw_stem:
         return "inline"
-    if LEGACY_COVER_RE.fullmatch(path.stem or ""):
-        return "legacy_cover"
     return "hero"
 
 
-def _score_token_overlap(left: set[str], right: set[str]) -> float:
+def _slug_similarity_ratio(left: str, right: str) -> float:
     if not left or not right:
         return 0.0
-    intersection = len(left & right)
-    if intersection <= 0:
-        return 0.0
-    return intersection / max(len(left), len(right), 1)
+    return float(rapidfuzz_fuzz.ratio(left, right))
 
 
-def _sequence_ratio(left: str, right: str) -> float:
-    if not left or not right:
-        return 0.0
-    return SequenceMatcher(a=left, b=right).ratio()
+def _extension_priority(path: Path) -> int:
+    lowered = path.suffix.lower()
+    if lowered == ".webp":
+        return 2
+    if lowered == ".png":
+        return 1
+    return 0
 
 
 def _cloudflare_manifest_dir(policy: CloudflareAssetPolicy) -> Path:
@@ -173,6 +218,30 @@ def _iter_image_files(root: Path) -> Iterable[Path]:
     )
 
 
+def _iter_manifest_category_rows(payload: dict[str, Any]) -> Iterable[tuple[str, str]]:
+    rows = payload.get("rows")
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            source = str(row.get("source") or "").strip()
+            category = str(row.get("target_category") or row.get("category_slug") or "").strip()
+            if source and category:
+                yield source, category
+
+    for key in ("items", "unresolved"):
+        rows = payload.get(key)
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            source = str(row.get("resolved_local_source") or row.get("source") or "").strip()
+            category = str(row.get("category_slug") or row.get("target_category") or "").strip()
+            if source and category:
+                yield source, category
+
+
 def _load_manifest_history(manifest_dir: Path) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
     source_category_history: dict[str, set[str]] = defaultdict(set)
     stem_category_history: dict[str, set[str]] = defaultdict(set)
@@ -185,16 +254,9 @@ def _load_manifest_history(manifest_dir: Path) -> tuple[dict[str, set[str]], dic
             payload = json.loads(manifest_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        rows = payload.get("rows")
-        if not isinstance(rows, list):
+        if not isinstance(payload, dict):
             continue
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            source = str(row.get("source") or "").strip()
-            category = str(row.get("target_category") or "").strip()
-            if not source or not category:
-                continue
+        for source, category in _iter_manifest_category_rows(payload):
             normalized_source = str(Path(source))
             source_category_history[normalized_source].add(category)
             stem = _clean_candidate_stem(Path(source))
@@ -203,124 +265,139 @@ def _load_manifest_history(manifest_dir: Path) -> tuple[dict[str, set[str]], dic
     return source_category_history, stem_category_history
 
 
-def _inventory_candidates(policy: CloudflareAssetPolicy) -> list[dict[str, Any]]:
-    local_root = resolve_cloudflare_local_asset_root(policy)
+def _inventory_candidates(
+    policy: CloudflareAssetPolicy,
+    *,
+    ignore_filename_patterns: list[str] | None = None,
+    source_scope: str = DEFAULT_SOURCE_SCOPE,
+) -> list[dict[str, Any]]:
     storage_root = _storage_images_root(policy)
-    manifest_dir = _cloudflare_manifest_dir(policy)
-    source_history, stem_history = _load_manifest_history(manifest_dir)
-
+    normalized_ignore_patterns = [
+        str(pattern or "").strip()
+        for pattern in (ignore_filename_patterns or list(DEFAULT_IGNORE_FILENAME_PATTERNS))
+        if str(pattern or "").strip()
+    ]
+    normalized_source_scope = str(source_scope or DEFAULT_SOURCE_SCOPE).strip().lower()
+    if normalized_source_scope != DEFAULT_SOURCE_SCOPE:
+        raise ValueError(f"Unsupported source_scope: {source_scope}")
     candidates: list[dict[str, Any]] = []
     seen_paths: set[str] = set()
-    roots: list[tuple[Path, str]] = []
-    if storage_root.exists():
-        roots.append((storage_root, "storage_pool"))
-    mystery_root = storage_root / "mystery"
-    if mystery_root.exists():
-        roots.append((mystery_root, "mystery_pool"))
-    if local_root.exists():
-        roots.append((local_root, "cloudflare_existing"))
+    if not storage_root.exists():
+        return candidates
 
-    for root, source_kind in roots:
-        for path in _iter_image_files(root):
-            normalized_path = str(path.resolve())
-            if normalized_path in seen_paths:
-                continue
-            if "_manifests" in path.parts:
-                continue
-            if source_kind == "storage_pool":
-                try:
-                    relative = path.relative_to(storage_root)
-                except ValueError:
-                    relative = path
-                if relative.parts and relative.parts[0] in {"Cloudflare", "mystery"}:
-                    continue
-            seen_paths.add(normalized_path)
-            normalized_stem = _clean_candidate_stem(path)
-            if not normalized_stem:
-                continue
-            category_hint = ""
-            if source_kind == "cloudflare_existing":
-                try:
-                    relative = path.relative_to(local_root)
-                except ValueError:
-                    relative = path
-                if len(relative.parts) >= 2:
-                    category_hint = str(relative.parts[0]).strip()
-            manifest_categories = sorted({*source_history.get(str(path), set()), *stem_history.get(normalized_stem, set())})
-            candidates.append(
-                {
-                    "path": str(path),
-                    "source_kind": source_kind,
-                    "normalized_stem": normalized_stem,
-                    "role": _candidate_role(path),
-                    "extension": path.suffix.lower(),
-                    "category_hint": category_hint,
-                    "manifest_categories": manifest_categories,
-                    "tokens": sorted(_tokenize(path.stem, normalized_stem, path.name)),
-                }
-            )
+    for path in sorted(storage_root.iterdir()):
+        if not path.is_file() or path.suffix.lower() not in IMAGE_EXTENSIONS:
+            continue
+        normalized_path = str(path.resolve())
+        if normalized_path in seen_paths:
+            continue
+        if _contains_ignored_pattern(path, ignore_patterns=normalized_ignore_patterns):
+            continue
+        seen_paths.add(normalized_path)
+        similarity_stem = _normalize_similarity_text(path.stem)
+        if not similarity_stem:
+            continue
+        candidates.append(
+            {
+                "path": str(path),
+                "source_kind": "cloudflare_root_pool",
+                "normalized_stem": _clean_candidate_stem(path),
+                "similarity_stem": similarity_stem,
+                "role": _candidate_role(path),
+                "extension": path.suffix.lower(),
+            }
+        )
     return candidates
 
 
-def _rank_candidate(post: dict[str, Any], candidate: dict[str, Any], *, use_fallback_heuristic: bool) -> dict[str, Any]:
-    candidate_stem = str(candidate.get("normalized_stem") or "").strip()
-    post_slug = str(post.get("slug") or "").strip()
+def _rank_candidate(post: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+    candidate_stem = str(candidate.get("similarity_stem") or "").strip()
+    post_slug = str(post.get("similarity_slug") or "").strip()
     if not candidate_stem or not post_slug:
         return {"score": 0.0, "match_source": "", "reason": ""}
 
-    desired_category = str(post.get("category_slug") or "").strip()
-    asset_slug_hint = str(post.get("asset_slug_hint") or "").strip()
-    role = str(candidate.get("role") or "").strip().lower()
-    candidate_tokens = {str(token) for token in candidate.get("tokens") or [] if str(token).strip()}
-    post_tokens = {str(token) for token in post.get("tokens") or [] if str(token).strip()}
-    manifest_categories = {str(item) for item in candidate.get("manifest_categories") or [] if str(item).strip()}
-    category_hint = str(candidate.get("category_hint") or "").strip()
-
-    if candidate_stem == post_slug and role == "hero":
-        return {"score": 1.0, "match_source": "exact_slug", "reason": "candidate_stem=post_slug"}
-    if candidate_stem == post_slug and role != "hero":
-        return {"score": 0.82, "match_source": "exact_slug", "reason": f"candidate_stem=post_slug role={role}"}
-    if asset_slug_hint and candidate_stem == asset_slug_hint and role == "hero":
-        return {"score": 0.97, "match_source": "asset_path_slug", "reason": "candidate_stem=thumbnail_slug"}
-    if asset_slug_hint and candidate_stem == asset_slug_hint:
-        return {"score": 0.79, "match_source": "asset_path_slug", "reason": f"candidate_stem=thumbnail_slug role={role}"}
-
-    slug_similarity = _sequence_ratio(candidate_stem, post_slug)
-    title_similarity = _sequence_ratio(candidate_stem, str(post.get("title_slug") or "").strip())
-    token_overlap = _score_token_overlap(candidate_tokens, post_tokens)
-    category_bonus = 0.0
-    manifest_bonus = 0.0
-
-    if category_hint and category_hint == desired_category:
-        category_bonus += 0.18
-    if desired_category and desired_category in manifest_categories:
-        manifest_bonus += 0.22
-
-    score = (slug_similarity * 0.46) + (title_similarity * 0.16) + (token_overlap * 0.28) + category_bonus + manifest_bonus
-    if role == "inline":
-        score -= 0.18
-    elif role == "legacy_cover":
-        score -= 0.08
-
-    if manifest_bonus > 0 and score >= DEFAULT_MATCH_CONFIDENCE:
-        return {"score": min(score, 0.94), "match_source": "manifest_history", "reason": "manifest_category_history"}
-    if category_bonus > 0 and token_overlap > 0:
-        return {"score": min(score, 0.9), "match_source": "title_category_tokens", "reason": "category_hint+token_overlap"}
-    if token_overlap > 0.18 or slug_similarity > 0.74:
-        return {"score": min(score, 0.86), "match_source": "title_category_tokens", "reason": "token_or_slug_similarity"}
-    if use_fallback_heuristic:
-        score += 0.08
-        return {"score": min(score, 0.74), "match_source": "fallback_heuristic", "reason": "fallback_heuristic"}
-    return {"score": max(score, 0.0), "match_source": "", "reason": ""}
+    score = _slug_similarity_ratio(candidate_stem, post_slug)
+    match_source = "exact_slug" if score >= 100.0 else "slug_similarity"
+    return {"score": score, "match_source": match_source, "reason": "slug_similarity"}
 
 
-def _rank_candidates_for_post(post: dict[str, Any], candidates: list[dict[str, Any]], *, use_fallback_heuristic: bool) -> list[dict[str, Any]]:
+def _build_legacy_evidence(
+    post: dict[str, Any],
+    candidate: dict[str, Any],
+    *,
+    source_category_history: dict[str, set[str]],
+    stem_category_history: dict[str, set[str]],
+    use_legacy_evidence: bool,
+) -> dict[str, Any]:
+    url_asset_slug = str(post.get("url_asset_slug") or "").strip()
+    legacy_object_slug = str(post.get("legacy_object_slug") or "").strip()
+    candidate_path = str(candidate.get("path") or "").strip()
+    normalized_stem = str(candidate.get("normalized_stem") or "").strip()
+    manifest_categories = set(source_category_history.get(candidate_path, set())) | set(stem_category_history.get(normalized_stem, set()))
+    manifest_category_hit = bool(str(post.get("category_slug") or "").strip() and str(post.get("category_slug") or "").strip() in manifest_categories)
+    evidence_sources: list[str] = []
+    evidence_score = 0.0
+    if use_legacy_evidence and normalized_stem:
+        if url_asset_slug:
+            if normalized_stem == url_asset_slug:
+                evidence_sources.append("url_asset_exact")
+                evidence_score += 100.0
+            elif (
+                normalized_stem.startswith(url_asset_slug)
+                or url_asset_slug.startswith(normalized_stem)
+                or normalized_stem in url_asset_slug
+                or url_asset_slug in normalized_stem
+            ):
+                evidence_sources.append("url_asset_prefix")
+                evidence_score += 25.0
+        if legacy_object_slug and legacy_object_slug != url_asset_slug:
+            if normalized_stem == legacy_object_slug:
+                evidence_sources.append("legacy_object_exact")
+                evidence_score += 80.0
+            elif (
+                normalized_stem.startswith(legacy_object_slug)
+                or legacy_object_slug.startswith(normalized_stem)
+                or normalized_stem in legacy_object_slug
+                or legacy_object_slug in normalized_stem
+            ):
+                evidence_sources.append("legacy_object_prefix")
+                evidence_score += 20.0
+        if manifest_category_hit:
+            evidence_sources.append("manifest_category_hit")
+            evidence_score += 10.0
+    return {
+        "url_asset_slug": url_asset_slug,
+        "legacy_object_slug": legacy_object_slug,
+        "manifest_category_hit": manifest_category_hit,
+        "evidence_score": round(evidence_score, 4),
+        "evidence_sources": evidence_sources,
+    }
+
+
+def _rank_candidates_for_post(
+    post: dict[str, Any],
+    candidates: list[dict[str, Any]],
+    *,
+    source_category_history: dict[str, set[str]],
+    stem_category_history: dict[str, set[str]],
+    use_legacy_evidence: bool,
+) -> list[dict[str, Any]]:
     ranked: list[dict[str, Any]] = []
     for candidate in candidates:
-        score_payload = _rank_candidate(post, candidate, use_fallback_heuristic=use_fallback_heuristic)
+        score_payload = _rank_candidate(post, candidate)
         score = float(score_payload.get("score") or 0.0)
-        if score <= 0.0:
+        evidence = _build_legacy_evidence(
+            post,
+            candidate,
+            source_category_history=source_category_history,
+            stem_category_history=stem_category_history,
+            use_legacy_evidence=use_legacy_evidence,
+        )
+        evidence_score = float(evidence.get("evidence_score") or 0.0)
+        if score <= 0.0 and evidence_score <= 0.0:
             continue
+        source_path = Path(str(candidate["path"]))
+        length_gap = abs(len(str(candidate.get("similarity_stem") or "")) - len(str(post.get("similarity_slug") or "")))
         ranked.append(
             {
                 "path": str(candidate["path"]),
@@ -329,30 +406,49 @@ def _rank_candidates_for_post(post: dict[str, Any], candidates: list[dict[str, A
                 "reason": str(score_payload.get("reason") or "").strip(),
                 "role": str(candidate.get("role") or "").strip(),
                 "source_kind": str(candidate.get("source_kind") or "").strip(),
+                "extension": source_path.suffix.lower(),
+                "extension_priority": _extension_priority(source_path),
+                "length_gap": length_gap,
+                "similarity_stem": str(candidate.get("similarity_stem") or "").strip(),
+                "normalized_stem": str(candidate.get("normalized_stem") or "").strip(),
+                "evidence_score": evidence_score,
+                "evidence_sources": list(evidence.get("evidence_sources") or []),
+                "url_asset_slug": str(evidence.get("url_asset_slug") or "").strip(),
+                "legacy_object_slug": str(evidence.get("legacy_object_slug") or "").strip(),
+                "manifest_category_hit": bool(evidence.get("manifest_category_hit")),
             }
         )
-    ranked.sort(key=lambda item: (item["score"], item["match_source"] == "exact_slug"), reverse=True)
+    ranked.sort(
+        key=lambda item: (
+            float(item["score"]),
+            float(item["evidence_score"]),
+            1 if str(item["role"]) == "hero" else 0,
+            int(item["extension_priority"]),
+            -int(item["length_gap"]),
+            str(item["path"]),
+        ),
+        reverse=True,
+    )
     return ranked[:8]
 
 
 def _coerce_post_row(row: SyncedCloudflarePost, *, policy: CloudflareAssetPolicy) -> dict[str, Any]:
     category_slug = str(row.canonical_category_slug or row.category_slug or "").strip()
     resolved_category = category_slug if category_slug in policy.allowed_category_slugs else ""
-    slug = _normalize_slug(row.slug)
+    slug = resolve_cloudflare_post_slug(row.slug)
     title = _normalize_space(row.title)
-    title_slug = _normalize_slug(title)
     return {
         "remote_post_id": str(row.remote_post_id or "").strip(),
         "slug": slug,
+        "similarity_slug": _normalize_similarity_text(row.slug),
         "title": title,
-        "title_slug": title_slug,
         "category_slug": resolved_category,
         "category_name": _normalize_space(row.canonical_category_name or row.category_name or resolved_category),
         "published_at": row.published_at,
         "thumbnail_url": str(row.thumbnail_url or "").strip(),
-        "asset_slug_hint": _asset_slug_from_url(row.thumbnail_url),
         "legacy_url_scheme": _legacy_url_scheme(row.thumbnail_url),
-        "tokens": sorted(_tokenize(slug, title_slug, title, resolved_category)),
+        "url_asset_slug": _asset_slug_from_url(row.thumbnail_url),
+        "legacy_object_slug": _legacy_object_slug_from_url(row.thumbnail_url),
         "target_path": str(build_cloudflare_local_asset_path(policy=policy, category_slug=resolved_category, post_slug=slug)) if resolved_category and slug else "",
         "object_key": build_cloudflare_r2_object_key(policy=policy, category_slug=resolved_category, post_slug=slug, published_at=row.published_at) if resolved_category and slug else "",
         "row": row,
@@ -384,10 +480,43 @@ def _load_target_posts(db: Session, *, policy: CloudflareAssetPolicy, category_s
     return coerced
 
 
-def _select_matches(posts: list[dict[str, Any]], candidates: list[dict[str, Any]], *, use_fallback_heuristic: bool) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _available_second_score(ranked: list[dict[str, Any]], *, chosen_path: str, used_paths: set[str]) -> float:
+    for candidate in ranked:
+        candidate_path = str(candidate["path"])
+        if candidate_path == chosen_path or candidate_path in used_paths:
+            continue
+        return float(candidate["score"])
+    return 0.0
+
+
+def _empty_post_evidence(post: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "url_asset_slug": str(post.get("url_asset_slug") or "").strip(),
+        "legacy_object_slug": str(post.get("legacy_object_slug") or "").strip(),
+        "manifest_category_hit": False,
+        "evidence_score": 0.0,
+        "evidence_sources": [],
+    }
+
+
+def _select_matches(
+    posts: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    *,
+    use_fallback_heuristic: bool,
+    source_category_history: dict[str, set[str]],
+    stem_category_history: dict[str, set[str]],
+    use_legacy_evidence: bool,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     ranked_posts: list[dict[str, Any]] = []
     for post in posts:
-        ranked = _rank_candidates_for_post(post, candidates, use_fallback_heuristic=use_fallback_heuristic)
+        ranked = _rank_candidates_for_post(
+            post,
+            candidates,
+            source_category_history=source_category_history,
+            stem_category_history=stem_category_history,
+            use_legacy_evidence=use_legacy_evidence,
+        )
         ranked_posts.append({"post": post, "ranked": ranked})
     ranked_posts.sort(key=lambda item: (float(item["ranked"][0]["score"]) if item["ranked"] else -1.0, str(item["post"]["slug"])), reverse=True)
 
@@ -398,7 +527,6 @@ def _select_matches(posts: list[dict[str, Any]], candidates: list[dict[str, Any]
         post = entry["post"]
         ranked = entry["ranked"]
         chosen: dict[str, Any] | None = None
-        second_score = float(ranked[1]["score"]) if len(ranked) > 1 else 0.0
         for candidate in ranked:
             if str(candidate["path"]) in used_paths:
                 continue
@@ -413,38 +541,110 @@ def _select_matches(posts: list[dict[str, Any]], candidates: list[dict[str, Any]
                 "title": post["title"],
                 "legacy_url_scheme": post["legacy_url_scheme"],
                 "reason": "no_available_candidate",
+                **_empty_post_evidence(post),
                 "top_candidates": ranked[:3],
             })
             continue
 
         score = float(chosen["score"])
-        ambiguous = second_score > 0 and abs(score - second_score) < AMBIGUITY_GAP and score < 0.98
-        confidence_threshold = DEFAULT_MATCH_CONFIDENCE if str(chosen["match_source"]) != "fallback_heuristic" else 0.58
-        if score < confidence_threshold or ambiguous:
+        second_score = _available_second_score(ranked, chosen_path=str(chosen["path"]), used_paths=used_paths)
+        score_gap = round(score - second_score, 4)
+        auto_match = score >= SIMILARITY_AUTO_THRESHOLD
+        conditional_match = (
+            use_fallback_heuristic
+            and score >= SIMILARITY_CONDITIONAL_THRESHOLD
+            and score < SIMILARITY_AUTO_THRESHOLD
+            and score_gap >= SIMILARITY_GAP_THRESHOLD
+        )
+        if not auto_match and not conditional_match:
             unresolved.append({
                 "remote_post_id": post["remote_post_id"],
                 "slug": post["slug"],
                 "category_slug": post["category_slug"],
                 "title": post["title"],
                 "legacy_url_scheme": post["legacy_url_scheme"],
-                "reason": "low_confidence" if score < confidence_threshold else "ambiguous_match",
+                "reason": "low_confidence" if score < SIMILARITY_CONDITIONAL_THRESHOLD else "ambiguous_match",
                 "confidence": round(score, 4),
+                "score_gap": score_gap,
+                "url_asset_slug": str(chosen.get("url_asset_slug") or post.get("url_asset_slug") or "").strip(),
+                "legacy_object_slug": str(chosen.get("legacy_object_slug") or post.get("legacy_object_slug") or "").strip(),
+                "manifest_category_hit": bool(chosen.get("manifest_category_hit")),
+                "evidence_score": round(float(chosen.get("evidence_score") or 0.0), 4),
+                "evidence_sources": list(chosen.get("evidence_sources") or []),
                 "top_candidates": ranked[:3],
             })
             continue
 
         used_paths.add(str(chosen["path"]))
+        match_source = str(chosen["match_source"] or "").strip()
+        if conditional_match:
+            match_source = "slug_similarity_gap"
+        elif match_source != "exact_slug":
+            match_source = "slug_similarity_auto"
         matched.append({
             **post,
-            "match_source": str(chosen["match_source"]),
+            "match_source": match_source,
             "confidence": round(score, 4),
+            "score_gap": score_gap,
             "resolved_local_source": str(chosen["path"]),
             "candidate_role": str(chosen["role"]),
             "candidate_source_kind": str(chosen["source_kind"]),
             "match_reason": str(chosen["reason"]),
+            "url_asset_slug": str(chosen.get("url_asset_slug") or post.get("url_asset_slug") or "").strip(),
+            "legacy_object_slug": str(chosen.get("legacy_object_slug") or post.get("legacy_object_slug") or "").strip(),
+            "manifest_category_hit": bool(chosen.get("manifest_category_hit")),
+            "evidence_score": round(float(chosen.get("evidence_score") or 0.0), 4),
+            "evidence_sources": list(chosen.get("evidence_sources") or []),
             "top_candidates": ranked[:3],
         })
     return matched, unresolved
+
+
+def _preflight_remote_thumbnail_fetch(posts: list[dict[str, Any]]) -> dict[str, Any]:
+    urls: list[str] = []
+    seen: set[str] = set()
+    for post in posts:
+        url = str(post.get("thumbnail_url") or "").strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        urls.append(url)
+        if len(urls) >= REMOTE_THUMBNAIL_PREFLIGHT_SAMPLE_SIZE:
+            break
+
+    status_breakdown: Counter[str] = Counter()
+    successful = 0
+    for url in urls:
+        status_label = "error"
+        try:
+            response = httpx.head(url, follow_redirects=True, timeout=20.0)
+            if response.status_code == 405 or response.status_code >= 400:
+                response = httpx.get(url, headers={"Range": "bytes=0-0"}, follow_redirects=True, timeout=20.0)
+            status_label = str(response.status_code)
+            if response.status_code < 400:
+                successful += 1
+        except Exception:  # noqa: BLE001
+            status_label = "error"
+        status_breakdown[status_label] += 1
+
+    attempted = len(urls)
+    enabled = bool(attempted) and successful > 0 and (successful / attempted) >= REMOTE_THUMBNAIL_PREFLIGHT_MIN_SUCCESS_RATIO
+    return {
+        "enabled": enabled,
+        "preflight_count": attempted,
+        "successful_preflight_count": successful,
+        "status_breakdown": dict(status_breakdown),
+    }
+
+
+def _build_evidence_breakdown(*, matched: list[dict[str, Any]], unresolved: list[dict[str, Any]]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for item in list(matched) + list(unresolved):
+        for source in list(item.get("evidence_sources") or []):
+            normalized = str(source or "").strip()
+            if normalized:
+                counts[normalized] += 1
+    return dict(counts)
 
 
 def _ensure_webp_bytes(source_path: Path) -> bytes:
@@ -553,6 +753,11 @@ def _write_report_artifacts(*, policy: CloudflareAssetPolicy, report: dict[str, 
         "match_source",
         "confidence",
         "legacy_url_scheme",
+        "url_asset_slug",
+        "legacy_object_slug",
+        "manifest_category_hit",
+        "evidence_score",
+        "evidence_sources",
         "resolved_local_source",
         "resolved_target_path",
         "resolved_object_key",
@@ -603,26 +808,72 @@ def rebuild_cloudflare_assets(
     limit: int | None = None,
     purge_target: bool = True,
     use_fallback_heuristic: bool = True,
+    image_match_strategy: str = "slug_similarity",
+    ignore_filename_patterns: list[str] | None = None,
+    allow_thumbnail_fallback: bool = False,
+    bucket_override: str | None = None,
+    source_scope: str = DEFAULT_SOURCE_SCOPE,
+    update_live_posts: bool = False,
+    allow_remote_thumbnail_fetch: bool = False,
+    use_legacy_evidence: bool = True,
+    legacy_evidence_can_auto_accept: bool = False,
 ) -> dict[str, Any]:
     normalized_mode = str(mode or "dry_run").strip().lower()
     if normalized_mode not in {"dry_run", "execute"}:
         raise ValueError(f"Unsupported rebuild mode: {mode}")
+    normalized_match_strategy = str(image_match_strategy or "slug_similarity").strip().lower()
+    if normalized_match_strategy != "slug_similarity":
+        raise ValueError(f"Unsupported image_match_strategy: {image_match_strategy}")
+    normalized_source_scope = str(source_scope or DEFAULT_SOURCE_SCOPE).strip().lower()
+    if normalized_source_scope != DEFAULT_SOURCE_SCOPE:
+        raise ValueError(f"Unsupported source_scope: {source_scope}")
+    if allow_thumbnail_fallback:
+        raise ValueError("allow_thumbnail_fallback=true is not supported for Cloudflare rebuild.")
+    if legacy_evidence_can_auto_accept:
+        raise ValueError("legacy_evidence_can_auto_accept=true is not supported in phase 1.")
 
     ensure_managed_channels(db)
     channel = db.execute(select(ManagedChannel).where(ManagedChannel.channel_id == channel_id)).scalar_one_or_none()
     policy = get_cloudflare_asset_policy(channel)
     normalized_categories = [str(item or "").strip() for item in (category_slugs or []) if str(item or "").strip()]
+    normalized_ignore_patterns = [
+        str(pattern or "").strip()
+        for pattern in (ignore_filename_patterns or list(DEFAULT_IGNORE_FILENAME_PATTERNS))
+        if str(pattern or "").strip()
+    ]
     for category_slug in normalized_categories:
         assert_cloudflare_asset_scope(policy=policy, category_slug=category_slug)
 
-    candidates = _inventory_candidates(policy)
+    candidates = _inventory_candidates(
+        policy,
+        ignore_filename_patterns=normalized_ignore_patterns,
+        source_scope=normalized_source_scope,
+    )
     posts = _load_target_posts(db, policy=policy, category_slugs=normalized_categories or None, limit=limit)
-    matched, unresolved = _select_matches(posts, candidates, use_fallback_heuristic=use_fallback_heuristic)
+    source_category_history, stem_category_history = _load_manifest_history(_cloudflare_manifest_dir(policy))
+    remote_fetch_probe = (
+        _preflight_remote_thumbnail_fetch(posts)
+        if allow_remote_thumbnail_fetch
+        else {"enabled": False, "preflight_count": 0, "successful_preflight_count": 0, "status_breakdown": {}}
+    )
+    matched, unresolved = _select_matches(
+        posts,
+        candidates,
+        use_fallback_heuristic=use_fallback_heuristic,
+        source_category_history=source_category_history,
+        stem_category_history=stem_category_history,
+        use_legacy_evidence=use_legacy_evidence,
+    )
 
     items: list[dict[str, Any]] = []
     failed_count = 0
+    uploaded_count = 0
     updated_count = 0
     purged_categories: list[str] = []
+    sample_uploaded_keys: list[str] = []
+    resolved_bucket_name = str(bucket_override or "").strip()
+    remote_fetch_attempted_count = 0
+    remote_fetch_success_count = 0
     touched_categories = sorted({str(item.get("category_slug") or "").strip() for item in matched if str(item.get("category_slug") or "").strip()})
     if normalized_mode == "execute" and purge_target and touched_categories:
         purged_categories = purge_cloudflare_target_categories(policy=policy, category_slugs=touched_categories)
@@ -638,6 +889,11 @@ def rebuild_cloudflare_assets(
             "match_source": item["match_source"],
             "confidence": item["confidence"],
             "legacy_url_scheme": item["legacy_url_scheme"],
+            "url_asset_slug": item["url_asset_slug"],
+            "legacy_object_slug": item["legacy_object_slug"],
+            "manifest_category_hit": item["manifest_category_hit"],
+            "evidence_score": item["evidence_score"],
+            "evidence_sources": list(item["evidence_sources"]),
             "resolved_local_source": item["resolved_local_source"],
             "resolved_target_path": item["target_path"],
             "resolved_object_key": item["object_key"],
@@ -656,17 +912,31 @@ def rebuild_cloudflare_assets(
             assert_cloudflare_asset_scope(policy=policy, category_slug=str(item["category_slug"]), object_key=str(item["object_key"]), local_path=target_path)
             webp_bytes = _ensure_webp_bytes(source_path)
             target_path.write_bytes(webp_bytes)
-            cover_image_url, upload_payload, _delivery_meta = upload_binary_to_cloudflare_r2(db, object_key=str(item["object_key"]), filename=target_path.name, content=webp_bytes)
+            cover_image_url, upload_payload, _delivery_meta = upload_binary_to_cloudflare_r2(
+                db,
+                object_key=str(item["object_key"]),
+                filename=target_path.name,
+                content=webp_bytes,
+                bucket_override=bucket_override,
+            )
             resolved_object_key = str(upload_payload.get("object_key") or "").strip()
             if resolved_object_key != str(item["object_key"]):
                 raise ValueError(f"canonical_object_key_mismatch expected={item['object_key']} actual={resolved_object_key}")
-            _update_live_post_cover(db, row=row, category_slug=str(item["category_slug"]), cover_image_url=cover_image_url)
-            row.thumbnail_url = cover_image_url
-            db.add(row)
-            db.flush()
-            report_row["status"] = "updated"
+            if not resolved_bucket_name:
+                resolved_bucket_name = str(upload_payload.get("bucket") or "").strip()
+            uploaded_count += 1
+            if len(sample_uploaded_keys) < 10:
+                sample_uploaded_keys.append(resolved_object_key)
+            if update_live_posts:
+                _update_live_post_cover(db, row=row, category_slug=str(item["category_slug"]), cover_image_url=cover_image_url)
+                row.thumbnail_url = cover_image_url
+                db.add(row)
+                db.flush()
+                report_row["status"] = "updated"
+                updated_count += 1
+            else:
+                report_row["status"] = "uploaded"
             report_row["resolved_public_url"] = cover_image_url
-            updated_count += 1
         except Exception as exc:  # noqa: BLE001
             report_row["status"] = "failed"
             report_row["error"] = str(exc)
@@ -674,24 +944,53 @@ def rebuild_cloudflare_assets(
         items.append(report_row)
 
     sync_result: dict[str, Any] | None = None
-    if normalized_mode == "execute" and updated_count > 0:
+    if normalized_mode == "execute":
         db.commit()
-        sync_result = sync_cloudflare_posts(db, include_non_published=True)
+        if update_live_posts and updated_count > 0:
+            sync_result = sync_cloudflare_posts(db, include_non_published=True)
 
+    evidence_breakdown = _build_evidence_breakdown(matched=matched, unresolved=unresolved)
     report = {
-        "status": "ok" if failed_count == 0 else ("partial" if updated_count > 0 else "failed"),
+        "status": "ok" if failed_count == 0 else ("partial" if uploaded_count > 0 else "failed"),
         "mode": normalized_mode,
         "channel_id": policy.channel_id,
         "generated_at": _utc_now_iso(),
+        "db_posts": len(posts),
         "post_count": len(posts),
+        "matched": len(matched),
         "candidate_count": len(candidates),
-        "matched_count": sum(1 for item in matched if item["match_source"] != "fallback_heuristic"),
-        "heuristic_matched_count": sum(1 for item in matched if item["match_source"] == "fallback_heuristic"),
+        "matched_count": sum(1 for item in matched if item["match_source"] != "slug_similarity_gap"),
+        "heuristic_matched_count": sum(1 for item in matched if item["match_source"] == "slug_similarity_gap"),
+        "uploaded": uploaded_count,
+        "uploaded_count": uploaded_count,
+        "unresolved_total": len(unresolved),
         "unresolved_count": len(unresolved),
         "updated_count": updated_count,
         "failed_count": failed_count,
         "purged_categories": purged_categories,
         "legacy_scheme_breakdown": dict(Counter(item["legacy_url_scheme"] for item in posts)),
+        "evidence_breakdown": evidence_breakdown,
+        "url_asset_exact_count": int(evidence_breakdown.get("url_asset_exact", 0)),
+        "url_asset_prefix_count": int(evidence_breakdown.get("url_asset_prefix", 0)),
+        "manifest_category_hit_count": int(evidence_breakdown.get("manifest_category_hit", 0)),
+        "image_match_strategy": normalized_match_strategy,
+        "ignore_filename_patterns": normalized_ignore_patterns,
+        "allow_thumbnail_fallback": False,
+        "bucket_name": resolved_bucket_name or None,
+        "bucket_verified": True if normalized_mode == "execute" and uploaded_count > 0 else None,
+        "sample_uploaded_keys": sample_uploaded_keys,
+        "source_scope": normalized_source_scope,
+        "update_live_posts": update_live_posts,
+        "allow_remote_thumbnail_fetch": allow_remote_thumbnail_fetch,
+        "remote_fetch_enabled": bool(remote_fetch_probe.get("enabled")),
+        "remote_fetch_attempted_count": remote_fetch_attempted_count,
+        "remote_fetch_success_count": remote_fetch_success_count,
+        "remote_fetch_preflight_count": int(remote_fetch_probe.get("preflight_count") or 0),
+        "remote_fetch_preflight_success_count": int(remote_fetch_probe.get("successful_preflight_count") or 0),
+        "remote_fetch_status_breakdown": dict(remote_fetch_probe.get("status_breakdown") or {}),
+        "use_legacy_evidence": use_legacy_evidence,
+        "legacy_evidence_can_auto_accept": legacy_evidence_can_auto_accept,
+        "created_categories": [],
         "sync_result": sync_result,
         "items": items,
         "unresolved": unresolved,
