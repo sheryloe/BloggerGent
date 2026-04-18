@@ -264,7 +264,7 @@ def resolve_r2_blog_group(
         return "cloudflare/dongri-archive"
 
     if travel_policy is not None:
-        return "Travel"
+        return "travel-blogger"
     if normalized_profile == "korea_travel":
         return "google-blogger/korea-travel"
     if normalized_profile == "world_mystery":
