@@ -75,6 +75,20 @@ def _normalize_base_url(base_url: str) -> str:
     return base_url.rstrip("/")
 
 
+def _normalize_asset_public_origin(base_url: str) -> str:
+    normalized = _normalize_base_url(base_url)
+    if not normalized:
+        return ""
+    parsed = urlparse(normalized)
+    if parsed.scheme and parsed.netloc:
+        if parsed.path.rstrip("/").lower() == "/assets":
+            return f"{parsed.scheme}://{parsed.netloc}"
+        return normalized
+    if normalized.lower().endswith("/assets"):
+        return normalized[: -len("/assets")]
+    return normalized
+
+
 def _join_public_url(base_url: str, path: str) -> str:
     return f"{_normalize_base_url(base_url)}/{path.lstrip('/')}"
 
@@ -619,6 +633,30 @@ def _resolve_cloudflare_integration_upload_configuration(values: dict[str, str])
     )
 
 
+def _resolve_cloudflare_r2_target_configuration(
+    values: dict[str, str],
+    *,
+    object_key: str | None = None,
+    bucket_override: str | None = None,
+    public_base_url_override: str | None = None,
+    prefix_override: str | None = None,
+) -> tuple[str, str, str, str, str, str]:
+    account_id, bucket, access_key_id, secret_access_key, public_base_url, prefix = _resolve_cloudflare_r2_configuration(
+        values,
+        object_key=object_key,
+    )
+    normalized_bucket = str(bucket_override or "").strip()
+    normalized_public_base_url = str(public_base_url_override or "").strip()
+    normalized_prefix = str(prefix_override or "").strip().strip("/")
+    if normalized_bucket:
+        bucket = normalized_bucket
+    if normalized_public_base_url:
+        public_base_url = _normalize_base_url(normalized_public_base_url)
+    if normalized_prefix:
+        prefix = normalized_prefix
+    return account_id, bucket, access_key_id, secret_access_key, public_base_url, prefix
+
+
 def _cloudflare_r2_object_key(*, filename: str, prefix: str) -> str:
     normalized_name = Path(filename).name
     normalized_prefix = prefix.strip().strip("/")
@@ -1021,6 +1059,214 @@ def _build_r2_authorization_headers(
     return headers
 
 
+def _probe_cloudflare_r2_image_bytes() -> bytes:
+    output = io.BytesIO()
+    Image.new("RGB", (2, 2), color=(24, 120, 220)).save(output, format="WEBP", quality=80, method=6)
+    return output.getvalue()
+
+
+def _ensure_cloudflare_r2_credentials(
+    *,
+    account_id: str,
+    bucket: str,
+    access_key_id: str,
+    secret_access_key: str,
+) -> None:
+    if account_id and bucket and access_key_id and secret_access_key:
+        return
+    raise ProviderRuntimeError(
+        provider="cloudflare_r2",
+        status_code=422,
+        message="Cloudflare R2 bucket bootstrap is missing required credentials.",
+        detail="Set cloudflare_account_id, cloudflare_r2_bucket, cloudflare_r2_access_key_id, and cloudflare_r2_secret_access_key.",
+    )
+
+
+def _cloudflare_r2_bucket_request(
+    *,
+    method: str,
+    account_id: str,
+    bucket: str,
+    access_key_id: str,
+    secret_access_key: str,
+    payload: bytes = b"",
+    extra_headers: Mapping[str, str] | None = None,
+) -> httpx.Response:
+    headers = _build_r2_authorization_headers(
+        method=method,
+        account_id=account_id,
+        bucket=bucket,
+        object_key="",
+        access_key_id=access_key_id,
+        secret_access_key=secret_access_key,
+        payload=payload,
+        extra_headers=extra_headers,
+    )
+    request_kwargs: dict[str, object] = {
+        "headers": headers,
+        "timeout": 120.0,
+    }
+    if payload:
+        request_kwargs["content"] = payload
+    return httpx.request(
+        method.upper(),
+        _r2_endpoint_url(account_id=account_id, bucket=bucket, object_key=""),
+        **request_kwargs,
+    )
+
+
+def ensure_cloudflare_r2_bucket(
+    db: Session,
+    *,
+    bucket_name: str,
+    verify: bool = True,
+    sample_object_key: str | None = None,
+    create_if_missing: bool = False,
+) -> dict[str, object]:
+    normalized_bucket = str(bucket_name or "").strip()
+    if not normalized_bucket:
+        raise ProviderRuntimeError(
+            provider="cloudflare_r2",
+            status_code=422,
+            message="Cloudflare R2 bucket name is required.",
+            detail="Pass a non-empty bucket_name.",
+        )
+
+    values = get_settings_map(db)
+    account_id, _, access_key_id, secret_access_key, public_base_url, _ = _resolve_cloudflare_r2_target_configuration(
+        values,
+        bucket_override=normalized_bucket,
+    )
+    _ensure_cloudflare_r2_credentials(
+        account_id=account_id,
+        bucket=normalized_bucket,
+        access_key_id=access_key_id,
+        secret_access_key=secret_access_key,
+    )
+
+    bucket_created = False
+    if create_if_missing:
+        head_response = _cloudflare_r2_bucket_request(
+            method="HEAD",
+            account_id=account_id,
+            bucket=normalized_bucket,
+            access_key_id=access_key_id,
+            secret_access_key=secret_access_key,
+        )
+        if head_response.status_code == 404:
+            create_response = _cloudflare_r2_bucket_request(
+                method="PUT",
+                account_id=account_id,
+                bucket=normalized_bucket,
+                access_key_id=access_key_id,
+                secret_access_key=secret_access_key,
+            )
+            if create_response.is_success:
+                bucket_created = True
+            elif create_response.status_code != 409:
+                raise ProviderRuntimeError(
+                    provider="cloudflare_r2",
+                    status_code=create_response.status_code,
+                    message="Cloudflare R2 bucket create failed.",
+                    detail=create_response.text,
+                )
+        elif not head_response.is_success:
+            raise ProviderRuntimeError(
+                provider="cloudflare_r2",
+                status_code=head_response.status_code,
+                message="Cloudflare R2 bucket existence check failed.",
+                detail=head_response.text,
+            )
+
+    verified = False
+    sample_uploaded_keys: list[str] = []
+    if verify:
+        probe_key = str(sample_object_key or "").strip().lstrip("/")
+        if not probe_key:
+            probe_key = f"assets/media/cloudflare/dongri-archive/bootstrap/{int(time.time())}-probe.webp"
+        probe_bytes = _probe_cloudflare_r2_image_bytes()
+        headers = _build_r2_authorization_headers(
+            method="PUT",
+            account_id=account_id,
+            bucket=normalized_bucket,
+            object_key=probe_key,
+            access_key_id=access_key_id,
+            secret_access_key=secret_access_key,
+            payload=probe_bytes,
+            extra_headers={
+                "Content-Type": "image/webp",
+                "Cache-Control": "no-store",
+            },
+        )
+        put_response = httpx.put(
+            _r2_endpoint_url(account_id=account_id, bucket=normalized_bucket, object_key=probe_key),
+            content=probe_bytes,
+            headers=headers,
+            timeout=120.0,
+        )
+        if not put_response.is_success:
+            raise ProviderRuntimeError(
+                provider="cloudflare_r2",
+                status_code=put_response.status_code,
+                message="Cloudflare R2 bucket verification PUT failed.",
+                detail=put_response.text,
+            )
+        sample_uploaded_keys.append(probe_key)
+
+        head_headers = _build_r2_authorization_headers(
+            method="HEAD",
+            account_id=account_id,
+            bucket=normalized_bucket,
+            object_key=probe_key,
+            access_key_id=access_key_id,
+            secret_access_key=secret_access_key,
+            payload=b"",
+        )
+        verify_response = httpx.head(
+            _r2_endpoint_url(account_id=account_id, bucket=normalized_bucket, object_key=probe_key),
+            headers=head_headers,
+            timeout=120.0,
+        )
+        if not verify_response.is_success:
+            raise ProviderRuntimeError(
+                provider="cloudflare_r2",
+                status_code=verify_response.status_code,
+                message="Cloudflare R2 bucket verification HEAD failed.",
+                detail=verify_response.text,
+            )
+        verified = True
+
+        delete_headers = _build_r2_authorization_headers(
+            method="DELETE",
+            account_id=account_id,
+            bucket=normalized_bucket,
+            object_key=probe_key,
+            access_key_id=access_key_id,
+            secret_access_key=secret_access_key,
+            payload=b"",
+        )
+        delete_response = httpx.delete(
+            _r2_endpoint_url(account_id=account_id, bucket=normalized_bucket, object_key=probe_key),
+            headers=delete_headers,
+            timeout=120.0,
+        )
+        if not delete_response.is_success:
+            raise ProviderRuntimeError(
+                provider="cloudflare_r2",
+                status_code=delete_response.status_code,
+                message="Cloudflare R2 bucket verification cleanup failed.",
+                detail=delete_response.text,
+            )
+
+    return {
+        "bucket_name": normalized_bucket,
+        "bucket_created": bucket_created,
+        "bucket_verified": verified,
+        "public_base_url": public_base_url,
+        "sample_uploaded_keys": sample_uploaded_keys,
+    }
+
+
 def _extract_cloudflare_integration_asset(payload: Mapping[str, object] | None) -> Mapping[str, object] | None:
     if not isinstance(payload, Mapping):
         return None
@@ -1059,13 +1305,23 @@ def _upload_to_cloudflare_r2(
     object_key: str | None = None,
     filename: str,
     content: bytes,
+    bucket_override: str | None = None,
+    public_base_url_override: str | None = None,
+    prefix_override: str | None = None,
 ) -> tuple[str, dict]:
     normalized_requested_key = str(object_key or "").strip().lstrip("/")
-    account_id, bucket, access_key_id, secret_access_key, public_base_url, prefix = _resolve_cloudflare_r2_configuration(
+    account_id, bucket, access_key_id, secret_access_key, public_base_url, prefix = _resolve_cloudflare_r2_target_configuration(
         values,
         object_key=normalized_requested_key,
+        bucket_override=bucket_override,
+        public_base_url_override=public_base_url_override,
+        prefix_override=prefix_override,
     )
     integration_base_url, integration_token = _resolve_cloudflare_integration_upload_configuration(values)
+    using_overrides = any(
+        str(value or "").strip()
+        for value in (bucket_override, public_base_url_override, prefix_override)
+    )
     object_key = (
         _normalize_cloudflare_object_key(public_key=prefix, key=normalized_requested_key)
         if normalized_requested_key
@@ -1158,8 +1414,20 @@ def _upload_to_cloudflare_r2(
                 message="Cloudflare R2 upload failed.",
                 detail=response.text,
             )
-            if mystery_object or not integration_base_url or not integration_token or response.status_code not in {401, 403}:
+            if using_overrides or mystery_object or not integration_base_url or not integration_token or response.status_code not in {401, 403, 404}:
                 raise direct_upload_error
+
+    if using_overrides:
+        fallback_detail = f" Direct upload error: {direct_upload_error.detail}" if direct_upload_error is not None else ""
+        raise ProviderRuntimeError(
+            provider="cloudflare_r2",
+            status_code=422,
+            message="Cloudflare R2 upload overrides require direct bucket access.",
+            detail=(
+                "Bucket override uploads do not support the integration proxy fallback."
+                + fallback_detail
+            ),
+        )
 
     if not integration_base_url or not integration_token:
         fallback_detail = (
@@ -1183,6 +1451,7 @@ def _upload_to_cloudflare_r2(
         data={
             "postSlug": Path(filename).stem,
             "altText": Path(filename).stem.replace("-", " "),
+            **({"objectKey": object_key} if object_key else {}),
         },
         files={"file": (filename, content, content_type)},
         timeout=120.0,
@@ -1275,15 +1544,27 @@ def upload_binary_to_cloudflare_r2(
     object_key: str | None = None,
     filename: str,
     content: bytes,
+    bucket_override: str | None = None,
+    public_base_url_override: str | None = None,
+    prefix_override: str | None = None,
 ) -> tuple[str, dict, dict]:
     values = get_settings_map(db)
     transform_enabled = _is_cloudflare_transform_enabled(values)
-    _, bucket, _, _, public_base_url, _ = _resolve_cloudflare_r2_configuration(values, object_key=object_key)
+    _, bucket, _, _, public_base_url, _ = _resolve_cloudflare_r2_target_configuration(
+        values,
+        object_key=object_key,
+        bucket_override=bucket_override,
+        public_base_url_override=public_base_url_override,
+        prefix_override=prefix_override,
+    )
     _, upload_payload = _upload_to_cloudflare_r2(
         values=values,
         object_key=object_key,
         filename=filename,
         content=content,
+        bucket_override=bucket_override,
+        public_base_url_override=public_base_url_override,
+        prefix_override=prefix_override,
     )
     resolved_bucket = str(upload_payload.get("bucket") or bucket).strip()
     resolved_public_base_url = str(upload_payload.get("public_base_url") or public_base_url).strip()
