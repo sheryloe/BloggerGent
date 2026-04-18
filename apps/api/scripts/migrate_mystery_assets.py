@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from html.parser import HTMLParser
 import json
 import os
 import re
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+import httpx
 from PIL import Image as PILImage
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -29,6 +31,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.entities import Article, Blog, SyncedBloggerPost  # noqa: E402
+from app.services.blogger.blogger_oauth_service import refresh_blogger_access_token  # noqa: E402
 from app.services.content.article_service import build_article_r2_asset_object_key  # noqa: E402
 from app.services.integrations.settings_service import get_settings_map  # noqa: E402
 from app.services.integrations.storage_service import (  # noqa: E402
@@ -36,10 +39,14 @@ from app.services.integrations.storage_service import (  # noqa: E402
     normalize_r2_url_to_key,
     save_public_binary,
 )
+from app.services.providers.factory import get_blogger_provider  # noqa: E402
 
+MYSTERY_BLOG_ID = 35
 LIVE_STATUSES = {"LIVE", "PUBLISHED", "live", "published"}
 URL_RE = re.compile(r"https?://[^\s'\"<>()]+", re.IGNORECASE)
 IMAGE_FILE_EXTENSIONS = {".png", ".webp", ".jpg", ".jpeg"}
+LIVE_FETCH_TIMEOUT_SECONDS = 30.0
+LIVE_FETCH_HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 
 def _safe_str(value: Any) -> str:
@@ -62,12 +69,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--blog-id", type=int, default=35)
     parser.add_argument("--mode", choices=("dry-run", "apply", "rewrite-only"), default="dry-run")
     parser.add_argument(
+        "--content-source",
+        choices=("live", "db"),
+        default="live",
+        help="Content source for synced post rewrite. live fetches post body HTML from SyncedBloggerPost.url.",
+    )
+    parser.add_argument("--limit", type=int, default=None, help="Limit processed LIVE synced posts after filters.")
+    parser.add_argument("--offset", type=int, default=0, help="Offset for LIVE synced posts after filters.")
+    parser.add_argument("--slug-file", default="", help="Optional file containing target slugs (line/comma/json list).")
+    parser.add_argument("--publish-live", action="store_true", help="After DB rewrite, call Blogger update_post per changed row.")
+    parser.add_argument(
         "--backup-root",
         action="append",
         default=[],
         help="Additional backup root path (repeatable).",
     )
     parser.add_argument("--report-path", default="", help="Optional JSON report path.")
+    parser.add_argument("--no-report-file", action="store_true", help="Do not write JSON report file; print summary only.")
     return parser.parse_args(argv)
 
 
@@ -246,6 +264,40 @@ def _extract_post_slug_from_url(post_url: str | None, *, fallback: str = "") -> 
     return _slug_token(fallback)
 
 
+def _load_slug_filter(path_value: str) -> set[str]:
+    source_path = _safe_str(path_value)
+    if not source_path:
+        return set()
+    file_path = Path(source_path)
+    if not file_path.exists():
+        raise RuntimeError(f"slug_file_not_found:{file_path}")
+    raw_text = file_path.read_text(encoding="utf-8", errors="replace")
+    trimmed = raw_text.strip()
+    tokens: list[str] = []
+    if trimmed.startswith("["):
+        try:
+            payload = json.loads(trimmed)
+        except json.JSONDecodeError:
+            payload = []
+        if isinstance(payload, list):
+            tokens.extend(_safe_str(item) for item in payload)
+    if not tokens:
+        for raw_line in raw_text.splitlines():
+            line = raw_line.split("#", maxsplit=1)[0].strip()
+            if not line:
+                continue
+            for part in line.split(","):
+                token = _safe_str(part)
+                if token:
+                    tokens.append(token)
+    normalized: set[str] = set()
+    for token in tokens:
+        slug = _slug_token(token)
+        if slug:
+            normalized.add(slug)
+    return normalized
+
+
 def _rewrite_url(value: str, *, direct_map: dict[str, str], key_map: dict[str, str], slug_map: dict[str, str]) -> str:
     candidate = _safe_str(value)
     if not candidate:
@@ -284,14 +336,130 @@ def _rewrite_text_urls(
     return rewritten_text, replacements
 
 
+def _parse_google_datetime(value: Any) -> datetime | None:
+    raw_value = _safe_str(value)
+    if not raw_value:
+        return None
+    candidate = raw_value
+    if candidate.endswith("Z"):
+        candidate = f"{candidate[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+class _LivePostBodyExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self._capture_depth = 0
+        self._parts: list[str] = []
+        self._found = False
+        self._done = False
+
+    @staticmethod
+    def _contains_post_body(attrs: list[tuple[str, str | None]]) -> bool:
+        for key, raw_value in attrs:
+            if _safe_str(key).lower() != "class":
+                continue
+            tokens = {_safe_str(item).lower() for item in _safe_str(raw_value).split()}
+            if "post-body" in tokens:
+                return True
+        return False
+
+    def _append(self, value: str) -> None:
+        if self._capture_depth > 0 and value:
+            self._parts.append(value)
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if self._done:
+            return
+        if self._capture_depth == 0:
+            if self._contains_post_body(attrs):
+                self._capture_depth = 1
+                self._found = True
+            return
+        self._capture_depth += 1
+        self._append(self.get_starttag_text() or f"<{tag}>")
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if self._capture_depth <= 0:
+            return
+        self._append(self.get_starttag_text() or f"<{tag} />")
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._capture_depth <= 0:
+            return
+        self._capture_depth -= 1
+        if self._capture_depth == 0:
+            self._done = True
+            return
+        self._append(f"</{tag}>")
+
+    def handle_data(self, data: str) -> None:
+        self._append(data)
+
+    def handle_entityref(self, name: str) -> None:
+        self._append(f"&{name};")
+
+    def handle_charref(self, name: str) -> None:
+        self._append(f"&#{name};")
+
+    def handle_comment(self, data: str) -> None:
+        self._append(f"<!--{data}-->")
+
+    def extracted_html(self) -> str:
+        if not self._found:
+            return ""
+        return "".join(self._parts).strip()
+
+
+def _fetch_live_post_body_html(post_url: str) -> tuple[str, str]:
+    normalized_url = _safe_str(post_url)
+    if not normalized_url:
+        raise RuntimeError("live_post_url_missing")
+    response = httpx.get(
+        normalized_url,
+        timeout=LIVE_FETCH_TIMEOUT_SECONDS,
+        follow_redirects=True,
+        headers=LIVE_FETCH_HEADERS,
+    )
+    response.raise_for_status()
+    parser = _LivePostBodyExtractor()
+    parser.feed(response.text)
+    parser.close()
+    extracted = parser.extracted_html()
+    if not extracted:
+        raise RuntimeError("live_post_body_not_found")
+    return extracted, f"live:{normalized_url}"
+
+
 def run(args: argparse.Namespace) -> dict[str, Any]:
     mode = _safe_str(args.mode).lower()
+    content_source = _safe_str(args.content_source).lower() or "live"
     apply_mode = mode == "apply"
     rewrite_only_mode = mode == "rewrite-only"
+    publish_live = bool(args.publish_live)
+    if publish_live and not (apply_mode or rewrite_only_mode):
+        raise RuntimeError("publish_live_requires_apply_or_rewrite_only_mode")
+    if int(args.blog_id) != MYSTERY_BLOG_ID:
+        raise RuntimeError(f"mystery_blog_only:{args.blog_id}")
+
+    offset = max(0, int(args.offset or 0))
+    limit = int(args.limit) if args.limit is not None else None
+    if limit is not None and limit <= 0:
+        raise RuntimeError(f"invalid_limit:{limit}")
+    slug_filter = _load_slug_filter(_safe_str(args.slug_file))
+
     report: dict[str, Any] = {
         "generated_at": _utc_now_iso(),
         "mode": mode,
+        "content_source": content_source,
         "blog_id": int(args.blog_id),
+        "publish_live": publish_live,
         "summary": {
             "articles_scanned": 0,
             "articles_migrated": 0,
@@ -302,8 +470,15 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "url_mappings": 0,
             "article_assembled_html_rewrites": 0,
             "synced_post_rewrites": 0,
+            "posts_source_total": 0,
+            "posts_planned": 0,
+            "posts_rewritten": 0,
+            "posts_published": 0,
+            "posts_publish_failed": 0,
+            "published_success": 0,
         },
         "items": [],
+        "post_items": [],
     }
 
     with SessionLocal() as db:
@@ -317,22 +492,93 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         mystery_public_base = _safe_str(
             settings_map.get("mystery_cloudflare_r2_public_base_url") or settings_map.get("cloudflare_r2_public_base_url")
         )
+        if (apply_mode or rewrite_only_mode) and not mystery_public_base:
+            raise RuntimeError("mystery_public_base_url_missing")
+        if publish_live and (apply_mode or rewrite_only_mode):
+            try:
+                refresh_blogger_access_token(db)
+            except Exception as exc:  # noqa: BLE001
+                detail = _safe_str(getattr(exc, "detail", "")) or str(exc)
+                raise RuntimeError(f"publish_live_oauth_gate_failed:{detail}") from exc
 
-        articles = (
+        all_synced_rows = (
             db.execute(
-                select(Article)
-                .where(Article.blog_id == blog.id)
-                .options(selectinload(Article.image))
-                .order_by(Article.created_at.desc(), Article.id.desc())
+                select(SyncedBloggerPost)
+                .where(
+                    SyncedBloggerPost.blog_id == blog.id,
+                    SyncedBloggerPost.status.in_(sorted(LIVE_STATUSES)),
+                )
+                .order_by(SyncedBloggerPost.published_at.desc().nullslast(), SyncedBloggerPost.id.desc())
             )
             .scalars()
             .all()
         )
+        report["summary"]["posts_source_total"] = len(all_synced_rows)
+
+        candidate_rows: list[tuple[SyncedBloggerPost, str]] = []
+        for row in all_synced_rows:
+            row_slug = _extract_post_slug_from_url(row.url, fallback=row.title or row.remote_post_id)
+            if not row_slug:
+                continue
+            if slug_filter and row_slug not in slug_filter:
+                continue
+            candidate_rows.append((row, row_slug))
+
+        scoped_rows = candidate_rows[offset:]
+        if limit is not None:
+            scoped_rows = scoped_rows[:limit]
+        selected_synced_rows = [row for row, _ in scoped_rows]
+        selected_post_slug_by_row_id = {row.id: slug for row, slug in scoped_rows}
+        selected_slugs = sorted({slug for _, slug in scoped_rows if slug})
+
+        report["summary"]["posts_planned"] = len(selected_synced_rows)
+        report["canary_scope"] = {
+            "requested_limit": limit,
+            "requested_offset": offset,
+            "slug_file": _safe_str(args.slug_file) or None,
+            "slug_filter_count": len(slug_filter),
+            "source_candidates": len(candidate_rows),
+            "selected_posts": len(selected_synced_rows),
+            "selected_slugs": selected_slugs,
+        }
+        row_source_content_by_id: dict[int, str] = {}
+        row_source_ref_by_id: dict[int, str] = {}
+        row_source_error_by_id: dict[int, str] = {}
+        for row in selected_synced_rows:
+            if content_source == "live":
+                try:
+                    fetched_html, fetched_ref = _fetch_live_post_body_html(row.url or "")
+                    row_source_content_by_id[row.id] = fetched_html
+                    row_source_ref_by_id[row.id] = fetched_ref
+                    continue
+                except Exception as exc:  # noqa: BLE001
+                    row_source_error_by_id[row.id] = str(exc)
+            row_source_content_by_id[row.id] = row.content_html or ""
+            row_source_ref_by_id[row.id] = "db:synced_post.content_html"
+
+        if selected_slugs:
+            articles = (
+                db.execute(
+                    select(Article)
+                    .where(
+                        Article.blog_id == blog.id,
+                        Article.slug.in_(selected_slugs),
+                    )
+                    .options(selectinload(Article.image), selectinload(Article.blog))
+                    .order_by(Article.created_at.desc(), Article.id.desc())
+                )
+                .scalars()
+                .all()
+            )
+        else:
+            articles = []
+
         report["summary"]["articles_scanned"] = len(articles)
         backup_roots = _candidate_backup_roots(args)
         backup_index = _build_backup_index(backup_roots)
         report["backup_roots"] = [str(path) for path in backup_roots]
         report["summary"]["backup_stems"] = len(backup_index)
+        article_by_slug = {_safe_str(article.slug).lower(): article for article in articles}
 
         url_map: dict[str, str] = {}
         slug_url_map: dict[str, str] = {}
@@ -467,9 +713,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             report["items"].append(item_payload)
 
         report["summary"]["url_mappings"] = len(url_map)
-        if not url_map and not slug_url_map:
-            return report
-
         key_url_map = _build_key_url_map(url_map)
 
         article_rewrite_count = 0
@@ -487,26 +730,17 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 article.assembled_html = rewritten_html
                 db.add(article)
 
-        synced_rows = (
-            db.execute(
-                select(SyncedBloggerPost)
-                .where(
-                    SyncedBloggerPost.blog_id == blog.id,
-                    SyncedBloggerPost.status.in_(sorted(LIVE_STATUSES)),
-                )
-                .order_by(SyncedBloggerPost.published_at.desc().nullslast(), SyncedBloggerPost.id.desc())
-            )
-            .scalars()
-            .all()
-        )
-
         if mystery_public_base:
-            for row in synced_rows:
+            canonical_url_by_slug: dict[str, str] = {}
+            candidate_urls_by_row_id: dict[int, list[str]] = {}
+            for row in selected_synced_rows:
+                source_content = row_source_content_by_id.get(row.id, row.content_html or "")
                 candidate_urls: list[str] = []
                 thumb = _safe_str(row.thumbnail_url)
                 if thumb:
                     candidate_urls.append(thumb)
-                candidate_urls.extend(URL_RE.findall(row.content_html or ""))
+                candidate_urls.extend(URL_RE.findall(source_content))
+                candidate_urls_by_row_id[row.id] = candidate_urls
 
                 layout_info = None
                 for candidate_url in candidate_urls:
@@ -514,7 +748,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                     if layout_info is not None:
                         break
 
-                post_slug = _extract_post_slug_from_url(row.url, fallback=row.title or "")
+                post_slug = selected_post_slug_by_row_id.get(row.id) or _extract_post_slug_from_url(
+                    row.url,
+                    fallback=row.title or row.remote_post_id,
+                )
                 if not post_slug:
                     continue
 
@@ -528,16 +765,23 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
                 canonical_key = f"assets/the-midnight-archives/{category}/{year}/{month}/{post_slug}/{post_slug}.webp"
                 canonical_url = _join_url(mystery_public_base, canonical_key)
-                slug_url_map.setdefault(post_slug, canonical_url)
-                for candidate_url in candidate_urls:
+                canonical_url_by_slug[post_slug] = canonical_url
+
+            for slug_token, canonical_url in canonical_url_by_slug.items():
+                slug_url_map[slug_token] = canonical_url
+            for row in selected_synced_rows:
+                for candidate_url in candidate_urls_by_row_id.get(row.id, []):
                     slug_token = _slug_key_token_from_url(candidate_url)
-                    if slug_token:
-                        slug_url_map.setdefault(slug_token, canonical_url)
+                    if slug_token and slug_token in canonical_url_by_slug:
+                        slug_url_map[slug_token] = canonical_url_by_slug[slug_token]
 
         synced_rewrite_count = 0
-        for row in synced_rows:
+        post_item_by_id: dict[int, dict[str, Any]] = {}
+        publish_targets: list[SyncedBloggerPost] = []
+        for row in selected_synced_rows:
+            source_content = row_source_content_by_id.get(row.id, row.content_html or "")
             rewritten_content, content_hits = _rewrite_text_urls(
-                row.content_html or "",
+                source_content,
                 direct_map=url_map,
                 key_map=key_url_map,
                 slug_map=slug_url_map,
@@ -549,26 +793,117 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 else current_thumb
             )
             changed = content_hits > 0 or rewritten_thumb != current_thumb
+            item_payload: dict[str, Any] = {
+                "row_id": row.id,
+                "remote_post_id": _safe_str(row.remote_post_id),
+                "post_slug": selected_post_slug_by_row_id.get(row.id),
+                "changed": changed,
+                "content_replacements": content_hits,
+                "thumbnail_changed": rewritten_thumb != current_thumb,
+                "content_source": row_source_ref_by_id.get(row.id, "db:synced_post.content_html"),
+                "status": "unchanged",
+            }
+            source_error = _safe_str(row_source_error_by_id.get(row.id))
+            if source_error:
+                item_payload["content_source_error"] = source_error
             if not changed:
+                post_item_by_id[row.id] = item_payload
                 continue
             synced_rewrite_count += 1
+            report["summary"]["posts_rewritten"] += 1
+            item_payload["status"] = "rewritten" if (apply_mode or rewrite_only_mode) else "planned_rewrite"
             if apply_mode or rewrite_only_mode:
                 row.content_html = rewritten_content
                 row.thumbnail_url = rewritten_thumb or None
                 row.synced_at = datetime.now(timezone.utc)
                 db.add(row)
+                if publish_live:
+                    publish_targets.append(row)
+            post_item_by_id[row.id] = item_payload
 
         if apply_mode or rewrite_only_mode:
             db.commit()
 
+        if publish_live and (apply_mode or rewrite_only_mode):
+            provider = None
+            provider_boot_error = ""
+            provider_boot_detail = ""
+            try:
+                provider = get_blogger_provider(db, blog)
+            except Exception as exc:  # noqa: BLE001
+                provider_boot_error = str(exc)
+                provider_boot_detail = _safe_str(getattr(exc, "detail", ""))
+
+            if provider is None:
+                for row in publish_targets:
+                    payload = post_item_by_id.get(row.id, {"row_id": row.id})
+                    report["summary"]["posts_publish_failed"] += 1
+                    payload["publish_status"] = "publish_failed"
+                    payload["publish_error"] = provider_boot_error or "blogger_provider_unavailable"
+                    if provider_boot_detail:
+                        payload["publish_error_detail"] = provider_boot_detail
+                    post_item_by_id[row.id] = payload
+            else:
+                for row in publish_targets:
+                    payload = post_item_by_id.get(row.id, {"row_id": row.id})
+                    row_slug = selected_post_slug_by_row_id.get(row.id) or _extract_post_slug_from_url(
+                        row.url,
+                        fallback=row.title or row.remote_post_id,
+                    )
+                    article = article_by_slug.get(_safe_str(row_slug).lower())
+                    labels_source = (
+                        article.labels if article is not None and list(article.labels or []) else list(row.labels or [])
+                    )
+                    labels = [_safe_str(item) for item in labels_source if _safe_str(item)]
+                    meta_description = (
+                        _safe_str(article.meta_description) if article is not None else _safe_str(row.excerpt_text)
+                    ) or _safe_str(row.excerpt_text)
+                    title = (_safe_str(article.title) if article is not None else _safe_str(row.title)) or _safe_str(row.title) or "Untitled"
+                    try:
+                        publish_result, _ = provider.update_post(
+                            post_id=_safe_str(row.remote_post_id),
+                            title=title,
+                            content=row.content_html or "",
+                            labels=labels,
+                            meta_description=meta_description,
+                        )
+                        updated_url = _safe_str(publish_result.get("url"))
+                        if updated_url:
+                            row.url = updated_url
+                        status_token = _safe_str(publish_result.get("postStatus")).lower()
+                        if status_token:
+                            row.status = status_token
+                        published_at = _parse_google_datetime(publish_result.get("published"))
+                        if published_at is not None:
+                            row.published_at = published_at
+                        row.synced_at = datetime.now(timezone.utc)
+                        db.add(row)
+                        report["summary"]["posts_published"] += 1
+                        payload["publish_status"] = "published"
+                    except Exception as exc:  # noqa: BLE001
+                        report["summary"]["posts_publish_failed"] += 1
+                        payload["publish_status"] = "publish_failed"
+                        payload["publish_error"] = str(exc)
+                        detail = _safe_str(getattr(exc, "detail", ""))
+                        if detail:
+                            payload["publish_error_detail"] = detail
+                    post_item_by_id[row.id] = payload
+                db.commit()
+
         report["summary"]["article_assembled_html_rewrites"] = article_rewrite_count
         report["summary"]["synced_post_rewrites"] = synced_rewrite_count
+        report["summary"]["published_success"] = int(report["summary"]["posts_published"])
+        report["post_items"] = [post_item_by_id[key] for key in sorted(post_item_by_id)]
         return report
 
 
 def main() -> int:
     args = parse_args()
     report = run(args)
+    if args.no_report_file:
+        print("report_file_skipped")
+        print(json.dumps(report["summary"], ensure_ascii=False))
+        return 0
     report_path = (
         Path(args.report_path)
         if _safe_str(args.report_path)
