@@ -1,0 +1,48 @@
+# BloggerGent Agent Rules (@rules)
+
+This file defines the behavior and technical standards for AI agents (Antigravity, Cursor, etc.) working on the BloggerGent repository.
+
+## 1. Core Principles
+- **Separation of Concerns**: Production code (`apps/`) must remain clean. Experimental or draft logic belongs in `refactoring/`.
+- **Dependency Flow**: `apps/web` -> `apps/api`. `refactoring/` code is **never** imported into production.
+- **Privacy**: Never commit secrets, DB dumps, or local `.env` files.
+
+## 2. Repository Structure
+- `apps/web`: Next.js Frontend.
+- `apps/api`: FastAPI Backend, SQLAlchemy models, Alembic migrations.
+- `prompts/channels`: Operational prompts (Source of Truth).
+- `refactoring/`: All experimental scripts, research, and temporary logic.
+- `infra/`: Terraform/Docker infrastructure.
+- `wiki/`: Documentation and manuals.
+
+## 3. Technical Standards
+
+### Python (FastAPI / `apps/api`)
+- Use `SessionLocal` from `app.db.session` for DB access.
+- Use `dotenv` for env variables.
+- **Boilerplate for Scripts**: When writing scripts in `refactoring/` that need API access, use:
+  ```python
+  import sys, os, dotenv
+  sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'apps', 'api')))
+  dotenv.load_dotenv(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.env')), encoding="utf-8")
+  ```
+- **Encoding**: Always use `utf-8` when reading/writing files with Korean characters.
+
+### Frontend (Next.js / `apps/web`)
+- Follow modern React patterns (Hooks, Functional components).
+- Ensure API calls point to the configured `apps/api` endpoints.
+
+## 4. Agent Behavioral Rules
+- **Before Modifying Production**: Always check if a similar logic exists in `refactoring/`.
+- **Proposing Changes**: Use `implementation_plan.md` for non-trivial modifications.
+- **Commit Rules**:
+  - Summarize changes clearly.
+  - Separate documentation/policy updates from code changes.
+  - Check `git status --short` before finalizing a turn.
+
+## 5. Metadata & SEO
+- Refer to `wiki/SEO-Metadata.md` for content standards.
+- Respect the blog-specific profiles in `.agents/` when generating content-related logic.
+
+---
+*For more details, see [AGENT.md](file:///d:/Donggri_Platform/BloggerGent/AGENT.md) and [REPO_STRUCTURE.md](file:///d:/Donggri_Platform/BloggerGent/REPO_STRUCTURE.md).*
