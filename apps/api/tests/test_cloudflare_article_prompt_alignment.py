@@ -51,11 +51,11 @@ ACTIVE_CATEGORY_PATHS = {
 }
 
 ARTICLE_EXPECTATIONS: dict[str, list[str]] = {
-    "yeohaenggwa-girog": ["동선 실전형 + 장소 감성형", "네이버 지도에서 보기", "구글맵에서 보기"],
-    "gaebalgwa-peurogeuraeming": ["Claude", "Codex", "Gemini", "정보 제공형"],
-    "ilsanggwa-memo": ["짧은 관찰형", "문학적 관찰감", "observed tension"],
-    "miseuteria-seutori": ["사건", "기록", "단서", "해석", "현재 추적"],
-    "naseudagyi-heureum": ["동그리", "햄니", "TradingView"],
+    "yeohaenggwa-girog": ["Route-first place story", "Naver Maps", "Google Maps"],
+    "gaebalgwa-peurogeuraeming": ["Claude", "Codex", "Gemini", "information-provider roles"],
+    "ilsanggwa-memo": ["daily-observation frame", "literary observation", "observed tension"],
+    "miseuteria-seutori": ["case", "record", "clue", "interpretation", "current tracking"],
+    "naseudagyi-heureum": ["Donggri", "언니", "TradingView"],
 }
 
 DISCOVERY_EXPECTATIONS: dict[str, list[str]] = {

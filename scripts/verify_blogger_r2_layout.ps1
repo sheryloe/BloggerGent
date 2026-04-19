@@ -17,7 +17,7 @@ Set-Location $repoRoot
 New-Item -ItemType Directory -Path "TEST/logs" -Force | Out-Null
 $ts = Get-Date -Format "yyyyMMdd-HHmmss"
 $logPath = "TEST/logs/ia-verify-blogger-r2-layout-$ts.log"
-$reportPath = "/app/storage/reports/ia-verify-blogger-r2-layout-$ts.json"
+$reportPath = "/app/storage/_common/analysis/ia-verify-blogger-r2-layout-$ts.json"
 
 "[$(Get-Date -Format o)] source=$Source timeout=$Timeout blog_ids=$($BlogId -join ',') blog_slugs=$($BlogSlug -join ',')" | Tee-Object -FilePath $logPath -Append | Out-Null
 

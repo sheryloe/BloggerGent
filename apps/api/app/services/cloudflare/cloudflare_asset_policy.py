@@ -71,10 +71,14 @@ def _truthy(value: Any, *, default: bool) -> bool:
 
 
 def default_cloudflare_local_asset_root() -> Path:
-    windows_runtime_root = Path(settings.mystery_storage_root_windows) / "images" / "Cloudflare"
-    if windows_runtime_root.exists():
-        return windows_runtime_root
-    return settings.storage_images_dir / "Cloudflare"
+    runtime_root = Path(settings.cloudflare_storage_root_windows)
+    canonical_runtime_root = runtime_root / "cloudflare"
+    if canonical_runtime_root.exists():
+        return canonical_runtime_root
+    legacy_runtime_root = runtime_root / "images" / "Cloudflare"
+    if legacy_runtime_root.exists():
+        return legacy_runtime_root
+    return Path(settings.storage_root) / "cloudflare"
 
 
 def default_cloudflare_channel_metadata() -> dict[str, Any]:
@@ -192,6 +196,12 @@ def resolve_cloudflare_category_leaf(category_slug: str | None, *, policy: Cloud
     return leaf
 
 
+def resolve_cloudflare_post_slug(post_slug: str | None) -> str:
+    normalized = str(post_slug or "").strip().strip("/")
+    normalized = normalized.replace("\\", "-").replace("/", "-")
+    return normalized or "post"
+
+
 def build_cloudflare_r2_object_key(
     *,
     policy: CloudflareAssetPolicy,
@@ -200,7 +210,7 @@ def build_cloudflare_r2_object_key(
     published_at: datetime | None = None,
 ) -> str:
     resolved_category = resolve_cloudflare_category_leaf(category_slug, policy=policy)
-    resolved_post_slug = slugify(str(post_slug or "").strip(), separator="-") or "post"
+    resolved_post_slug = resolve_cloudflare_post_slug(post_slug)
     resolved_time = published_at.astimezone(timezone.utc) if isinstance(published_at, datetime) and published_at.tzinfo else published_at
     if resolved_time is None:
         resolved_time = datetime.now(timezone.utc)
@@ -222,7 +232,7 @@ def build_cloudflare_local_asset_path(
     prefer_existing_root: bool = True,
 ) -> Path:
     resolved_category = resolve_cloudflare_category_slug(category_slug, policy=policy)
-    resolved_post_slug = slugify(str(post_slug or "").strip(), separator="-") or "post"
+    resolved_post_slug = resolve_cloudflare_post_slug(post_slug)
     root = resolve_cloudflare_local_asset_root(policy, prefer_existing=prefer_existing_root)
     return root / resolved_category / f"{resolved_post_slug}.webp"
 

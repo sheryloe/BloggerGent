@@ -14,7 +14,7 @@ from app.services.ops.openai_usage_service import assert_openai_api_stage_allowe
 from app.services.providers.base import ProviderRuntimeError, RuntimeProviderConfig
 from app.services.providers.blogger import BloggerPublishingProvider
 from app.services.providers.codex_cli import CodexCLITextProvider
-from app.services.providers.gemini import GeminiTopicDiscoveryProvider
+from app.services.providers.gemini import GeminiTextProvider, GeminiTopicDiscoveryProvider
 from app.services.providers.mock import MockArticleProvider, MockBloggerProvider, MockImageProvider, MockTopicDiscoveryProvider
 from app.services.providers.openai import (
     ENFORCED_OPENAI_IMAGE_MODEL,
@@ -86,6 +86,12 @@ def get_article_provider(
     resolved_provider = (provider_hint or runtime.text_runtime_kind or OPENAI_TEXT_RUNTIME_KIND).strip().lower()
     if runtime.provider_mode == "live" and resolved_provider == CODEX_TEXT_RUNTIME_KIND:
         return CodexCLITextProvider(runtime=runtime, model=model_override or runtime.text_runtime_model)
+    if runtime.provider_mode == "live" and resolved_provider in {"gemini", "gemini_cli"} and runtime.gemini_api_key:
+        return GeminiTextProvider(
+            api_key=runtime.gemini_api_key,
+            model=model_override or runtime.gemini_model,
+            provider_name=resolved_provider,
+        )
     if runtime.provider_mode == "live" and resolved_provider in {"openai", "openai_text"} and runtime.openai_api_key:
         return OpenAIArticleProvider(
             api_key=runtime.openai_api_key,

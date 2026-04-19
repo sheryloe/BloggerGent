@@ -178,7 +178,7 @@ def _resolve_migrated_url(*, legacy_key: str, legacy_map: dict[str, str]) -> str
 def _replace_legacy_urls(
     content: str,
     *,
-    db,
+    db=None,
     legacy_map: dict[str, str],
 ) -> tuple[str, list[dict[str, str]], list[dict[str, str]]]:
     updated = content or ""
@@ -192,7 +192,8 @@ def _replace_legacy_urls(
         if not target_url:
             unresolved.append({"url": url, "legacy_key": legacy_key})
             continue
-        target_url = _ensure_google_blogger_single_assets_url(db=db, url=target_url)
+        if db is not None:
+            target_url = _ensure_google_blogger_single_assets_url(db=db, url=target_url)
         if target_url == url:
             continue
         updated = updated.replace(url, target_url)

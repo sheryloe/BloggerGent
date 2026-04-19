@@ -916,6 +916,38 @@ export interface SettingItem {
   is_secret: boolean;
 }
 
+export interface EnvSecretMaskedItemRead {
+  key: string;
+  maskedValue: string;
+  sourceFile: string;
+}
+
+export interface IntegrationConnectionChannelRead {
+  channelId: string;
+  name: string;
+  provider: string;
+  status: string;
+  isConnected: boolean;
+}
+
+export interface SettingsEnvSecretsStatusRead {
+  checkedAt: string;
+  envDir: string;
+  secrets: EnvSecretMaskedItemRead[];
+  connection: {
+    state: "connected" | "disconnected";
+    connected: number;
+    total: number;
+    channels: IntegrationConnectionChannelRead[];
+  };
+}
+
+export interface SettingsEnvSecretSyncRead {
+  checkedAt: string;
+  updatedCount: number;
+  updatedKeys: string[];
+}
+
 export interface TrainingSchedule {
   enabled: boolean;
   time: string;

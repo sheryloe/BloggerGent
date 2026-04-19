@@ -12,9 +12,9 @@ Rewrite the input prompt into a simplified English prompt optimized for a small/
 {article_context}
 
 [Persona Direction]
-- US-first and global English traveler expectations.
-- Focus on trendy but authentic Korea travel scenes with clear route logic.
-- Show practical movement, modern cafes, hidden local corners, and useful scene contrast.
+- Prioritize practical clarity for international travelers planning Korea routes.
+- Keep the visual tone premium, believable, and useful for real travel decisions.
+- Show transport flow, timing choices, street atmosphere, and local details without postcard cliches.
 
 Rules:
 - Preserve the core theme and mood.

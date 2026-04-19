@@ -341,6 +341,38 @@ def _merge_record_key(record: dict[str, str], *, key_columns: Sequence[str]) -> 
     return ""
 
 
+def _looks_like_cloudflare_remote_id(value: object) -> bool:
+    normalized = _safe_str(value)
+    if not normalized or any(char.isspace() for char in normalized):
+        return False
+    lowered = normalized.casefold()
+    if lowered.startswith(("remote-", "post-", "cf-", "cld-")):
+        return True
+    return bool(re.fullmatch(r"[a-z0-9][a-z0-9_-]{5,}", lowered))
+
+
+def _repair_legacy_cloudflare_record(record: dict[str, str]) -> dict[str, str]:
+    if _safe_str(record.get("remote_id")):
+        return record
+    shifted_remote_id = _safe_str(record.get("canonical_category"))
+    shifted_title = _safe_str(record.get("canonical_category_slug"))
+    if not shifted_remote_id or not shifted_title or not _looks_like_cloudflare_remote_id(shifted_remote_id):
+        return record
+
+    repaired = dict(record)
+    repaired["canonical_category"] = ""
+    repaired["canonical_category_slug"] = ""
+    repaired["remote_id"] = shifted_remote_id
+    repaired["title"] = shifted_title
+    repaired["url"] = _safe_str(record.get("remote_id"))
+    repaired["excerpt"] = _safe_str(record.get("title"))
+    repaired["labels"] = _safe_str(record.get("url"))
+    repaired["status"] = _safe_str(record.get("excerpt"))
+    if _safe_str(record.get("labels")) and not _safe_str(record.get("manual_note")):
+        repaired["manual_note"] = _safe_str(record.get("labels"))
+    return repaired
+
+
 def _sheet_range(tab_name: str) -> str:
     return f"'{tab_name}'!A1:ZZ"
 
@@ -1306,6 +1338,8 @@ def merge_sheet_rows_with_existing(
         record = _hydrate_summary_alias(
             {header: _safe_str(row[index] if index < len(row) else "") for index, header in enumerate(existing_header)}
         )
+        if "remote_id" in existing_header:
+            record = _repair_legacy_cloudflare_record(record)
         record_key = _merge_record_key(record, key_columns=key_columns)
         if record_key:
             if record_key not in existing_records_by_key:
@@ -1905,4 +1939,3 @@ def sync_google_sheet_snapshot(db: Session, *, initial: bool = False) -> dict:
         "cloudflare_tab": cloudflare_tab,
         "tab_results": tab_results,
     }
-

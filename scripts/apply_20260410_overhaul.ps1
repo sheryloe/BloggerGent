@@ -26,7 +26,7 @@ if (-not $env:DATABASE_URL) {
 }
 
 if (-not $env:STORAGE_ROOT) {
-    $env:STORAGE_ROOT = Join-Path $RepoRoot "storage"
+    $env:STORAGE_ROOT = "D:\Donggri_Runtime\BloggerGent\storage"
 }
 
 Push-Location (Join-Path $RepoRoot "apps/api")
@@ -34,7 +34,7 @@ alembic upgrade head
 Pop-Location
 
 if (-not $SkipPromptSync) {
-    python .\scripts\sync_cloudflare_prompt_files.py --execute
+    python .\scripts\cloudflare\sync_cloudflare_prompt_files.py --execute
     python .\scripts\sync_channel_prompt_backups.py
 }
 

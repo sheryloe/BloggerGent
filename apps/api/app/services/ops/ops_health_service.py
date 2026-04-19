@@ -29,7 +29,7 @@ def _now_kst_iso() -> str:
 
 
 def _ops_health_report_dir() -> Path:
-    path = Path(settings.storage_root) / "reports"
+    path = settings.storage_common_analysis_dir / "ops-health"
     path.mkdir(parents=True, exist_ok=True)
     return path
 

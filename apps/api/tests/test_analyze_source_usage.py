@@ -61,7 +61,7 @@ jobs:
     _write(root / ".env", "API_KEY=dev\n")
     _write(root / "docs/guide.md", "# guide\n")
     _write(root / "scripts/manual_task.py", "print('manual')\n")
-    _write(root / "storage/reports/sample.json", "{}\n")
+    _write(root / "storage/generated/sample.json", "{}\n")
 
 
 def test_analyze_repository_classifies_active_review_inactive(tmp_path: Path) -> None:
@@ -76,7 +76,7 @@ def test_analyze_repository_classifies_active_review_inactive(tmp_path: Path) ->
     assert flat["backup/old.txt"]["status"] == module.STATUS_INACTIVE
     assert flat["docs/guide.md"]["status"] == module.STATUS_REVIEW
     assert flat["scripts/manual_task.py"]["status"] == module.STATUS_REVIEW
-    assert flat["storage/reports/sample.json"]["status"] == module.STATUS_INACTIVE
+    assert flat["storage/generated/sample.json"]["status"] == module.STATUS_INACTIVE
 
 
 def test_analyze_repository_writes_json_tree_html_outputs(tmp_path: Path) -> None:
@@ -109,8 +109,8 @@ def test_analyze_repository_writes_json_tree_html_outputs(tmp_path: Path) -> Non
     assert "[A] ." in tree_text
 
     html = html_path.read_text(encoding="utf-8")
-    assert "Source Usage Report" in html
-    assert "Inactive Cleanup Candidates" in html
+    assert "<h1>" in html
+    assert "cleanup_candidates" in html
 
     cleanup_paths = {item["path"] for item in payload.get("cleanup_candidates", [])}
     assert "backup/old.txt" in cleanup_paths

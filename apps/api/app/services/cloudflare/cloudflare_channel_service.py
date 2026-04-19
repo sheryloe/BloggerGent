@@ -52,6 +52,7 @@ from app.services.ops.openai_usage_service import (
     route_openai_free_tier_text_model,
 )
 from app.services.ops.model_policy_service import CODEX_TEXT_RUNTIME_KIND, CODEX_TEXT_RUNTIME_MODEL
+from app.services.ops.lighthouse_service import LighthouseAuditError, run_required_cloudflare_lighthouse_audit
 from app.services.providers.factory import get_article_provider, get_image_provider, get_runtime_config, get_topic_provider
 from app.services.content.prompt_service import render_prompt_template
 from app.services.content.publish_trust_gate_service import assess_publish_trust_requirements
@@ -5209,6 +5210,8 @@ def generate_cloudflare_posts(
     except Exception as exc:  # noqa: BLE001
         quality_sheet_sync = {"status": "failed", "reason": str(exc), "rows": len(cloudflare_quality_rows)}
     sync_result: dict[str, Any] | None = None
+    lighthouse_results: list[dict[str, Any]] = []
+    lighthouse_failed_count = 0
     if created_pattern_map:
         try:
             from app.services.cloudflare.cloudflare_sync_service import sync_cloudflare_posts
@@ -5240,18 +5243,59 @@ def generate_cloudflare_posts(
                 if render_metadata and synced_row.render_metadata != render_metadata:
                     synced_row.render_metadata = render_metadata
                     synced_changed = True
-            if synced_changed:
+                if str(synced_row.status or "").strip().lower() in {"published", "live"}:
+                    try:
+                        lighthouse_payload = run_required_cloudflare_lighthouse_audit(
+                            db,
+                            synced_row,
+                            url=synced_row.url,
+                            form_factor="mobile",
+                            commit=False,
+                        )
+                        lighthouse_results.append(
+                            {
+                                "remote_post_id": str(synced_row.remote_post_id or "").strip(),
+                                "status": "ok",
+                                "lighthouse_score": lighthouse_payload.get("scores", {}).get("lighthouse_score"),
+                                "report_path": lighthouse_payload.get("report_path"),
+                            }
+                        )
+                        synced_changed = True
+                    except LighthouseAuditError as exc:
+                        lighthouse_failed_count += 1
+                        synced_row.lighthouse_payload = {
+                            "version": "cloudflare-publish-lighthouse-v1",
+                            "status": "failed",
+                            "reason": str(exc),
+                            "url": str(synced_row.url or "").strip(),
+                            "form_factor": "mobile",
+                            "required": True,
+                            "audited_at": _utc_now_iso(),
+                        }
+                        db.add(synced_row)
+                        lighthouse_results.append(
+                            {
+                                "remote_post_id": str(synced_row.remote_post_id or "").strip(),
+                                "status": "failed",
+                                "reason": str(exc),
+                            }
+                        )
+                        synced_changed = True
+            if synced_changed or lighthouse_results:
                 db.commit()
         except Exception as exc:  # noqa: BLE001
             sync_result = {"status": "failed", "reason": str(exc)}
+    failed_count += lighthouse_failed_count
     status_value = "ok" if failed_count == 0 else ("partial" if created_count > 0 else "failed")
     return {
         "status": status_value,
         "created_count": created_count,
         "failed_count": failed_count,
+        "lighthouse_failed_count": lighthouse_failed_count,
         "requested_categories": len(categories),
         "per_category": normalized_per_category,
         "category_plan": normalized_plan if normalized_plan else None,
+        "lighthouse": lighthouse_results,
         "quality_sheet_sync": quality_sheet_sync,
         "sync_result": sync_result,
         "categories": category_results,

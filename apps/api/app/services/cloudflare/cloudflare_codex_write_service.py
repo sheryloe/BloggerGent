@@ -124,7 +124,7 @@ CLOSING_RECORD_INLINE_STYLE = (
 )
 S3_NS = "{http://s3.amazonaws.com/doc/2006-03-01/}"
 CLOUDFLARE_MEDIA_KEY_PREFIX = "assets/media/cloudflare/dongri-archive/"
-CLOUDFLARE_MEDIA_URL_PREFIX = "/assets/assets/media/cloudflare/dongri-archive/"
+CLOUDFLARE_MEDIA_URL_PREFIX = "/assets/media/cloudflare/dongri-archive/"
 
 
 def _repo_root() -> Path:
@@ -343,15 +343,17 @@ def _asset_key_from_url(url: str | None, *, public_base_url: str = "") -> str:
         return ""
     parsed = urlparse(raw_url)
     path = unquote(parsed.path or "").strip()
+    if "/assets/assets/" in path:
+        path = path.replace("/assets/assets/", "/assets/", 1)
+    if "/assets/" in path:
+        return f"assets/{path.split('/assets/', 1)[1].lstrip('/')}"
     normalized_base = _normalize_space(public_base_url)
     if normalized_base and raw_url.startswith(normalized_base):
         base_path = urlparse(normalized_base).path.rstrip("/")
         if base_path and path.startswith(base_path):
             path = path[len(base_path):]
-    if "/assets/assets/" in path:
-        return path.split("/assets/assets/", 1)[1].lstrip("/")
-    if "/assets/" in path:
-        return path.split("/assets/", 1)[1].lstrip("/")
+            if path.strip("/"):
+                return f"assets/{path.strip('/')}"
     return Path(path).name.strip()
 
 
@@ -364,12 +366,12 @@ def _canonicalize_cloudflare_asset_url(url: str | None, *, public_base_url: str 
     if not path:
         return raw_url
     normalized_base = _normalize_space(public_base_url)
-    if "/assets/assets/media/" in path:
-        canonical_path = path
+    if "/assets/assets/" in path:
+        canonical_path = path.replace("/assets/assets/", "/assets/", 1)
     elif "/assets/media/" in path:
-        canonical_path = path.replace("/assets/media/", "/assets/assets/media/", 1)
+        canonical_path = path
     elif normalized_base and raw_url.startswith(normalized_base.rstrip("/")) and "/media/" in path and "/assets/" not in path:
-        canonical_path = path.replace("/media/", "/assets/assets/media/", 1)
+        canonical_path = path.replace("/media/", "/assets/media/", 1)
     else:
         canonical_path = path
     return urlunparse(

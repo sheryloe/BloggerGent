@@ -332,10 +332,19 @@ def _blogger_prompt_folder_candidates(blog: Blog | None) -> tuple[str, ...]:
     mapped_folder = _blogger_prompt_folder_map().get(channel_id)
     if mapped_folder:
         candidates.append(mapped_folder)
+    profile_key = str(getattr(blog, "profile_key", None) or "").strip()
+    if profile_key == "korea_travel":
+        for folder_name in (
+            "donggri-s-hidden-korea-local-travel-culture",
+            "donggri-el-alma-de-corea",
+            "donggri-ri-han-fu-fu-nohan-guo-rokaruan-nei",
+        ):
+            if folder_name not in candidates:
+                candidates.append(folder_name)
     for raw in (
         getattr(blog, "name", None),
         getattr(blog, "slug", None),
-        getattr(blog, "profile_key", None),
+        profile_key,
     ):
         normalized = slugify(str(raw or "").strip(), separator="-")
         if normalized and normalized not in candidates:

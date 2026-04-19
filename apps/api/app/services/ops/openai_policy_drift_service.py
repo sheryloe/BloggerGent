@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 
 from app.core.config import settings
 from app.services.content.travel_blog_policy import (
+    TRAVEL_DEFAULT_TEXT_ROUTE,
     TRAVEL_IMAGE_PROMPT_MODEL,
     TRAVEL_LOCKED_IMAGE_MODEL,
+    resolve_travel_text_route_models,
 )
 
 OFFICIAL_OPENAI_POLICY_URLS: tuple[str, ...] = (
@@ -26,6 +30,7 @@ _TRAVEL_CHANNEL_FOLDERS = {
     "donggri-el-alma-de-corea",
     "donggri-ri-han-fu-fu-nohan-guo-rokaruan-nei",
 }
+_MYSTERY_CHANNEL_FOLDERS = {"the-midnight-archives"}
 _PROMPT_SYNC_IGNORED_KEYS = {
     "the-midnight-archives/mystery_article_generation.md",
 }
@@ -69,29 +74,42 @@ def _prompt_sync_key(path: Path) -> str:
     return "/".join(path.parts[-2:])
 
 
-def _expected_stage_model(path: Path, stage: str) -> str | None:
+def _expected_stage_model(path: Path, stage: str, step: dict[str, Any] | None = None) -> str | None:
     folder_name = path.parent.name
-    if folder_name in _TRAVEL_CHANNEL_FOLDERS and stage == "image_prompt_generation":
-        return TRAVEL_IMAGE_PROMPT_MODEL
-    if folder_name in _TRAVEL_CHANNEL_FOLDERS and stage == "image_generation":
-        return TRAVEL_LOCKED_IMAGE_MODEL
+    if folder_name in _TRAVEL_CHANNEL_FOLDERS:
+        step_payload = step or {}
+        policy_config = step_payload.get("policy_config") if isinstance(step_payload.get("policy_config"), dict) else {}
+        route = str(
+            step_payload.get("text_generation_route")
+            or policy_config.get("text_generation_route")
+            or TRAVEL_DEFAULT_TEXT_ROUTE
+        )
+        route_models = resolve_travel_text_route_models(route)
+        if stage == "topic_discovery":
+            return None
+        if stage == "article_generation":
+            return route_models["pass_provider_model"]
+        if stage == "image_prompt_generation":
+            return route_models["image_prompt_provider_model"]
+        if stage == "image_generation":
+            return TRAVEL_LOCKED_IMAGE_MODEL
+    if folder_name in _MYSTERY_CHANNEL_FOLDERS and stage == "topic_discovery":
+        provider_hint = str((step or {}).get("provider_hint") or "").strip()
+        if provider_hint == "codex_cli":
+            return "gpt-5.4"
     return _EXPECTED_STAGE_MODELS.get(stage)
 
 
-def _extract_stage_models(path: Path) -> list[tuple[str, str]]:
-    current_stage = ""
-    pairs: list[tuple[str, str]] = []
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if '"stage_type"' in line:
-            current_stage = line.split('"')[-2]
-        elif current_stage and '"provider_model"' in line:
-            if "null" in line:
-                current_stage = ""
-                continue
-            model = line.split('"')[-2]
-            pairs.append((current_stage, model))
-            current_stage = ""
+def _extract_stage_models(path: Path) -> list[tuple[str, str, dict[str, Any]]]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    pairs: list[tuple[str, str, dict[str, Any]]] = []
+    for raw_step in payload.get("steps", []):
+        if not isinstance(raw_step, dict):
+            continue
+        stage = str(raw_step.get("stage_type") or "").strip()
+        model = str(raw_step.get("provider_model") or "").strip()
+        if stage and model:
+            pairs.append((stage, model, raw_step))
     return pairs
 
 
@@ -123,8 +141,8 @@ def build_openai_policy_drift_payload() -> dict[str, object]:
 
     channel_violations: list[str] = []
     for path in _channel_json_files(root):
-        for stage, model in _extract_stage_models(path):
-            expected = _expected_stage_model(path, stage)
+        for stage, model, step in _extract_stage_models(path):
+            expected = _expected_stage_model(path, stage, step)
             if expected and model != expected:
                 channel_violations.append(f"{path}:{stage}={model}")
 

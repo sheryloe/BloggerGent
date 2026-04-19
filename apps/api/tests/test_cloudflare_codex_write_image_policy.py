@@ -264,11 +264,11 @@ def test_publish_resolves_backup_json_url_and_uploads_webp(db: Session, tmp_path
 
     def _fake_upload(_db, *, filename: str, content: bytes, object_key=None):
         upload_calls.append(filename)
-        stem = Path(filename).stem
+        resolved_key = str(object_key or f"assets/media/cloudflare/dongri-archive/yeohaenggwa-girog/2026/04/real-route/{Path(filename).stem}.webp")
         return (
-            f"https://r2.example.com/assets/{stem}.webp",
-            {"object_key": f"travel/{stem}.webp"},
-            {"cloudflare": {"original_url": f"https://r2.example.com/assets/{stem}.webp"}},
+            f"https://api.dongriarchive.com/{resolved_key}",
+            {"object_key": resolved_key},
+            {"cloudflare": {"original_url": f"https://api.dongriarchive.com/{resolved_key}"}},
         )
 
     monkeypatch.setattr(cloudflare_codex_write_service, "upload_binary_to_cloudflare_r2", _fake_upload)
@@ -300,4 +300,4 @@ def test_publish_resolves_backup_json_url_and_uploads_webp(db: Session, tmp_path
     assert saved["backup_image_resolution"]["status"] == "resolved"
     assert saved["image_uniqueness"]["is_distinct_within_post"] is True
     assert saved["image_uniqueness"]["is_distinct_across_blog"] is True
-    assert "<img src=\"https://r2.example.com/assets/" in saved["content_body"]
+    assert "<img src=\"https://api.dongriarchive.com/assets/media/cloudflare/" in saved["content_body"]

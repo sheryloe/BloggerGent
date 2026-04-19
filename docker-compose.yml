@@ -11,7 +11,9 @@ x-api-common: &api-common
     PUBLIC_API_BASE_URL: http://localhost:7002
   volumes:
     - ./apps/api:/app
-    - ${API_STORAGE_DIR:-./storage}:/app/storage
+    - type: bind
+      source: ${API_STORAGE_DIR:-D:/Donggri_Runtime/BloggerGent/storage}
+      target: /app/storage
     - ./prompts:/app/prompts
   extra_hosts:
     - "host.docker.internal:host-gateway"

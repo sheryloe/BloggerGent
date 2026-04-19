@@ -14,6 +14,7 @@ def test_blogger_trust_guard_applies_to_travel_profile() -> None:
     assert "[SEO trust + source integrity guard]" in rendered
     assert 'As of 2026-04-04' in rendered
     assert "confirmed facts" in rendered
+    assert "No verified source URL yet" not in rendered
 
 
 def test_blogger_trust_guard_applies_to_mystery_profile() -> None:
@@ -39,8 +40,8 @@ def test_cloudflare_trust_guard_adds_base_rules() -> None:
 
     assert rendered.startswith("BASE")
     assert "[SEO trust + source integrity guard]" in rendered
-    assert "기준 시각: 2026-04-04 (Asia/Seoul)" in rendered
-    assert "확인된 사실" in rendered
+    assert "target date 2026-04-04 (Asia/Seoul)" in rendered
+    assert "concrete entities, dates, places, and reader actions" in rendered
 
 
 def test_cloudflare_trust_guard_adds_analysis_rule_for_thought_category() -> None:

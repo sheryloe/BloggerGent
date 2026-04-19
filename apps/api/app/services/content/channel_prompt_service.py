@@ -128,6 +128,16 @@ def _backup_root() -> Path:
     return _prompt_root() / "channels"
 
 
+def _cloudflare_prompt_backup_root() -> Path:
+    return Path(settings.storage_root) / "CloudFlare" / "_prompts"
+
+
+def _backup_root_for_flow(flow: PromptFlowRead) -> Path:
+    if str(flow.provider or "").strip() == "cloudflare":
+        return _cloudflare_prompt_backup_root()
+    return _prompt_root()
+
+
 def _default_channel_backup_dir(channel_id: str) -> Path:
     provider, raw_id = _parse_channel_id(channel_id)
     return _backup_root() / _safe_segment(provider, "channel") / _safe_segment(raw_id, "default")
@@ -734,16 +744,17 @@ def _auxiliary_backup_files(db: Session, flow: PromptFlowRead) -> dict[str, str]
 
 def attach_backup_metadata(db: Session, flow: PromptFlowRead) -> PromptFlowRead:
     flow.backup_directory = flow.backup_directory or _default_channel_backup_relative_dir(flow.channel_id)
+    backup_root = _backup_root_for_flow(flow)
     for index, step in enumerate(sorted(flow.steps, key=lambda item: (item.sort_order, item.id)), start=1):
         step.backup_relative_path = _step_backup_relative_path(db, flow, step, index)
-        step.backup_exists = bool(step.backup_relative_path and (_prompt_root() / step.backup_relative_path).exists())
+        step.backup_exists = bool(step.backup_relative_path and (backup_root / step.backup_relative_path).exists())
     return flow
 
 
 def sync_prompt_flow_backup(db: Session, flow: PromptFlowRead) -> PromptFlowRead:
     attach_backup_metadata(db, flow)
 
-    root = _prompt_root()
+    root = _backup_root_for_flow(flow)
     channel_dir = root / str(flow.backup_directory or _default_channel_backup_relative_dir(flow.channel_id))
     legacy_channel_dir = root / _default_channel_backup_relative_dir(flow.channel_id)
 
@@ -1012,7 +1023,7 @@ def _step_backup_relative_path(db: Session, flow: PromptFlowRead, step: PromptFl
 def sync_prompt_flow_backup(db: Session, flow: PromptFlowRead) -> PromptFlowRead:
     attach_backup_metadata(db, flow)
 
-    root = _prompt_root()
+    root = _backup_root_for_flow(flow)
     channel_dir = root / str(flow.backup_directory or _default_channel_backup_relative_dir(flow.channel_id))
     legacy_channel_dir = root / _default_channel_backup_relative_dir(flow.channel_id)
 

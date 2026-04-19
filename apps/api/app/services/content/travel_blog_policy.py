@@ -11,19 +11,25 @@ TRAVEL_IMAGE_POLICY_VERSION = "2025-04-23"
 TRAVEL_IMAGE_LAYOUT_POLICY = "travel_editorial_8panel_mar2026"
 TRAVEL_LOCKED_IMAGE_MODEL = "gpt-image-1"
 TRAVEL_PANEL_COUNT = 8
-TRAVEL_CANONICAL_PREFIX = "assets/Travel/"
+TRAVEL_CANONICAL_PREFIX = "assets/travel-blogger/"
+TRAVEL_BLOG_GROUP = "travel-blogger"
 TRAVEL_TEXT_ROUTE_CODEX = "codex_cli"
+TRAVEL_TEXT_ROUTE_GEMINI = "gemini_cli"
 TRAVEL_TEXT_ROUTE_API = "api"
 TRAVEL_DEFAULT_TEXT_ROUTE = TRAVEL_TEXT_ROUTE_CODEX
 TRAVEL_CODEX_PLANNER_MODEL = "gpt-5.4"
 TRAVEL_CODEX_PASS_MODEL = "gpt-5.4-mini"
 TRAVEL_CODEX_IMAGE_PROMPT_MODEL = "gpt-5.4-mini"
+TRAVEL_GEMINI_PLANNER_MODEL = "gemini-2.5-pro"
+TRAVEL_GEMINI_PASS_MODEL = "gemini-2.5-flash"
+TRAVEL_GEMINI_IMAGE_PROMPT_MODEL = "gemini-2.5-flash"
 TRAVEL_API_PLANNER_MODEL = "gpt-5.4-2026-03-05"
 TRAVEL_API_PASS_MODEL = "gpt-5.4-mini-2026-03-17"
 TRAVEL_API_IMAGE_PROMPT_MODEL = "gpt-4.1-mini"
+TRAVEL_IMAGE_PROMPT_MODEL = TRAVEL_API_IMAGE_PROMPT_MODEL
 TRAVEL_IMAGE_SIZE = "1024x1024"
 TRAVEL_ALLOWED_CATEGORIES = frozenset({"travel", "culture", "food", "uncategorized"})
-TRAVEL_ALLOWED_ROLE_RE = re.compile(r"^cover\.webp$", re.IGNORECASE)
+TRAVEL_ALLOWED_FILENAME_RE = re.compile(r"^(?P<post_slug>[a-z0-9]+(?:-[a-z0-9]+)*)\.webp$", re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,7 +103,7 @@ def assert_travel_scope_blog(*, blog=None, blog_id: int | None = None) -> Travel
 
 def normalize_travel_text_generation_route(route: str | None) -> str:
     normalized = str(route or "").strip().lower()
-    if normalized in {TRAVEL_TEXT_ROUTE_CODEX, TRAVEL_TEXT_ROUTE_API}:
+    if normalized in {TRAVEL_TEXT_ROUTE_CODEX, TRAVEL_TEXT_ROUTE_GEMINI, TRAVEL_TEXT_ROUTE_API}:
         return normalized
     return TRAVEL_DEFAULT_TEXT_ROUTE
 
@@ -121,6 +127,45 @@ def resolve_travel_text_generation_route(
     return normalize_travel_text_generation_route(raw_value)
 
 
+def travel_text_generation_route_chain(route: str | None) -> tuple[str, ...]:
+    normalized = normalize_travel_text_generation_route(route)
+    if normalized == TRAVEL_TEXT_ROUTE_GEMINI:
+        return (TRAVEL_TEXT_ROUTE_GEMINI, TRAVEL_TEXT_ROUTE_CODEX, TRAVEL_TEXT_ROUTE_API)
+    if normalized == TRAVEL_TEXT_ROUTE_API:
+        return (TRAVEL_TEXT_ROUTE_API, TRAVEL_TEXT_ROUTE_CODEX, TRAVEL_TEXT_ROUTE_GEMINI)
+    return (TRAVEL_TEXT_ROUTE_CODEX, TRAVEL_TEXT_ROUTE_GEMINI, TRAVEL_TEXT_ROUTE_API)
+
+
+def resolve_travel_text_route_models(route: str) -> dict[str, str]:
+    normalized = normalize_travel_text_generation_route(route)
+    if normalized == TRAVEL_TEXT_ROUTE_API:
+        return {
+            "planner_provider_hint": "openai_text",
+            "planner_provider_model": TRAVEL_API_PLANNER_MODEL,
+            "pass_provider_hint": "openai_text",
+            "pass_provider_model": TRAVEL_API_PASS_MODEL,
+            "image_prompt_provider_hint": "openai_text",
+            "image_prompt_provider_model": TRAVEL_API_IMAGE_PROMPT_MODEL,
+        }
+    if normalized == TRAVEL_TEXT_ROUTE_GEMINI:
+        return {
+            "planner_provider_hint": TRAVEL_TEXT_ROUTE_GEMINI,
+            "planner_provider_model": TRAVEL_GEMINI_PLANNER_MODEL,
+            "pass_provider_hint": TRAVEL_TEXT_ROUTE_GEMINI,
+            "pass_provider_model": TRAVEL_GEMINI_PASS_MODEL,
+            "image_prompt_provider_hint": TRAVEL_TEXT_ROUTE_GEMINI,
+            "image_prompt_provider_model": TRAVEL_GEMINI_IMAGE_PROMPT_MODEL,
+        }
+    return {
+        "planner_provider_hint": TRAVEL_TEXT_ROUTE_CODEX,
+        "planner_provider_model": TRAVEL_CODEX_PLANNER_MODEL,
+        "pass_provider_hint": TRAVEL_TEXT_ROUTE_CODEX,
+        "pass_provider_model": TRAVEL_CODEX_PASS_MODEL,
+        "image_prompt_provider_hint": TRAVEL_TEXT_ROUTE_CODEX,
+        "image_prompt_provider_model": TRAVEL_CODEX_IMAGE_PROMPT_MODEL,
+    }
+
+
 def normalize_travel_category_key(category_key: str | None) -> str:
     normalized = str(category_key or "").strip().lower()
     if normalized in TRAVEL_ALLOWED_CATEGORIES:
@@ -131,15 +176,15 @@ def normalize_travel_category_key(category_key: str | None) -> str:
 def normalize_travel_asset_role(asset_role: str | None) -> str:
     lowered = str(asset_role or "").strip().lower()
     if lowered in {"cover", "hero", "hero-retry", "hero-refresh", "main", "primary"}:
-        return "cover.webp"
+        return "main"
     raise ValueError(f"Travel canonical assets only allow the cover role, got '{asset_role}'.")
 
 
 def build_travel_asset_object_key(*, policy: TravelBlogPolicy, category_key: str, post_slug: str, asset_role: str) -> str:
     slug_token = slugify(str(post_slug or "").strip(), separator="-") or "post"
-    file_name = normalize_travel_asset_role(asset_role)
+    normalize_travel_asset_role(asset_role)
     resolved_category = normalize_travel_category_key(category_key)
-    return f"{policy.canonical_prefix}{resolved_category}/{slug_token}/{file_name}"
+    return f"{policy.canonical_prefix}{resolved_category}/{slug_token}.webp"
 
 
 def is_travel_canonical_prefix(object_key: str | None) -> bool:
@@ -153,18 +198,20 @@ def parse_travel_canonical_object_key(object_key: str | None) -> dict[str, str] 
         return None
     remainder = normalized[len(TRAVEL_CANONICAL_PREFIX) :]
     parts = [segment for segment in remainder.split("/") if segment]
-    if len(parts) != 3:
+    if len(parts) != 2:
         return None
-    category_key, post_slug, role_name = parts
+    category_key, file_name = parts
     category_key = normalize_travel_category_key(category_key)
-    if not slugify(post_slug, separator="-"):
+    match = TRAVEL_ALLOWED_FILENAME_RE.fullmatch(file_name)
+    if match is None:
         return None
-    if not TRAVEL_ALLOWED_ROLE_RE.fullmatch(role_name):
+    post_slug = slugify(str(match.group("post_slug") or "").strip(), separator="-")
+    if not post_slug:
         return None
     return {
         "category_key": category_key,
         "post_slug": post_slug,
-        "role_name": role_name,
+        "file_name": file_name,
         "object_key": normalized,
     }
 
@@ -186,11 +233,11 @@ def is_valid_travel_canonical_object_key(object_key: str | None, *, policy: Trav
 
 
 def build_travel_local_backup_relative_dir(*, category_key: str, post_slug: str) -> str:
-    return f"images/TravelBackup/{normalize_travel_category_key(category_key)}/{slugify(str(post_slug or '').strip(), separator='-') or 'post'}"
+    return f"images/TravelBackup/{normalize_travel_category_key(category_key)}"
 
 
 def build_travel_local_publish_relative_dir(*, category_key: str, post_slug: str) -> str:
-    return f"images/Travel/{normalize_travel_category_key(category_key)}/{slugify(str(post_slug or '').strip(), separator='-') or 'post'}"
+    return f"images/Travel/{normalize_travel_category_key(category_key)}"
 
 
 def build_travel_policy_config(
@@ -203,20 +250,13 @@ def build_travel_policy_config(
         return None
     normalized_stage = str(stage_type or "").strip()
     route = resolve_travel_text_generation_route(policy=policy, values=values)
-    if route == TRAVEL_TEXT_ROUTE_API:
-        planner_provider_hint = "openai_text"
-        planner_provider_model = TRAVEL_API_PLANNER_MODEL
-        pass_provider_hint = "openai_text"
-        pass_provider_model = TRAVEL_API_PASS_MODEL
-        image_prompt_provider_hint = "openai_text"
-        image_prompt_provider_model = TRAVEL_API_IMAGE_PROMPT_MODEL
-    else:
-        planner_provider_hint = TRAVEL_TEXT_ROUTE_CODEX
-        planner_provider_model = TRAVEL_CODEX_PLANNER_MODEL
-        pass_provider_hint = TRAVEL_TEXT_ROUTE_CODEX
-        pass_provider_model = TRAVEL_CODEX_PASS_MODEL
-        image_prompt_provider_hint = TRAVEL_TEXT_ROUTE_CODEX
-        image_prompt_provider_model = TRAVEL_CODEX_IMAGE_PROMPT_MODEL
+    route_models = resolve_travel_text_route_models(route)
+    planner_provider_hint = route_models["planner_provider_hint"]
+    planner_provider_model = route_models["planner_provider_model"]
+    pass_provider_hint = route_models["pass_provider_hint"]
+    pass_provider_model = route_models["pass_provider_model"]
+    image_prompt_provider_hint = route_models["image_prompt_provider_hint"]
+    image_prompt_provider_model = route_models["image_prompt_provider_model"]
 
     if normalized_stage == "article_generation":
         return {

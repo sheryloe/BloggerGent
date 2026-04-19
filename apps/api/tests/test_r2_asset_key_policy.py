@@ -11,6 +11,7 @@ API_ROOT = REPO_ROOT / "apps" / "api"
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(API_ROOT))
 
+from app.core.config import settings
 from app.services.content.article_service import (
     build_r2_asset_object_key,
     resolve_r2_blog_group,
@@ -21,12 +22,18 @@ from app.services.content.travel_blog_policy import (
     get_travel_blog_policy,
     is_valid_travel_canonical_object_key,
 )
+from app.services.cloudflare.cloudflare_asset_policy import (
+    build_cloudflare_local_asset_path,
+    build_default_cloudflare_asset_policy,
+    build_cloudflare_r2_object_key,
+    default_cloudflare_local_asset_root,
+)
 
 
 def test_resolve_r2_blog_group_for_travel_blog_ids() -> None:
-    assert resolve_r2_blog_group(profile_key="korea_travel", blog_id=34, primary_language="en") == "Travel"
-    assert resolve_r2_blog_group(profile_key="korea_travel", blog_id=36, primary_language="es") == "Travel"
-    assert resolve_r2_blog_group(profile_key="korea_travel", blog_id=37, primary_language="ja") == "Travel"
+    assert resolve_r2_blog_group(profile_key="korea_travel", blog_id=34, primary_language="en") == "travel-blogger"
+    assert resolve_r2_blog_group(profile_key="korea_travel", blog_id=36, primary_language="es") == "travel-blogger"
+    assert resolve_r2_blog_group(profile_key="korea_travel", blog_id=37, primary_language="ja") == "travel-blogger"
 
 
 def test_resolve_r2_category_key_for_localized_travel_labels() -> None:
@@ -57,7 +64,7 @@ def test_build_r2_asset_object_key_uses_travel_canonical_layout() -> None:
         asset_role="hero",
         content=b"slug-priority",
     )
-    assert object_key == "assets/Travel/travel/seoul-day-route/cover.webp"
+    assert object_key == "assets/travel-blogger/travel/seoul-day-route.webp"
     assert is_valid_travel_canonical_object_key(object_key)
 
 
@@ -71,8 +78,14 @@ def test_build_travel_asset_object_key_normalizes_known_cover_roles() -> None:
             post_slug="night-seoul",
             asset_role="hero-refresh",
         )
-        == "assets/Travel/culture/night-seoul/cover.webp"
+        == "assets/travel-blogger/culture/night-seoul.webp"
     )
+
+
+def test_is_valid_travel_canonical_object_key_rejects_legacy_cover_folder_layout() -> None:
+    assert is_valid_travel_canonical_object_key("assets/travel-blogger/culture/night-seoul.webp")
+    assert is_valid_travel_canonical_object_key("assets/travel-blogger/culture/night-seoul/cover.webp") is False
+    assert is_valid_travel_canonical_object_key("assets/Travel/culture/night-seoul.webp") is False
 
 
 @pytest.mark.parametrize("asset_role", ["inline-3x2", "legacy-01"])
@@ -124,3 +137,37 @@ def test_build_r2_asset_object_key_for_mystery_uses_slug_filename_contract() -> 
     )
     assert "cover-" not in object_key
     assert "hero-refresh-" not in object_key
+
+
+def test_cloudflare_asset_policy_preserves_percent_encoded_slug_segments() -> None:
+    policy = build_default_cloudflare_asset_policy()
+    category_slug = policy.allowed_category_slugs[0]
+    post_slug = "%EA%B0%9C%EB%B0%9C%EC%9E%90-ai-%EA%B0%80%EC%9D%B4%EB%93%9C"
+    timestamp = datetime(2026, 4, 17, 12, 30, tzinfo=timezone.utc)
+
+    object_key = build_cloudflare_r2_object_key(
+        policy=policy,
+        category_slug=category_slug,
+        post_slug=post_slug,
+        published_at=timestamp,
+    )
+    local_path = build_cloudflare_local_asset_path(
+        policy=policy,
+        category_slug=category_slug,
+        post_slug=post_slug,
+        prefer_existing_root=False,
+    )
+
+    assert f"/{post_slug}/{post_slug}.webp" in object_key
+    assert local_path.name == f"{post_slug}.webp"
+
+
+def test_default_cloudflare_local_asset_root_uses_cloudflare_storage_root(monkeypatch, tmp_path: Path) -> None:
+    runtime_root = tmp_path / "cloudflare-runtime"
+    target_dir = runtime_root / "images" / "Cloudflare"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(settings, "cloudflare_storage_root_windows", str(runtime_root))
+
+    resolved = default_cloudflare_local_asset_root()
+
+    assert resolved == target_dir

@@ -80,6 +80,7 @@ def _create_blog(
     blogger_blog_id: str | None = None,
     search_console_site_url: str | None = None,
     ga4_property_id: str | None = None,
+    profile_key: str = "custom",
 ) -> Blog:
     blog = Blog(
         id=blog_id,
@@ -87,7 +88,7 @@ def _create_blog(
         slug=slug,
         content_category="custom",
         primary_language="ko",
-        profile_key="custom",
+        profile_key=profile_key,
         publish_mode=PublishMode.DRAFT,
         is_active=True,
         blogger_blog_id=blogger_blog_id or f"remote-{blog_id}",
@@ -141,6 +142,65 @@ def test_complete_google_platform_oauth_stores_youtube_credential(db: Session, m
     assert credential is not None
     assert decrypt_secret_value(credential.access_token_encrypted) == "youtube-access-token"
     assert credential.subject == "Main Channel"
+
+
+def test_blogger_oauth_nonce_survives_channel_ensure_and_allows_completion(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _create_blog(
+        db,
+        blog_id=35,
+        slug="the-midnight-archives",
+        blogger_url="https://the-midnight-archives.example.com",
+        blogger_blog_id="remote-35",
+        profile_key="world_mystery",
+    )
+    ensure_managed_channels(db)
+
+    monkeypatch.setattr(
+        platform_oauth_service,
+        "_google_token_request",
+        lambda _payload: {
+            "access_token": "blogger-access-token",
+            "refresh_token": "blogger-refresh-token",
+            "scope": " ".join(platform_oauth_service.GOOGLE_OAUTH_SCOPES),
+            "token_type": "Bearer",
+            "expires_in": 3600,
+        },
+    )
+    monkeypatch.setattr(
+        platform_oauth_service,
+        "_list_blogger_blogs_with_token",
+        lambda _access_token: [
+            {
+                "id": "remote-35",
+                "name": "The Midnight Archives",
+                "url": "https://the-midnight-archives.example.com",
+                "description": "",
+            }
+        ],
+    )
+
+    auth_url = build_platform_authorization_url(db, channel_id="blogger:35")
+    state = parse_qs(urlparse(auth_url).query)["state"][0]
+
+    before_ensure = get_managed_channel_by_channel_id(db, "blogger:35")
+    assert before_ensure is not None
+    before_oauth = dict(before_ensure.channel_metadata or {}).get("oauth")
+    before_nonce = str((before_oauth or {}).get("nonce") or "")
+    assert before_nonce
+
+    ensure_managed_channels(db)
+
+    after_ensure = get_managed_channel_by_channel_id(db, "blogger:35")
+    assert after_ensure is not None
+    after_oauth = dict(after_ensure.channel_metadata or {}).get("oauth")
+    after_nonce = str((after_oauth or {}).get("nonce") or "")
+    assert after_nonce == before_nonce
+
+    result = complete_google_platform_oauth(db, code="oauth-code", state=state)
+    assert result["channel_id"] == "blogger:35"
 
 
 def test_refresh_platform_access_token_updates_youtube_token(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:

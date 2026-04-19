@@ -81,7 +81,7 @@ HELP_TOPICS: tuple[HelpTopic, ...] = (
         tags=("analytics", "lighthouse", "indexing"),
         related_screens=("/analytics/blogger", "/analytics"),
         commands=(
-            "python scripts/sync_lighthouse_scores.py --published-only --form-factor mobile",
+            "python scripts/lighthouse/sync_lighthouse_scores.py --published-only --form-factor mobile",
             "POST /api/v1/analytics/indexing/refresh",
             "POST /api/v1/google/indexing/status-refresh",
         ),

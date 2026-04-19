@@ -28,7 +28,7 @@ def test_assemble_article_html_uses_left_aligned_wrapper_without_centered_card()
 
     assert "max-width:860px" not in assembled
     assert "margin:0 auto" not in assembled
-    assert "box-shadow:" not in assembled
-    assert "background:transparent" in assembled
+    assert "box-shadow:0 20px 60px rgba(15,23,42,0.08)" in assembled
+    assert "background:#ffffff" in assembled
     assert "text-align:left" in assembled
     assert "align-items:flex-start" in assembled

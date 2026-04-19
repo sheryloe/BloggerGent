@@ -92,6 +92,7 @@ class MatchDecision:
     reason: str
     cover_url: str = ""
     inline1_url: str = ""
+    inline2_url: str = ""
     folder: str = ""
     score: float = 0.0
     candidates: list[dict[str, Any]] | None = None

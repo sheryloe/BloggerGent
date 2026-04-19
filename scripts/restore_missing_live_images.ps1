@@ -18,7 +18,7 @@ Set-Location $repoRoot
 New-Item -ItemType Directory -Path "TEST/logs" -Force | Out-Null
 $ts = Get-Date -Format "yyyyMMdd-HHmmss"
 $logPath = "TEST/logs/restore-missing-live-images-$ts.log"
-$reportPath = "/app/storage/reports/restore-missing-live-images-$ts.json"
+$reportPath = "/app/storage/_common/analysis/restore-missing-live-images-$ts.json"
 
 "[$(Get-Date -Format o)] mode=$Mode scope=$Scope match_policy=$MatchPolicy generate_slots=$GenerateSlots model=$Model canary_count=$CanaryCount" | Tee-Object -FilePath $logPath -Append | Out-Null
 

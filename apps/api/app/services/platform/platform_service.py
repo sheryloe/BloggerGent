@@ -362,6 +362,7 @@ def ensure_managed_channels(db: Session) -> list[ManagedChannel]:
         has_valid_credential = bool(channel and has_valid_channel_credential(channel, "blogger"))
         oauth_state = "connected" if has_valid_credential else "not_configured"
         status = "connected" if has_valid_credential else "attention"
+        existing_channel_metadata = dict(channel.channel_metadata or {}) if channel is not None else {}
         payload = {
             "provider": "blogger",
             "channel_id": channel_id,
@@ -375,7 +376,7 @@ def ensure_managed_channels(db: Session) -> list[ManagedChannel]:
             "capabilities": ["article_publish", "seo_feedback", "search_console", "ga4"],
             "oauth_state": oauth_state,
             "quota_state": {},
-            "channel_metadata": {"profile_key": blog.profile_key},
+            "channel_metadata": {**existing_channel_metadata, "profile_key": blog.profile_key},
             "is_enabled": bool(blog.is_active),
         }
         if channel is None:

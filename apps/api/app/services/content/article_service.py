@@ -16,11 +16,13 @@ from app.schemas.ai import ArticleGenerationOutput
 from app.services.content.content_guard_service import assert_article_not_duplicate
 from app.services.content.faq_hygiene import strip_generic_faq_leak_html
 from app.services.content.travel_blog_policy import (
+    TRAVEL_BLOG_IDS,
     build_travel_asset_object_key,
     build_travel_collage_context,
     get_travel_blog_policy,
     normalize_travel_category_key,
 )
+from app.services.content.travel_translation_state_service import seed_article_travel_sync_fields
 from app.services.cloudflare.cloudflare_asset_policy import (
     build_cloudflare_r2_object_key,
     build_default_cloudflare_asset_policy,
@@ -264,7 +266,7 @@ def resolve_r2_blog_group(
         return "cloudflare/dongri-archive"
 
     if travel_policy is not None:
-        return "Travel"
+        return "travel-blogger"
     if normalized_profile == "korea_travel":
         return "google-blogger/korea-travel"
     if normalized_profile == "world_mystery":
@@ -937,6 +939,33 @@ def save_article(db: Session, *, job: Job, topic: Topic | None, output: ArticleG
         article = Article(job_id=job.id, **payload)
         db.add(article)
     db.flush()
+    seed_article_travel_sync_fields(db, article, commit=False)
+    travel_sync_payload = {}
+    if isinstance(job.raw_prompts, dict):
+        candidate = job.raw_prompts.get("travel_sync")
+        if isinstance(candidate, dict):
+            travel_sync_payload = dict(candidate)
+    explicit_source_id = int(travel_sync_payload.get("source_article_id") or 0)
+    if explicit_source_id > 0 and explicit_source_id != int(article.id or 0):
+        source_article = db.execute(select(Article).where(Article.id == explicit_source_id)).scalar_one_or_none()
+        if source_article is not None and int(source_article.blog_id or 0) in TRAVEL_BLOG_IDS:
+            article.travel_sync_source_article_id = int(source_article.id)
+            explicit_group_key = str(travel_sync_payload.get("group_key") or "").strip()
+            if explicit_group_key:
+                article.travel_sync_group_key = explicit_group_key
+            render_metadata = dict(article.render_metadata or {})
+            render_metadata["travel_sync_source_article_id"] = int(source_article.id)
+            render_metadata["travel_sync_source_blog_id"] = int(source_article.blog_id or 0)
+            if explicit_group_key:
+                render_metadata["travel_sync_group_key"] = explicit_group_key
+            source_language = str(travel_sync_payload.get("source_language") or "").strip().lower()
+            target_language = str(travel_sync_payload.get("target_language") or "").strip().lower()
+            if source_language:
+                render_metadata["travel_sync_source_language"] = source_language
+            if target_language:
+                render_metadata["travel_sync_target_language"] = target_language
+            article.render_metadata = render_metadata
+            db.add(article)
     planner_slot = db.execute(select(ContentPlanSlot).where(ContentPlanSlot.job_id == job.id)).scalar_one_or_none()
     if planner_slot is not None:
         planner_slot.article_id = article.id

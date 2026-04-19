@@ -164,6 +164,17 @@ def test_build_prompt_flow_exposes_travel_text_generation_route(db: Session) -> 
     assert by_stage["image_prompt_generation"].text_generation_route == "api"
     assert by_stage["image_prompt_generation"].provider_model == "gpt-4.1-mini"
 
+    upsert_settings(db, {travel_text_generation_route_setting_key(blog.id): "gemini_cli"})
+    flow_gemini = channel_prompt_service.build_prompt_flow(db, f"blogger:{blog.id}", sync_backup=False)
+    by_stage_gemini = {step.stage_type: step for step in flow_gemini.steps}
+
+    assert by_stage_gemini["article_generation"].text_generation_route == "gemini_cli"
+    assert by_stage_gemini["article_generation"].planner_provider_hint == "gemini_cli"
+    assert by_stage_gemini["article_generation"].planner_provider_model == "gemini-2.5-pro"
+    assert by_stage_gemini["article_generation"].pass_provider_model == "gemini-2.5-flash"
+    assert by_stage_gemini["image_prompt_generation"].text_generation_route == "gemini_cli"
+    assert by_stage_gemini["image_prompt_generation"].provider_model == "gemini-2.5-flash"
+
 
 def test_save_platform_prompt_step_persists_and_syncs_backup(db: Session, tmp_path: Path) -> None:
     ensure_managed_channels(db)
@@ -251,6 +262,7 @@ def test_build_prompt_flow_syncs_cloudflare_backups_to_channel_name_dir(
     )
 
     flow = channel_prompt_service.build_prompt_flow(db, "cloudflare:dongriarchive", sync_backup=True)
+    runtime_root = tmp_path / "storage" / "CloudFlare" / "_prompts"
 
     assert flow.backup_directory == "channels/cloudflare/dongri-archive"
     assert [step.stage_type for step in flow.steps] == [
@@ -264,24 +276,24 @@ def test_build_prompt_flow_syncs_cloudflare_backups_to_channel_name_dir(
     ]
     assert flow.steps[0].backup_relative_path == "channels/cloudflare/dongri-archive/mystery/topic_discovery.md"
     assert (
-        tmp_path / "prompts" / "channels" / "cloudflare" / "dongri-archive" / "mystery" / "topic_discovery.md"
+        runtime_root / "channels" / "cloudflare" / "dongri-archive" / "mystery" / "topic_discovery.md"
     ).read_text(encoding="utf-8") == "Investigate unexplained stories\n"
     assert (
-        tmp_path / "prompts" / "channels" / "cloudflare" / "dongri-archive" / "mystery" / "article_generation.md"
+        runtime_root / "channels" / "cloudflare" / "dongri-archive" / "mystery" / "article_generation.md"
     ).exists()
     assert (
-        tmp_path / "prompts" / "channels" / "cloudflare" / "dongri-archive" / "mystery" / "image_prompt_generation.md"
+        runtime_root / "channels" / "cloudflare" / "dongri-archive" / "mystery" / "image_prompt_generation.md"
     ).exists()
     assert (
-        tmp_path / "prompts" / "channels" / "cloudflare" / "dongri-archive" / "mystery" / "publishing.md"
+        runtime_root / "channels" / "cloudflare" / "dongri-archive" / "mystery" / "publishing.md"
     ).read_text(encoding="utf-8").startswith("[Cloudflare System Step Backup]\n")
     root_channel = json.loads(
-        (tmp_path / "prompts" / "channels" / "cloudflare" / "dongri-archive" / "channel.json").read_text(
+        (runtime_root / "channels" / "cloudflare" / "dongri-archive" / "channel.json").read_text(
             encoding="utf-8"
         )
     )
     category_channel = json.loads(
-        (tmp_path / "prompts" / "channels" / "cloudflare" / "dongri-archive" / "mystery" / "channel.json").read_text(
+        (runtime_root / "channels" / "cloudflare" / "dongri-archive" / "mystery" / "channel.json").read_text(
             encoding="utf-8"
         )
     )
@@ -290,6 +302,9 @@ def test_build_prompt_flow_syncs_cloudflare_backups_to_channel_name_dir(
     assert category_channel["root_channel_id"] == "cloudflare:dongriarchive"
     assert category_channel["backup_directory"] == "channels/cloudflare/dongri-archive/mystery"
     assert category_channel["steps"][0]["backup_relative_path"] == "channels/cloudflare/dongri-archive/mystery/topic_discovery.md"
+    assert not (
+        tmp_path / "prompts" / "channels" / "cloudflare" / "dongri-archive" / "mystery" / "topic_discovery.md"
+    ).exists()
 
 
 def test_travel_blogger_backup_excludes_inline_prompt_file(db: Session, tmp_path: Path) -> None:

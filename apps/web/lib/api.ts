@@ -65,6 +65,8 @@ import {
   PlannerSlotRead,
   PlannerSlotUpdateRequest,
   SeoTargetRead,
+  SettingsEnvSecretSyncRead,
+  SettingsEnvSecretsStatusRead,
   AnalyticsArticleFactListResponse,
   AnalyticsBlogMonthlyListResponse,
   AnalyticsBlogMonthlyReportRead,
@@ -277,6 +279,48 @@ export async function getArchiveChannelPage(channelKey: string, page = 1, pageSi
 
 export async function getSettings() {
   return apiFetch<SettingItem[]>("/settings", { revalidate: false });
+}
+
+function mapSettingsEnvSecretsStatus(payload: any): SettingsEnvSecretsStatusRead {
+  return {
+    checkedAt: payload?.checked_at ?? new Date().toISOString(),
+    envDir: payload?.env_dir ?? "",
+    secrets: (payload?.secrets ?? []).map((item: any) => ({
+      key: item?.key ?? "",
+      maskedValue: item?.masked_value ?? "",
+      sourceFile: item?.source_file ?? "",
+    })),
+    connection: {
+      state: payload?.connection?.state === "connected" ? "connected" : "disconnected",
+      connected: Number(payload?.connection?.connected ?? 0),
+      total: Number(payload?.connection?.total ?? 0),
+      channels: (payload?.connection?.channels ?? []).map((item: any) => ({
+        channelId: item?.channel_id ?? "",
+        name: item?.name ?? "",
+        provider: item?.provider ?? "",
+        status: item?.status ?? "unknown",
+        isConnected: Boolean(item?.is_connected),
+      })),
+    },
+  };
+}
+
+export async function getSettingsEnvSecretsStatus() {
+  const payload = await apiFetch<any>("/settings/env-secrets", { revalidate: false, timeoutMs: 5000 });
+  return mapSettingsEnvSecretsStatus(payload);
+}
+
+export async function syncSettingsFromEnvSecrets(): Promise<SettingsEnvSecretSyncRead> {
+  const payload = await apiFetch<any>("/settings/env-secrets/sync", {
+    method: "POST",
+    body: JSON.stringify({}),
+    timeoutMs: 10000,
+  });
+  return {
+    checkedAt: payload?.checked_at ?? new Date().toISOString(),
+    updatedCount: Number(payload?.updated_count ?? 0),
+    updatedKeys: Array.isArray(payload?.updated_keys) ? payload.updated_keys.map((item: unknown) => String(item)) : [],
+  };
 }
 
 export async function getTrainingStatus() {

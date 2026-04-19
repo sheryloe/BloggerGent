@@ -86,10 +86,10 @@ def test_cloudflare_category_channel_json_uses_english_keys_and_korean_values(
     )
 
     channel_prompt_service.build_prompt_flow(db, "cloudflare:dongriarchive", sync_backup=True)
+    runtime_root = tmp_path / "storage" / "CloudFlare" / "_prompts"
 
     path = (
-        tmp_path
-        / "prompts"
+        runtime_root
         / "channels"
         / "cloudflare"
         / "dongri-archive"

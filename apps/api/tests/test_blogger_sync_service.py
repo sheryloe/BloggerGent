@@ -53,6 +53,52 @@ def test_normalize_public_feed_post_extracts_core_fields() -> None:
     assert payload["author_display_name"] == "Donggri"
 
 
+def test_apply_travel_sync_asset_normalization_collapses_duplicate_assets_prefix() -> None:
+    blog = Blog(
+        id=34,
+        name="Travel EN",
+        slug="travel-en",
+        content_category="travel",
+        primary_language="en",
+        profile_key="korea_travel",
+        is_active=True,
+    )
+
+    payload = blogger_sync_service._apply_travel_sync_asset_normalization(
+        blog,
+        {
+            "content_html": (
+                "<p>Hello</p>"
+                "<img src='https://api.dongriarchive.com/assets/assets/travel-blogger/travel/example.webp' />"
+            ),
+            "thumbnail_url": "https://api.dongriarchive.com/assets/assets/travel-blogger/travel/example.webp",
+        },
+    )
+
+    assert "/assets/assets/" not in payload["content_html"]
+    assert payload["thumbnail_url"] == "https://api.dongriarchive.com/assets/travel-blogger/travel/example.webp"
+
+
+def test_apply_travel_sync_asset_normalization_skips_non_travel_blog() -> None:
+    blog = Blog(
+        id=99,
+        name="Other",
+        slug="other",
+        content_category="archive",
+        primary_language="ko",
+        profile_key="archive",
+        is_active=True,
+    )
+    payload = {
+        "content_html": "<img src='https://api.dongriarchive.com/assets/assets/media/posts/example.webp' />",
+        "thumbnail_url": "https://api.dongriarchive.com/assets/assets/media/posts/example.webp",
+    }
+
+    normalized = blogger_sync_service._apply_travel_sync_asset_normalization(blog, payload)
+
+    assert normalized == payload
+
+
 def test_sync_blogger_posts_falls_back_to_public_feed_when_api_project_is_deleted(
     db: Session,
     monkeypatch: pytest.MonkeyPatch,

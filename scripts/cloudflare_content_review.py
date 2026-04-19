@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 
 PUBLIC_API_BASE = "https://api.dongriarchive.com"
 PUBLIC_SITE_BASE = "https://dongriarchive.com"
-REPORT_DIR = Path("storage/reports")
+REPORT_DIR = Path(r"D:\Donggri_Runtime\BloggerGent\storage\cloudflare\reports")
 GENERIC_COLLAGE_MARKERS = ("3x3", "9패널", "콜라주", "collage")
 
 CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {

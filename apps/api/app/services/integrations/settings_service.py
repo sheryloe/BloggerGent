@@ -92,9 +92,57 @@ DEFAULT_SETTINGS: dict[str, DefaultSetting] = {
         settings.cloudflare_r2_public_base_url,
         "Cloudflare 怨듦컻 ?대?吏 湲곕낯 URL. integration ?낅줈?쒕? 鍮꾩슦硫?cloudflare_blog_api_base_url + /assets 媛 ?먮룞 ?곸슜?⑸땲??",
     ),
+    "cloudflare_r2_direct_public_base_url": DefaultSetting(
+        settings.cloudflare_r2_direct_public_base_url,
+        "Direct public base URL for the Cloudflare R2 bucket. Example: https://pub-xxxx.r2.dev",
+    ),
     "cloudflare_r2_prefix": DefaultSetting(
         settings.cloudflare_r2_prefix,
         "Object key prefix inside the R2 bucket. Files are stored as <prefix>/<slug>.webp",
+    ),
+    "travel_cloudflare_account_id": DefaultSetting(
+        settings.travel_cloudflare_account_id,
+        "Cloudflare account ID dedicated to travel assets",
+    ),
+    "travel_cloudflare_r2_bucket": DefaultSetting(
+        settings.travel_cloudflare_r2_bucket,
+        "Cloudflare R2 bucket name dedicated to travel assets",
+    ),
+    "travel_cloudflare_r2_access_key_id": DefaultSetting(
+        settings.travel_cloudflare_r2_access_key_id,
+        "Cloudflare R2 access key ID dedicated to travel assets",
+        True,
+    ),
+    "travel_cloudflare_r2_secret_access_key": DefaultSetting(
+        settings.travel_cloudflare_r2_secret_access_key,
+        "Cloudflare R2 secret access key dedicated to travel assets",
+        True,
+    ),
+    "travel_cloudflare_r2_public_base_url": DefaultSetting(
+        settings.travel_cloudflare_r2_public_base_url,
+        "Public base URL for the travel-only R2 bucket",
+    ),
+    "shared_channel_cloudflare_account_id": DefaultSetting(
+        settings.shared_channel_cloudflare_account_id,
+        "DEPRECATED: shared Cloudflare account ID for travel and mystery channel assets",
+    ),
+    "shared_channel_cloudflare_r2_bucket": DefaultSetting(
+        settings.shared_channel_cloudflare_r2_bucket,
+        "DEPRECATED: shared Cloudflare R2 bucket name for travel and mystery channel assets",
+    ),
+    "shared_channel_cloudflare_r2_access_key_id": DefaultSetting(
+        settings.shared_channel_cloudflare_r2_access_key_id,
+        "DEPRECATED: shared Cloudflare R2 access key ID for travel and mystery channel assets",
+        True,
+    ),
+    "shared_channel_cloudflare_r2_secret_access_key": DefaultSetting(
+        settings.shared_channel_cloudflare_r2_secret_access_key,
+        "DEPRECATED: shared Cloudflare R2 secret access key for travel and mystery channel assets",
+        True,
+    ),
+    "shared_channel_cloudflare_r2_public_base_url": DefaultSetting(
+        settings.shared_channel_cloudflare_r2_public_base_url,
+        "DEPRECATED: shared public asset base URL for travel and mystery channels",
     ),
     "mystery_cloudflare_account_id": DefaultSetting(
         settings.mystery_cloudflare_account_id,
@@ -545,6 +593,16 @@ SETTING_DESCRIPTION_OVERRIDES_KO: dict[str, str] = {
     "cloudflare_account_id": "Cloudflare 계정 ID",
     "cloudflare_r2_bucket": "Cloudflare R2 버킷명",
     "cloudflare_r2_public_base_url": "Cloudflare R2 공개 기본 URL",
+    "travel_cloudflare_account_id": "Travel 전용 Cloudflare 계정 ID",
+    "travel_cloudflare_r2_bucket": "Travel 전용 R2 버킷명",
+    "travel_cloudflare_r2_access_key_id": "Travel 전용 R2 액세스 키 ID",
+    "travel_cloudflare_r2_secret_access_key": "Travel 전용 R2 시크릿 키",
+    "travel_cloudflare_r2_public_base_url": "Travel 전용 R2 공개 기본 URL",
+    "shared_channel_cloudflare_account_id": "DEPRECATED Travel·Mystery 공용 Cloudflare 계정 ID",
+    "shared_channel_cloudflare_r2_bucket": "DEPRECATED Travel·Mystery 공용 R2 버킷명",
+    "shared_channel_cloudflare_r2_access_key_id": "DEPRECATED Travel·Mystery 공용 R2 액세스 키 ID",
+    "shared_channel_cloudflare_r2_secret_access_key": "DEPRECATED Travel·Mystery 공용 R2 시크릿 키",
+    "shared_channel_cloudflare_r2_public_base_url": "DEPRECATED Travel·Mystery 공용 R2 공개 기본 URL",
     "mystery_cloudflare_account_id": "미스터리 전용 Cloudflare 계정 ID",
     "mystery_cloudflare_r2_bucket": "미스터리 전용 R2 버킷명",
     "mystery_cloudflare_r2_access_key_id": "미스터리 전용 R2 액세스 키 ID",

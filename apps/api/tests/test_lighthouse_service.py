@@ -1,7 +1,20 @@
+from datetime import datetime, timezone
+from pathlib import Path
+import sys
+from types import SimpleNamespace
+
+API_ROOT = Path(__file__).resolve().parents[1]
+if str(API_ROOT) not in sys.path:
+    sys.path.insert(0, str(API_ROOT))
+
+from app.core.config import settings
 from app.services.ops.lighthouse_service import (
     LIGHTHOUSE_10_PERFORMANCE_METRIC_WEIGHTS,
     LIGHTHOUSE_SCORING_METHOD,
+    apply_lighthouse_audit_to_article,
+    apply_lighthouse_audit_to_cloudflare_post,
     parse_lighthouse_report,
+    resolve_lighthouse_report_root,
 )
 
 
@@ -65,3 +78,69 @@ def test_parse_lighthouse_report_handles_missing_audits_without_crashing():
         "total_blocking_time_ms": None,
         "cumulative_layout_shift": None,
     }
+
+
+def test_apply_lighthouse_audit_to_article_persists_required_scores():
+    article = SimpleNamespace()
+    audited_at = datetime(2026, 4, 19, tzinfo=timezone.utc)
+    audit = {
+        "scores": {
+            "lighthouse_score": 88,
+            "accessibility_score": 91,
+            "best_practices_score": 93,
+            "seo_score": 97,
+        },
+        "weights": {"largest-contentful-paint": 0.25},
+    }
+
+    payload = apply_lighthouse_audit_to_article(
+        article,
+        audit,
+        url="https://example.com/post",
+        report_path=Path(r"D:\Donggri_Runtime\BloggerGent\storage\_common\analysis\lighthouse\manual.json"),
+        audited_at=audited_at,
+    )
+
+    assert article.quality_lighthouse_score == 88
+    assert article.quality_lighthouse_accessibility_score == 91
+    assert article.quality_lighthouse_best_practices_score == 93
+    assert article.quality_lighthouse_seo_score == 97
+    assert article.quality_lighthouse_last_audited_at == audited_at
+    assert payload["status"] == "ok"
+    assert payload["form_factor"] == "mobile"
+
+
+def test_apply_lighthouse_audit_to_cloudflare_post_persists_required_scores():
+    post = SimpleNamespace()
+    audit = {
+        "scores": {
+            "lighthouse_score": 76,
+            "accessibility_score": 84,
+            "best_practices_score": 89,
+            "seo_score": 92,
+        },
+        "weights": {},
+    }
+
+    payload = apply_lighthouse_audit_to_cloudflare_post(
+        post,
+        audit,
+        url="https://dongriarchive.com/article",
+        report_path=Path(r"D:\Donggri_Runtime\BloggerGent\storage\_common\analysis\lighthouse\cloudflare.json"),
+    )
+
+    assert post.lighthouse_score == 76
+    assert post.lighthouse_accessibility_score == 84
+    assert post.lighthouse_best_practices_score == 89
+    assert post.lighthouse_seo_score == 92
+    assert post.lighthouse_payload["status"] == "ok"
+    assert payload["url"] == "https://dongriarchive.com/article"
+
+
+def test_resolve_lighthouse_report_root_uses_runtime_storage(monkeypatch):
+    monkeypatch.delenv("LIGHTHOUSE_REPORT_ROOT", raising=False)
+    monkeypatch.setattr(settings, "storage_root", r"D:\Donggri_Runtime\BloggerGent\storage", raising=False)
+
+    root = resolve_lighthouse_report_root(provider="manual")
+
+    assert str(root).endswith(r"storage\_common\analysis\lighthouse\manual")

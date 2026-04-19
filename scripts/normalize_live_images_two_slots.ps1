@@ -16,7 +16,7 @@ Set-Location $repoRoot
 New-Item -ItemType Directory -Path "TEST/logs" -Force | Out-Null
 $ts = Get-Date -Format "yyyyMMdd-HHmmss"
 $logPath = "TEST/logs/normalize-live-images-two-slots-$ts.log"
-$reportPath = "/app/storage/reports/normalize-live-images-two-slots-$ts.json"
+$reportPath = "/app/storage/_common/analysis/normalize-live-images-two-slots-$ts.json"
 
 "[$(Get-Date -Format o)] mode=$Mode source=$Source model=$Model canary_count=$CanaryCount timeout=$Timeout" | Tee-Object -FilePath $logPath -Append | Out-Null
 

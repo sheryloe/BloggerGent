@@ -26,7 +26,19 @@ class Settings(BaseSettings):
     cloudflare_r2_access_key_id: str = ""
     cloudflare_r2_secret_access_key: str = ""
     cloudflare_r2_public_base_url: str = ""
+    cloudflare_r2_direct_public_base_url: str = ""
     cloudflare_r2_prefix: str = "assets/images"
+    cloudflare_storage_root_windows: str = r"D:\Donggri_Runtime\BloggerGent\storage"
+    travel_cloudflare_account_id: str = ""
+    travel_cloudflare_r2_bucket: str = ""
+    travel_cloudflare_r2_access_key_id: str = ""
+    travel_cloudflare_r2_secret_access_key: str = ""
+    travel_cloudflare_r2_public_base_url: str = ""
+    shared_channel_cloudflare_account_id: str = ""
+    shared_channel_cloudflare_r2_bucket: str = ""
+    shared_channel_cloudflare_r2_access_key_id: str = ""
+    shared_channel_cloudflare_r2_secret_access_key: str = ""
+    shared_channel_cloudflare_r2_public_base_url: str = ""
     mystery_cloudflare_account_id: str = ""
     mystery_cloudflare_r2_bucket: str = ""
     mystery_cloudflare_r2_access_key_id: str = ""
@@ -146,6 +158,31 @@ class Settings(BaseSettings):
     @property
     def storage_html_dir(self) -> Path:
         return Path(self.storage_root) / "html"
+
+    @computed_field
+    @property
+    def storage_common_analysis_dir(self) -> Path:
+        return Path(self.storage_root) / "_common" / "analysis"
+
+    @computed_field
+    @property
+    def storage_lighthouse_dir(self) -> Path:
+        return self.storage_common_analysis_dir / "lighthouse"
+
+    @computed_field
+    @property
+    def storage_travel_dir(self) -> Path:
+        return Path(self.storage_root) / "travel"
+
+    @computed_field
+    @property
+    def storage_mystery_dir(self) -> Path:
+        return Path(self.storage_root) / "mystery"
+
+    @computed_field
+    @property
+    def storage_cloudflare_dir(self) -> Path:
+        return Path(self.storage_root) / "cloudflare"
 
 
 settings = Settings()

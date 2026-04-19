@@ -4,10 +4,14 @@ import importlib.util
 from pathlib import Path
 import sys
 
+import pytest
+
 
 def _load_module():
     root = Path(__file__).resolve().parents[3]
     script_path = root / "scripts" / "migrate_r2_blogger_prefix_all.py"
+    if not script_path.exists():
+        pytest.skip("legacy one-off R2 migration script is archived under the current bucket policy")
     spec = importlib.util.spec_from_file_location("migrate_r2_blogger_prefix_all", script_path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)

@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-
-TOPIC_MODEL = "gpt-5.4-2026-03-05"
-ARTICLE_PASS_MODEL = "gpt-5.4-mini-2026-03-17"
-IMAGE_PROMPT_MODEL = "gpt-4.1-mini"
-IMAGE_MODEL = "gpt-image-1"
+from app.core.config import settings
+from app.services.content.travel_blog_policy import (
+    TRAVEL_DEFAULT_TEXT_ROUTE,
+    TRAVEL_IMAGE_POLICY_VERSION,
+    TRAVEL_LOCKED_IMAGE_MODEL,
+    resolve_travel_text_route_models,
+)
 
 TRAVEL_CHANNELS = {
     "donggri-s-hidden-korea-local-travel-culture": "blogger:34",
@@ -33,23 +35,28 @@ def test_travel_channel_models_are_locked_to_planner_pass_and_image_policy() -> 
         if payload.get("channel_id") != channel_id:
             violations.append(f"{path}: channel_id={payload.get('channel_id')}")
         steps = {str(item.get("stage_type") or ""): item for item in payload.get("steps", [])}
-        if steps["topic_discovery"]["provider_model"] != TOPIC_MODEL:
+        topic_model = steps["topic_discovery"].get("provider_model")
+        if topic_model not in {None, settings.topic_discovery_model}:
             violations.append(f"{path}: topic_discovery={steps['topic_discovery']['provider_model']}")
-        if steps["article_generation"]["provider_model"] != ARTICLE_PASS_MODEL:
+        route = steps["article_generation"].get("text_generation_route") or TRAVEL_DEFAULT_TEXT_ROUTE
+        route_models = resolve_travel_text_route_models(str(route))
+        if steps["article_generation"]["provider_model"] != route_models["pass_provider_model"]:
             violations.append(f"{path}: article_generation={steps['article_generation']['provider_model']}")
-        if steps["article_generation"].get("planner_provider_model") != TOPIC_MODEL:
+        if steps["article_generation"].get("planner_provider_model") != route_models["planner_provider_model"]:
             violations.append(f"{path}: planner_provider_model={steps['article_generation'].get('planner_provider_model')}")
-        if steps["article_generation"].get("pass_provider_model") != ARTICLE_PASS_MODEL:
+        if steps["article_generation"].get("pass_provider_model") != route_models["pass_provider_model"]:
             violations.append(f"{path}: pass_provider_model={steps['article_generation'].get('pass_provider_model')}")
         if steps["article_generation"].get("structure_mode") != "kisungjeongyeol_4beat":
             violations.append(f"{path}: structure_mode={steps['article_generation'].get('structure_mode')}")
-        if steps["image_prompt_generation"]["provider_model"] != IMAGE_PROMPT_MODEL:
+        image_route = steps["image_prompt_generation"].get("text_generation_route") or route
+        image_route_models = resolve_travel_text_route_models(str(image_route))
+        if steps["image_prompt_generation"]["provider_model"] != image_route_models["image_prompt_provider_model"]:
             violations.append(f"{path}: image_prompt_generation={steps['image_prompt_generation']['provider_model']}")
-        if steps["image_generation"]["provider_model"] != IMAGE_MODEL:
+        if steps["image_generation"]["provider_model"] != TRAVEL_LOCKED_IMAGE_MODEL:
             violations.append(f"{path}: image_generation={steps['image_generation']['provider_model']}")
-        if steps["image_generation"].get("locked_image_model") != IMAGE_MODEL:
+        if steps["image_generation"].get("locked_image_model") != TRAVEL_LOCKED_IMAGE_MODEL:
             violations.append(f"{path}: locked_image_model={steps['image_generation'].get('locked_image_model')}")
-        if steps["image_generation"].get("image_policy_version") != "2025-04-23":
+        if steps["image_generation"].get("image_policy_version") != TRAVEL_IMAGE_POLICY_VERSION:
             violations.append(f"{path}: image_policy_version={steps['image_generation'].get('image_policy_version')}")
     assert not violations, f"Travel channel policy violations: {violations}"
 

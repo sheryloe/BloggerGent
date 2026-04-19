@@ -12,7 +12,7 @@ Set-Location $repoRoot
 New-Item -ItemType Directory -Path "TEST/logs" -Force | Out-Null
 $ts = Get-Date -Format "yyyyMMdd-HHmmss"
 $logPath = "TEST/logs/fix-broken-live-asset-urls-$ts.log"
-$reportPath = "/app/storage/reports/fix-broken-live-asset-urls-$ts.json"
+$reportPath = "/app/storage/_common/analysis/fix-broken-live-asset-urls-$ts.json"
 
 "[$(Get-Date -Format o)] mode=$Mode canary_count=$CanaryCount" | Tee-Object -FilePath $logPath -Append | Out-Null
 

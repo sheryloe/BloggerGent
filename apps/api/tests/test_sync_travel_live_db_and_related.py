@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from scripts.sync_travel_live_db_and_related import (
+from scripts.travel.sync_travel_live_db_and_related import (
     count_related_png_fallback_tokens,
     is_stale_published_url,
     normalize_blogger_url_key,

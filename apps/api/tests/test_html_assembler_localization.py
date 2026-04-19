@@ -72,8 +72,8 @@ def test_assemble_article_html_mystery_forces_english_ui_and_light_theme() -> No
 
     assert "Frequently Asked Questions" in assembled
     assert "Related Mystery Stories" in assembled
-    assert "color:#0f172a" in assembled
-    assert "background:#ffffff" in assembled
+    assert "color:#f3f7ff" in assembled
+    assert "background:#0b1220" in assembled
 
 
 def test_assemble_article_html_mystery_english_strips_hangul_from_body_and_faq() -> None:

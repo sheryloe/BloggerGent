@@ -12,7 +12,7 @@ Set-Location $repoRoot
 New-Item -ItemType Directory -Path "TEST/logs" -Force | Out-Null
 $ts = Get-Date -Format "yyyyMMdd-HHmmss"
 $logPath = "TEST/logs/ia-r2-cleanup-$ts.log"
-$reportPath = "/app/storage/reports/ia-r2-cleanup-$ts.json"
+$reportPath = "/app/storage/_common/analysis/ia-r2-cleanup-$ts.json"
 
 "[$(Get-Date -Format o)] apply=$($Apply.IsPresent) grace_days=$GraceDays limit=$Limit" | Tee-Object -FilePath $logPath -Append | Out-Null
 

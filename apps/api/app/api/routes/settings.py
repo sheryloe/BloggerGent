@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import logging
 import json
+import os
+import re
+from datetime import UTC, datetime
+from pathlib import Path
 from urllib.parse import urlencode, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -40,6 +44,8 @@ from app.services.integrations.storage_service import is_private_asset_url
 router = APIRouter()
 blogger_router = APIRouter()
 logger = logging.getLogger(__name__)
+_ENV_SECRET_KEY_PATTERN = re.compile(r"(api|token|secret|password|key|auth|client|access|refresh|credential)", re.IGNORECASE)
+_ENV_VAR_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _parse_int_setting(values: dict[str, str], key: str, *, minimum: int, maximum: int, allow_zero: bool = False) -> None:
@@ -99,6 +105,127 @@ def _cloudflare_public_base_url(values: dict[str, str]) -> str:
     return ""
 
 
+def _resolve_repo_env_dir() -> Path:
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        candidate = parent / "env"
+        if candidate.exists() and candidate.is_dir():
+            return candidate
+    return Path.cwd() / "env"
+
+
+def _mask_secret_value(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if len(raw) <= 2:
+        return f"{raw[:1]}*"
+    if len(raw) <= 4:
+        return f"{raw[:2]}{'*' * max(1, len(raw) - 2)}"
+    return f"{raw[:2]}{'*' * (len(raw) - 4)}{raw[-2:]}"
+
+
+def _strip_env_value_quotes(raw_value: str) -> str:
+    value = str(raw_value or "").strip()
+    if len(value) >= 2 and ((value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'"))):
+        return value[1:-1]
+    return value
+
+
+def _load_masked_env_secrets() -> list[dict[str, str]]:
+    env_dir = _resolve_repo_env_dir()
+    runtime_file = env_dir / "runtime.settings.env"
+    candidate_files: list[Path] = []
+    if env_dir.exists() and runtime_file.exists():
+        candidate_files.append(runtime_file)
+    if env_dir.exists():
+        candidate_files.extend(
+            sorted(
+                [path for path in env_dir.glob("*.env*") if path.is_file() and path != runtime_file],
+                key=lambda path: path.stat().st_mtime,
+                reverse=True,
+            )
+        )
+
+    by_key: dict[str, dict[str, str]] = {}
+    for file_path in candidate_files:
+        try:
+            lines = file_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            raw = line.strip()
+            if not raw or raw.startswith("#") or "=" not in raw:
+                continue
+            if raw.startswith("export "):
+                raw = raw[7:].strip()
+            key, raw_value = raw.split("=", 1)
+            key = key.strip()
+            if not _ENV_VAR_NAME_PATTERN.match(key):
+                continue
+            if not _ENV_SECRET_KEY_PATTERN.search(key):
+                continue
+            normalized_key = key.lower()
+            if normalized_key in by_key:
+                continue
+            value = _strip_env_value_quotes(raw_value)
+            if not value:
+                continue
+            by_key[normalized_key] = {
+                "key": key,
+                "value": value,
+                "masked_value": _mask_secret_value(value),
+                "source_file": file_path.name,
+            }
+    if not by_key:
+        for key, raw_value in os.environ.items():
+            if not _ENV_VAR_NAME_PATTERN.match(key):
+                continue
+            if not _ENV_SECRET_KEY_PATTERN.search(key):
+                continue
+            value = _strip_env_value_quotes(str(raw_value or ""))
+            if not value:
+                continue
+            normalized_key = key.lower()
+            if normalized_key in by_key:
+                continue
+            by_key[normalized_key] = {
+                "key": key,
+                "value": value,
+                "masked_value": _mask_secret_value(value),
+                "source_file": "process-env",
+            }
+    return sorted(by_key.values(), key=lambda item: item["key"])
+
+
+def _connection_state_summary(db: Session) -> dict:
+    channels = list_managed_channels(db, include_disconnected=True)
+    channel_items: list[dict[str, str | bool]] = []
+    connected_count = 0
+    for channel in channels:
+        status = str(getattr(channel, "status", "") or "").strip().lower()
+        is_connected = status == "connected"
+        if is_connected:
+            connected_count += 1
+        channel_items.append(
+            {
+                "channel_id": str(getattr(channel, "channel_id", "") or ""),
+                "name": str(getattr(channel, "display_name", "") or getattr(channel, "channel_id", "") or "Channel"),
+                "provider": str(getattr(channel, "provider", "") or "unknown"),
+                "status": status or "unknown",
+                "is_connected": is_connected,
+            }
+        )
+    total = len(channel_items)
+    overall = "connected" if total > 0 and connected_count == total else "disconnected"
+    return {
+        "state": overall,
+        "connected": connected_count,
+        "total": total,
+        "channels": channel_items,
+    }
+
+
 @router.get("", response_model=list[SettingItem])
 def get_settings(db: Session = Depends(get_db)):
     return [
@@ -110,6 +237,44 @@ def get_settings(db: Session = Depends(get_db)):
         )
         for item in list_settings(db)
     ]
+
+
+@router.get("/env-secrets")
+def get_env_secrets(db: Session = Depends(get_db)) -> dict:
+    checked_at = datetime.now(UTC)
+    return {
+        "checked_at": checked_at,
+        "env_dir": str(_resolve_repo_env_dir()),
+        "secrets": [
+            {
+                "key": item["key"],
+                "masked_value": item["masked_value"],
+                "source_file": item["source_file"],
+            }
+            for item in _load_masked_env_secrets()
+        ],
+        "connection": _connection_state_summary(db),
+    }
+
+
+@router.post("/env-secrets/sync")
+def sync_env_secrets(db: Session = Depends(get_db)) -> dict:
+    current_settings = get_settings_map(db)
+    current_setting_keys = {str(key).strip().lower() for key in current_settings.keys()}
+    env_values = _load_masked_env_secrets()
+    payload = {
+        str(item["key"]).strip().lower(): str(item["value"]).strip()
+        for item in env_values
+        if str(item["key"]).strip().lower() in current_setting_keys and str(item["value"]).strip()
+    }
+    if payload:
+        upsert_settings(db, payload)
+    checked_at = datetime.now(UTC)
+    return {
+        "checked_at": checked_at,
+        "updated_count": len(payload),
+        "updated_keys": sorted(payload.keys()),
+    }
 
 
 @router.put("", response_model=list[SettingItem])

@@ -279,6 +279,27 @@ class Article(TimestampMixin, Base):
     quality_status: Mapped[str | None] = mapped_column(sa.String(50), nullable=True)
     quality_rewrite_attempts: Mapped[int] = mapped_column(sa.Integer, default=0, nullable=False)
     quality_last_audited_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    travel_sync_group_key: Mapped[str | None] = mapped_column(sa.String(120), nullable=True, index=True)
+    travel_sync_role: Mapped[str | None] = mapped_column(sa.String(30), nullable=True, index=True)
+    travel_sync_source_article_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("articles.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    travel_sync_es_article_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("articles.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    travel_sync_ja_article_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("articles.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    travel_sync_es_status: Mapped[str | None] = mapped_column(sa.String(30), nullable=True, index=True)
+    travel_sync_ja_status: Mapped[str | None] = mapped_column(sa.String(30), nullable=True, index=True)
+    travel_sync_last_checked_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
+    travel_all_languages_ready: Mapped[bool] = mapped_column(sa.Boolean, default=False, nullable=False)
 
     job: Mapped[Job] = relationship(back_populates="article")
     blog: Mapped[Blog] = relationship(back_populates="articles")
@@ -472,6 +493,7 @@ class SyncedBloggerPost(TimestampMixin, Base):
     live_other_image_count: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
     live_cover_present: Mapped[bool | None] = mapped_column(sa.Boolean, nullable=True)
     live_inline_present: Mapped[bool | None] = mapped_column(sa.Boolean, nullable=True)
+    travel_image_migration_status: Mapped[str] = mapped_column(sa.String(32), nullable=False, default="pending")
     live_image_issue: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
     live_image_audited_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
     synced_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now(), index=True)
@@ -525,6 +547,7 @@ class SyncedCloudflarePost(TimestampMixin, Base):
     live_webp_count: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
     live_png_count: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
     live_other_image_count: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    image_health_status: Mapped[str | None] = mapped_column(sa.String(30), nullable=True, index=True)
     live_image_issue: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
     live_image_audited_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
     index_status: Mapped[str | None] = mapped_column(sa.String(50), nullable=True)

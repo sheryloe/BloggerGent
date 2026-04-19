@@ -419,6 +419,7 @@ def list_synced_cloudflare_posts(db: Session, *, include_non_published: bool = F
                 "live_webp_count": row.live_webp_count,
                 "live_png_count": row.live_png_count,
                 "live_other_image_count": row.live_other_image_count,
+                "image_health_status": row.image_health_status,
                 "live_image_issue": row.live_image_issue,
                 "live_image_audited_at": row.live_image_audited_at.isoformat() if row.live_image_audited_at else None,
                 "index_status": row.index_status or "unknown",

@@ -1057,6 +1057,38 @@ class CloudflareR2MigrationRead(BaseModel):
     items: list[CloudflareR2MigrationItemRead] = Field(default_factory=list)
 
 
+class CloudflareAssetBootstrapRequest(BaseModel):
+    channel_id: str = "cloudflare:dongriarchive"
+    bucket_name: str = "dongriarchive-cloudflare"
+    create_missing_categories: bool = True
+    backfill_channel_metadata: bool = True
+    verify_bucket: bool = True
+    create_if_missing: bool = False
+    verify_transport: str = Field(default="direct_bucket", pattern="^(direct_bucket|integration_proxy)$")
+
+
+class CloudflareAssetBootstrapRead(BaseModel):
+    status: str
+    channel_id: str
+    generated_at: str
+    verify_transport: str = "direct_bucket"
+    bucket_name: str
+    bucket_exists: bool = False
+    bucket_created: bool = False
+    bucket_verified: bool = False
+    transport_verified: bool = False
+    created_categories: list[str] = Field(default_factory=list)
+    backfilled_metadata: bool = False
+    metadata_updated: bool = False
+    local_asset_root: str = ""
+    public_base_url: str = ""
+    sample_uploaded_keys: list[str] = Field(default_factory=list)
+    sample_public_urls: list[str] = Field(default_factory=list)
+    report_path: str | None = None
+    manifest_path: str | None = None
+    csv_path: str | None = None
+
+
 class CloudflareAssetRebuildRequest(BaseModel):
     mode: str = Field(default="dry_run", pattern="^(dry_run|execute)$")
     channel_id: str = "cloudflare:dongriarchive"
@@ -1064,6 +1096,16 @@ class CloudflareAssetRebuildRequest(BaseModel):
     limit: int | None = Field(default=None, ge=1, le=1000)
     purge_target: bool = True
     use_fallback_heuristic: bool = True
+    image_match_strategy: str = Field(default="slug_similarity", pattern="^(slug_similarity)$")
+    ignore_filename_patterns: list[str] = Field(default_factory=lambda: ["cover"])
+    allow_thumbnail_fallback: bool = False
+    bucket_override: str | None = "dongriarchive-cloudflare"
+    source_scope: str = Field(default="cloudflare_backup_tree", pattern="^(cloudflare_only_root_pool|cloudflare_backup_tree)$")
+    public_url_strategy: str = Field(default="direct_public", pattern="^(configured|direct_public|integration_assets)$")
+    update_live_posts: bool = True
+    allow_remote_thumbnail_fetch: bool = False
+    use_legacy_evidence: bool = True
+    legacy_evidence_can_auto_accept: bool = False
 
 
 class CloudflareAssetRebuildItemRead(BaseModel):
@@ -1075,6 +1117,11 @@ class CloudflareAssetRebuildItemRead(BaseModel):
     match_source: str | None = None
     confidence: float | None = None
     legacy_url_scheme: str | None = None
+    url_asset_slug: str | None = None
+    legacy_object_slug: str | None = None
+    manifest_category_hit: bool = False
+    evidence_score: float | None = None
+    evidence_sources: list[str] = Field(default_factory=list)
     resolved_local_source: str | None = None
     resolved_target_path: str | None = None
     resolved_object_key: str | None = None
@@ -1088,15 +1135,47 @@ class CloudflareAssetRebuildRead(BaseModel):
     mode: str
     channel_id: str
     generated_at: str
+    db_posts: int = 0
     post_count: int = 0
+    matched: int = 0
     candidate_count: int = 0
     matched_count: int = 0
     heuristic_matched_count: int = 0
+    uploaded: int = 0
+    uploaded_count: int = 0
     unresolved_count: int = 0
     updated_count: int = 0
     failed_count: int = 0
     purged_categories: list[str] = Field(default_factory=list)
     legacy_scheme_breakdown: dict[str, int] = Field(default_factory=dict)
+    evidence_breakdown: dict[str, int] = Field(default_factory=dict)
+    url_asset_exact_count: int = 0
+    url_asset_prefix_count: int = 0
+    manifest_category_hit_count: int = 0
+    image_match_strategy: str = "slug_similarity"
+    ignore_filename_patterns: list[str] = Field(default_factory=list)
+    allow_thumbnail_fallback: bool = False
+    bucket_name: str | None = None
+    public_url_strategy: str = "direct_public"
+    bucket_verified: bool | None = None
+    sample_uploaded_keys: list[str] = Field(default_factory=list)
+    source_scope: str = "cloudflare_backup_tree"
+    update_live_posts: bool = True
+    allow_remote_thumbnail_fetch: bool = False
+    remote_fetch_enabled: bool = False
+    public_url_verified_count: int = 0
+    remote_fetch_attempted_count: int = 0
+    remote_fetch_success_count: int = 0
+    remote_fetch_preflight_count: int = 0
+    remote_fetch_preflight_success_count: int = 0
+    remote_fetch_status_breakdown: dict[str, int] = Field(default_factory=dict)
+    use_legacy_evidence: bool = True
+    legacy_evidence_can_auto_accept: bool = False
+    direct_public_url_verified_count: int = 0
+    matched_by_exact_slug: int = 0
+    matched_by_slug_family: int = 0
+    matched_by_similarity_with_evidence: int = 0
+    created_categories: list[str] = Field(default_factory=list)
     sync_result: dict | None = None
     report_path: str | None = None
     manifest_path: str | None = None
@@ -1111,6 +1190,52 @@ class CloudflareAssetRebuildReportRead(BaseModel):
     report_path: str = ""
     manifest_path: str = ""
     report: dict | None = None
+
+
+class CloudflarePostDedupeRequest(BaseModel):
+    mode: str = Field(default="dry_run", pattern="^(dry_run|execute)$")
+    channel_id: str = "cloudflare:dongriarchive"
+    delete_scope: str = Field(default="remote_and_synced", pattern="^(remote_and_synced|synced_only)$")
+    keep_rule: str = Field(default="latest_published", pattern="^(latest_published)$")
+
+
+class CloudflarePostDedupeItemRead(BaseModel):
+    action: str
+    id: int | None = None
+    remote_post_id: str | None = None
+    slug: str | None = None
+    title: str | None = None
+    category_slug: str | None = None
+    status: str | None = None
+    url: str | None = None
+    published_at: str | datetime | None = None
+    normalized_title: str | None = None
+    keeper_remote_post_id: str | None = None
+    error: str | None = None
+
+
+class CloudflarePostDedupeRead(BaseModel):
+    status: str
+    mode: str
+    channel_id: str
+    delete_scope: str
+    keep_rule: str
+    generated_at: str
+    initial_sync_result: dict | None = None
+    final_sync_result: dict | None = None
+    total_live_count: int = 0
+    duplicate_group_count: int = 0
+    keep_count: int = 0
+    delete_candidate_count: int = 0
+    deleted_count: int = 0
+    delete_failed_count: int = 0
+    remaining_live_count: int = 0
+    report_path: str | None = None
+    manifest_path: str | None = None
+    csv_path: str | None = None
+    keep_items: list[CloudflarePostDedupeItemRead] = Field(default_factory=list)
+    delete_candidates: list[CloudflarePostDedupeItemRead] = Field(default_factory=list)
+    failed_items: list[CloudflarePostDedupeItemRead] = Field(default_factory=list)
 
 
 class BloggerEditorialLabelBackfillRequest(BaseModel):

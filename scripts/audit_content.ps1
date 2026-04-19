@@ -1,7 +1,7 @@
 ﻿param(
   [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,
-  [string]$HtmlDir = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..')).Path 'storage/html'),
-  [string]$OutputDir = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..')).Path 'storage/reports')
+  [string]$HtmlDir = 'D:\Donggri_Runtime\BloggerGent\storage\_common\analysis\html',
+  [string]$OutputDir = 'D:\Donggri_Runtime\BloggerGent\storage\_common\analysis\content-audit'
 )
 
 Set-StrictMode -Version Latest

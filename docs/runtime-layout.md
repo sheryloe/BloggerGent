@@ -1,49 +1,41 @@
-# BloggerGent Runtime Layout (Antigravity 기준)
+# BloggerGent Runtime Layout (Antigravity)
 
-## 고정 경로
-- 소스 코드: `D:\Donggri_Platform\BloggerGent`
-- 런타임 루트: `D:\Donggri_Runtime\BloggerGent`
-- 런타임 데이터:
+## Fixed paths
+- Source code root: `D:\Donggri_Platform\BloggerGent`
+- Runtime root: `D:\Donggri_Runtime\BloggerGent`
+- Runtime data:
   - `D:\Donggri_Runtime\BloggerGent\app`
   - `D:\Donggri_Runtime\BloggerGent\backup`
   - `D:\Donggri_Runtime\BloggerGent\storage`
+  - `D:\Donggri_Runtime\BloggerGent\db\snapshots`
   - `D:\Donggri_Runtime\BloggerGent\tools`
-  - `D:\Donggri_Runtime\BloggerGent\tools\reports\repo-storage-reports`
+  - `D:\Donggri_Runtime\BloggerGent\env\runtime.settings.env`
 
-## 운영 규칙
-- 레포(`D:\Donggri_Platform\BloggerGent`)는 소스/설정만 유지한다.
-- 실행 산출물, 캐시, 1회성 검증 파일은 runtime 경로에만 둔다.
-- `storage/reports`는 레포에 상주하지 않고 runtime으로만 저장한다.
-- 레포 루트에 아래 항목이 재생성되면 즉시 runtime으로 이동/정리한다:
-  - `.playwright-cli`
-  - `output`
-  - `TEST`
-  - `backup`
-  - `apps/storage`
-  - `storage/reports`
+## Operational contract
+- Keep only reproducible source/config files in repo.
+- Keep runtime artifacts, reports, caches, and one-off outputs in runtime root.
+- Repo-local generated report folders must not stay in repo.
+- Lighthouse reports must use `D:\Donggri_Runtime\BloggerGent\storage\_common\analysis\lighthouse`.
+- Travel reports/logs must use `D:\Donggri_Runtime\BloggerGent\storage\travel`.
+- SQL full dump snapshots must use `D:\Donggri_Runtime\BloggerGent\db\snapshots`.
+- `env/runtime.settings.env` is an operational settings file and must not be deleted by one-off cleanup.
+- Docker live mount source for `/app/storage` is `D:\Donggri_Runtime\BloggerGent\storage`.
+- Do not use repo-local `./storage` as the live default mount.
 
-## 점검 명령 (PowerShell)
+## Recovery commands (PowerShell)
 ```powershell
 Set-Location D:\Donggri_Platform\BloggerGent
 
-$targets = @(
-  '.playwright-cli',
-  'output',
-  'TEST',
-  'backup',
-  'apps/storage',
-  'storage/reports'
-)
+# 1) Rebuild runtime.settings.env from DB settings
+powershell -ExecutionPolicy Bypass -File scripts/maintenance/sync_settings_env.ps1 -OutPath env/runtime.settings.env
 
-foreach ($t in $targets) {
-  if (Test-Path -LiteralPath (Join-Path $PWD $t)) {
-    Write-Host "[FOUND] $t"
-  }
-}
-
-git status --short
+# 2) Runtime backup copy
+New-Item -ItemType Directory -Force -Path D:\Donggri_Runtime\BloggerGent\env | Out-Null
+Copy-Item -LiteralPath D:\Donggri_Platform\BloggerGent\env\runtime.settings.env -Destination D:\Donggri_Runtime\BloggerGent\env\runtime.settings.env -Force
 ```
 
-## 이관/정리 리포트
-- `D:\Donggri_Runtime\BloggerGent\tools\reports\runtime-rehome-report-20260417.json`
-- `D:\Donggri_Runtime\BloggerGent\tools\reports\oneoff-cleanup-preview-20260417.json`
+## One-off cleanup rule
+- Use `scripts/maintenance/cleanup_oneoff_artifacts.ps1` for one-off cleanup.
+- `env` deletion requires explicit opt-in:
+  - `-DeleteEnv -AllowEnvDelete`
+- Without `-AllowEnvDelete`, env deletion is blocked and logged in `protected_skipped`.

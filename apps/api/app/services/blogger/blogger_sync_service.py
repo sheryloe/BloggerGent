@@ -14,6 +14,8 @@ from sqlalchemy.orm import Session
 from app.models.entities import Blog, SyncedBloggerPost
 from app.services.blogger.blogger_live_audit_service import fetch_and_audit_blogger_post
 from app.services.blogger.blogger_oauth_service import BloggerOAuthError, authorized_google_request
+from app.services.content.travel_blog_policy import get_travel_blog_policy
+from app.services.content.travel_translation_state_service import refresh_travel_translation_state
 from app.services.content.topic_guard_service import rebuild_topic_memories_for_blog
 
 BLOGGER_POSTS_URL = "https://www.googleapis.com/blogger/v3/blogs/{blog_id}/posts"
@@ -28,6 +30,7 @@ HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
 WHITESPACE_PATTERN = re.compile(r"\s+")
 PUBLIC_FEED_POST_ID_PATTERN = re.compile(r"post-(\d+)")
 MAX_EXCERPT_LENGTH = 480
+TRAVEL_DUPLICATE_ASSETS_RE = re.compile(r"(?P<prefix>/assets)/(?:assets/)+", re.IGNORECASE)
 
 
 def _parse_google_datetime(value: str | None) -> datetime | None:
@@ -107,6 +110,33 @@ def _extract_excerpt_text(content_html: str) -> str:
         return _plain_text(paragraphs[0])
 
     return _plain_text(content_html)
+
+
+def _normalize_travel_asset_path_text(value: str | None) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+    normalized = text
+    while True:
+        updated = TRAVEL_DUPLICATE_ASSETS_RE.sub(r"\g<prefix>/", normalized)
+        if updated == normalized:
+            break
+        normalized = updated
+    return normalized
+
+
+def _apply_travel_sync_asset_normalization(blog: Blog, payload: dict[str, Any]) -> dict[str, Any]:
+    if get_travel_blog_policy(blog=blog) is None:
+        return payload
+
+    normalized = dict(payload)
+    content_html = _normalize_travel_asset_path_text(normalized.get("content_html"))
+    thumbnail_url = _normalize_travel_asset_path_text(normalized.get("thumbnail_url"))
+    if content_html and not thumbnail_url:
+        thumbnail_url = _extract_thumbnail_url(content_html)
+    normalized["content_html"] = content_html
+    normalized["thumbnail_url"] = thumbnail_url or None
+    return normalized
 
 
 def _normalize_remote_post(item: dict) -> dict:
@@ -309,6 +339,7 @@ def sync_blogger_posts_for_blog(db: Session, blog: Blog) -> dict:
         now = datetime.now(timezone.utc)
         with httpx.Client(follow_redirects=True, timeout=15.0) as http_client:
             for payload in remote_posts:
+                payload = _apply_travel_sync_asset_normalization(blog, payload)
                 remote_post_id = payload["remote_post_id"]
                 remote_ids.append(remote_post_id)
                 post = existing_by_remote_id.get(remote_post_id)
@@ -356,6 +387,12 @@ def sync_blogger_posts_for_blog(db: Session, blog: Blog) -> dict:
         from app.services.ops.analytics_service import sync_synced_post_facts_for_blog
 
         sync_synced_post_facts_for_blog(db, blog.id)
+        if get_travel_blog_policy(blog=blog) is not None:
+            refresh_travel_translation_state(
+                db,
+                blog_ids=(34, 36, 37),
+                write_report=False,
+            )
         return {
             "blog_id": blog.id,
             "count": len(remote_posts),

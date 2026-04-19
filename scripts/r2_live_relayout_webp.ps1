@@ -29,7 +29,7 @@ Set-Location $repoRoot
 New-Item -ItemType Directory -Path "TEST/logs" -Force | Out-Null
 $ts = Get-Date -Format "yyyyMMdd-HHmmss"
 $logPath = "TEST/logs/ia-r2-live-relayout-$ts.log"
-$reportPath = "/app/storage/reports/ia-r2-live-relayout-$ts.json"
+$reportPath = "/app/storage/_common/analysis/ia-r2-live-relayout-$ts.json"
 
 "[$(Get-Date -Format o)] mode=$mode source=$Source canary_count=$CanaryCount blog_ids=$($BlogId -join ',') blog_slugs=$($BlogSlug -join ',')" | Tee-Object -FilePath $logPath -Append | Out-Null
 

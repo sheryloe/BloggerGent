@@ -32,13 +32,13 @@ def _normalize_profile_keys(profile_keys: list[str] | None) -> list[str]:
 
 
 def _reports_dir() -> Path:
-    path = Path(settings.storage_root) / "reports"
+    path = settings.storage_common_analysis_dir / "blogger"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def _relative_report_path(file_name: str) -> str:
-    return f"storage/reports/{file_name}"
+    return str(_reports_dir() / file_name)
 
 
 def _write_report(*, execution_id: str, payload: dict[str, Any]) -> str:

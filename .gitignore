@@ -15,10 +15,9 @@ __pycache__/
 *.pfx
 secrets/
 secret/
-storage/images/*
-storage/html/*
-!storage/images/.gitkeep
-!storage/html/.gitkeep
+storage/*
+!storage/.gitkeep
+!storage/README.md
 
 # local build artifacts / caches
 apps/web/out/
@@ -41,17 +40,7 @@ plugins/
 docs/assets/images/
 docs/reports/
 
-# local storage snapshots
-storage/reports/
-storage/backups/
-storage/retrofit/
-storage/tmp/
-storage/rewrite-packages/
-storage/scheduled-post-batches/
-storage/training/
-storage/manual-mystery-repair/
-storage/mystery-refine-backups/
-storage/patch-packages/
+# repo-local storage is placeholder-only; runtime data belongs under D:\Donggri_Runtime\BloggerGent.
 
 # one-off local scripts / dumps
 scripts/fix_cloudflare_ctr_images.py
@@ -64,10 +53,9 @@ scripts/fix_cloudflare_ctr_images.py
 /rss.xml
 
 # Codex optimization gate (2026-04-10)
-storage/playwright-browser/
-apps/api/storage/reports/
-apps/api/storage/html/*
-apps/api/storage/reports/*
+apps/api/storage/*
+!apps/api/storage/.gitkeep
+!apps/api/storage/README.md
 apps/storage/
 
 # refactoring workspace artifacts

@@ -173,7 +173,62 @@ def test_rebuild_cloudflare_assets_leaves_low_confidence_fallback_unresolved(db:
     assert result["unresolved"][0]["reason"] in {"low_confidence", "ambiguous_match"}
 
 
-def test_rebuild_cloudflare_assets_execute_writes_slug_webp_and_updates_cover(db: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rebuild_cloudflare_assets_reports_legacy_evidence_without_auto_accept(db: Session, tmp_path: Path) -> None:
+    storage_root = tmp_path / "storage" / "images"
+    local_root = storage_root / "Cloudflare"
+    source_path = storage_root / "legacy-asset.png"
+    _write_image(source_path)
+    manifest_path = local_root / "_manifests" / "classification.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "rows": [
+                    {
+                        "source": str(source_path),
+                        "target_category": "여행과-기록",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    channel = _create_channel(db, local_root=local_root)
+    _create_post(
+        db,
+        channel=channel,
+        slug="different-post",
+        category_slug="여행과-기록",
+        thumbnail_url="https://api.dongriarchive.com/assets/assets/media/cloudflare/dongri-archive/yeohaenggwa-girog/2026/04/legacy-asset/cover-abc123.webp",
+    )
+
+    result = rebuild_service.rebuild_cloudflare_assets(
+        db,
+        mode="dry_run",
+        use_legacy_evidence=True,
+        legacy_evidence_can_auto_accept=False,
+    )
+
+    assert result["matched_count"] == 0
+    assert result["unresolved_count"] == 1
+    assert result["url_asset_exact_count"] == 1
+    assert result["manifest_category_hit_count"] == 1
+    unresolved = result["unresolved"][0]
+    assert unresolved["url_asset_slug"] == "legacy-asset"
+    assert unresolved["legacy_object_slug"] == "legacy-asset"
+    assert unresolved["manifest_category_hit"] is True
+    assert unresolved["evidence_score"] > 0
+    assert "url_asset_exact" in unresolved["evidence_sources"]
+    assert "manifest_category_hit" in unresolved["evidence_sources"]
+
+
+def test_rebuild_cloudflare_assets_execute_writes_slug_webp_without_live_cutover(
+    db: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     storage_root = tmp_path / "storage" / "images"
     local_root = storage_root / "Cloudflare"
     source_path = storage_root / "dev-post.png"
@@ -198,17 +253,189 @@ def test_rebuild_cloudflare_assets_execute_writes_slug_webp_and_updates_cover(db
     )
     captured: dict[str, object] = {}
 
-    def _fake_upload(_db: Session, *, object_key: str | None = None, filename: str, content: bytes):
+    def _fake_upload(
+        _db: Session,
+        *,
+        object_key: str | None = None,
+        filename: str,
+        content: bytes,
+        bucket_override: str | None = None,
+        public_base_url_override: str | None = None,
+        prefix_override: str | None = None,
+        force_integration_proxy: bool = False,
+    ):
         captured["object_key"] = object_key or ""
         captured["filename"] = filename
         captured["content_size"] = len(content)
+        captured["bucket_override"] = bucket_override
+        captured["force_integration_proxy"] = force_integration_proxy
         return (
             "https://img.example.com/assets/media/cloudflare/dongri-archive/gaebalgwa-peurogeuraeming/2026/04/dev-post/dev-post.webp",
-            {"object_key": object_key},
+            {"object_key": object_key, "bucket": bucket_override or "dongriarchive-cloudflare"},
             {"cloudflare": {"original_url": "https://img.example.com/assets/media/cloudflare/dongri-archive/gaebalgwa-peurogeuraeming/2026/04/dev-post/dev-post.webp"}},
         )
 
     monkeypatch.setattr(rebuild_service, "upload_binary_to_cloudflare_r2", _fake_upload)
+    monkeypatch.setattr(
+        rebuild_service,
+        "ensure_cloudflare_r2_bucket",
+        lambda *_args, **_kwargs: {
+            "bucket_name": "dongriarchive-cloudflare",
+            "bucket_exists": True,
+            "bucket_created": False,
+            "bucket_verified": False,
+            "sample_uploaded_keys": [],
+        },
+    )
+    monkeypatch.setattr(rebuild_service, "_resolve_public_base_url_for_strategy", lambda *_args, **_kwargs: "https://pub.example.dev")
+    monkeypatch.setattr(rebuild_service, "_verify_public_image_url", lambda *_args, **_kwargs: (True, 200))
+    monkeypatch.setattr(
+        rebuild_service,
+        "_update_live_post_cover",
+        lambda *_args, **_kwargs: pytest.fail("_update_live_post_cover should not run when update_live_posts=False"),
+    )
+    monkeypatch.setattr(rebuild_service, "sync_cloudflare_posts", lambda *_args, **_kwargs: pytest.fail("sync_cloudflare_posts should not run"))
+
+    result = rebuild_service.rebuild_cloudflare_assets(
+        db,
+        mode="execute",
+        purge_target=True,
+        bucket_override="dongriarchive-cloudflare",
+        update_live_posts=False,
+    )
+
+    target_path = local_root / "개발과-프로그래밍" / "dev-post.webp"
+    assert result["uploaded_count"] == 1
+    assert result["updated_count"] == 0
+    assert result["failed_count"] == 0
+    assert target_path.exists()
+    assert not stale_path.exists()
+    assert captured["object_key"] == expected_object_key
+    assert captured["bucket_override"] == "dongriarchive-cloudflare"
+    assert captured["force_integration_proxy"] is False
+    assert result["bucket_name"] == "dongriarchive-cloudflare"
+    assert result["bucket_verified"] is True
+    assert result["public_url_strategy"] == "direct_public"
+    assert result["public_url_verified_count"] == 1
+    assert result["direct_public_url_verified_count"] == 1
+    assert result["sample_uploaded_keys"] == [expected_object_key]
+    assert row.thumbnail_url.endswith("cover-abc123.webp")
+    assert result["items"][0]["resolved_public_url"].endswith("/dev-post/dev-post.webp")
+    assert result["items"][0]["status"] == "uploaded"
+
+
+def test_rebuild_cloudflare_assets_remote_fetch_gate_disables_on_500_preflight(
+    db: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeResponse:
+        def __init__(self, status_code: int) -> None:
+            self.status_code = status_code
+
+    storage_root = tmp_path / "storage" / "images"
+    local_root = storage_root / "Cloudflare"
+    source_path = storage_root / "travel-post.png"
+    _write_image(source_path)
+
+    channel = _create_channel(db, local_root=local_root)
+    _create_post(
+        db,
+        channel=channel,
+        slug="travel-post",
+        category_slug="여행과-기록",
+        thumbnail_url="https://api.dongriarchive.com/assets/media/posts/2026/04/travel-post/travel-post.webp",
+    )
+
+    monkeypatch.setattr(rebuild_service.httpx, "head", lambda *_args, **_kwargs: _FakeResponse(500))
+    monkeypatch.setattr(rebuild_service.httpx, "get", lambda *_args, **_kwargs: _FakeResponse(500))
+    monkeypatch.setattr(
+        rebuild_service,
+        "ensure_cloudflare_r2_bucket",
+        lambda *_args, **_kwargs: {
+            "bucket_name": "dongriarchive-cloudflare",
+            "bucket_exists": True,
+            "bucket_created": False,
+            "bucket_verified": False,
+            "sample_uploaded_keys": [],
+        },
+    )
+    monkeypatch.setattr(rebuild_service, "_resolve_public_base_url_for_strategy", lambda *_args, **_kwargs: "https://pub.example.dev")
+    monkeypatch.setattr(
+        rebuild_service,
+        "upload_binary_to_cloudflare_r2",
+        lambda *_args, **_kwargs: (
+            "https://img.example.com/assets/media/cloudflare/dongri-archive/yeohaenggwa-girog/2026/04/travel-post/travel-post.webp",
+            {"object_key": _kwargs["object_key"], "bucket": "dongriarchive-cloudflare"},
+            {"cloudflare": {"original_url": "https://img.example.com/assets/media/cloudflare/dongri-archive/yeohaenggwa-girog/2026/04/travel-post/travel-post.webp"}},
+        ),
+    )
+    monkeypatch.setattr(rebuild_service, "_verify_public_image_url", lambda *_args, **_kwargs: (True, 200))
+    monkeypatch.setattr(
+        rebuild_service,
+        "_update_live_post_cover",
+        lambda *_args, **_kwargs: pytest.fail("_update_live_post_cover should not run when update_live_posts=False"),
+    )
+
+    result = rebuild_service.rebuild_cloudflare_assets(
+        db,
+        mode="execute",
+        bucket_override="dongriarchive-cloudflare",
+        allow_remote_thumbnail_fetch=True,
+        update_live_posts=False,
+    )
+
+    assert result["uploaded_count"] == 1
+    assert result["remote_fetch_enabled"] is False
+    assert result["remote_fetch_attempted_count"] == 0
+    assert result["remote_fetch_success_count"] == 0
+    assert result["remote_fetch_preflight_count"] == 1
+    assert result["remote_fetch_preflight_success_count"] == 0
+    assert result["remote_fetch_status_breakdown"] == {"500": 1}
+
+
+def test_rebuild_cloudflare_assets_execute_can_update_live_posts_when_enabled(
+    db: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage_root = tmp_path / "storage" / "images"
+    local_root = storage_root / "Cloudflare"
+    source_path = storage_root / "dev-post.png"
+    _write_image(source_path)
+
+    channel = _create_channel(db, local_root=local_root)
+    row = _create_post(
+        db,
+        channel=channel,
+        slug="dev-post",
+        category_slug="개발과-프로그래밍",
+        thumbnail_url="https://api.dongriarchive.com/assets/assets/media/cloudflare/dongri-archive/gaebalgwa-peurogeuraeming/2026/04/dev-post/cover-abc123.webp",
+    )
+    captured: dict[str, object] = {}
+
+    def _fake_upload(*_args, **kwargs):
+        captured["upload_kwargs"] = kwargs
+        return (
+            "https://pub.example.dev/assets/media/cloudflare/dongri-archive/gaebalgwa-peurogeuraeming/2026/04/dev-post/dev-post.webp",
+            {"object_key": kwargs["object_key"], "bucket": "dongriarchive-cloudflare"},
+            {"cloudflare": {"original_url": "https://pub.example.dev/assets/media/cloudflare/dongri-archive/gaebalgwa-peurogeuraeming/2026/04/dev-post/dev-post.webp"}},
+        )
+
+    monkeypatch.setattr(rebuild_service, "upload_binary_to_cloudflare_r2", _fake_upload)
+    monkeypatch.setattr(
+        rebuild_service,
+        "ensure_cloudflare_r2_bucket",
+        lambda *_args, **_kwargs: {
+            "bucket_name": "dongriarchive-cloudflare",
+            "bucket_exists": True,
+            "bucket_created": False,
+            "bucket_verified": False,
+            "sample_uploaded_keys": [],
+        },
+    )
+    monkeypatch.setattr(rebuild_service, "_resolve_public_base_url_for_strategy", lambda *_args, **_kwargs: "https://pub.example.dev")
+    monkeypatch.setattr(rebuild_service, "_verify_public_image_url", lambda *_args, **_kwargs: (True, 200))
     monkeypatch.setattr(
         rebuild_service,
         "_fetch_integration_post_detail",
@@ -223,6 +450,7 @@ def test_rebuild_cloudflare_assets_execute_writes_slug_webp_and_updates_cover(db
             "tagNames": ["개발과-프로그래밍"],
         },
     )
+
     def _fake_integration_request(*_args, **kwargs):
         captured["payload"] = kwargs["json_payload"]
         return {"data": kwargs["json_payload"]}
@@ -231,13 +459,361 @@ def test_rebuild_cloudflare_assets_execute_writes_slug_webp_and_updates_cover(db
     monkeypatch.setattr(rebuild_service, "_integration_data_or_raise", lambda payload: payload["data"])
     monkeypatch.setattr(rebuild_service, "sync_cloudflare_posts", lambda *_args, **_kwargs: {"status": "ok", "count": 1})
 
-    result = rebuild_service.rebuild_cloudflare_assets(db, mode="execute", purge_target=True)
+    result = rebuild_service.rebuild_cloudflare_assets(
+        db,
+        mode="execute",
+        update_live_posts=True,
+        bucket_override="dongriarchive-cloudflare",
+    )
 
-    target_path = local_root / "개발과-프로그래밍" / "dev-post.webp"
+    assert result["uploaded_count"] == 1
     assert result["updated_count"] == 1
-    assert result["failed_count"] == 0
-    assert target_path.exists()
-    assert not stale_path.exists()
-    assert captured["object_key"] == expected_object_key
-    assert result["items"][0]["resolved_public_url"].endswith("/dev-post/dev-post.webp")
     assert "<img" not in str(captured["payload"]["content"])
+    assert row.thumbnail_url.endswith("/dev-post/dev-post.webp")
+    assert captured["upload_kwargs"]["public_base_url_override"] == "https://pub.example.dev"
+    assert captured["upload_kwargs"]["force_integration_proxy"] is False
+    assert result["public_url_verified_count"] == 1
+    assert result["direct_public_url_verified_count"] == 1
+    assert result["matched_by_exact_slug"] == 1
+
+
+def test_rebuild_cloudflare_assets_integration_assets_strategy_forces_proxy_and_updates_live_posts(
+    db: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage_root = tmp_path / "storage" / "images"
+    local_root = storage_root / "Cloudflare"
+    source_path = storage_root / "travel-post.png"
+    _write_image(source_path)
+
+    channel = _create_channel(db, local_root=local_root)
+    row = _create_post(
+        db,
+        channel=channel,
+        slug="travel-post",
+        category_slug="여행과-기록",
+        thumbnail_url="https://api.dongriarchive.com/assets/media/posts/2026/04/travel-post/travel-post.webp",
+    )
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        rebuild_service,
+        "ensure_cloudflare_r2_bucket",
+        lambda *_args, **_kwargs: {
+            "bucket_name": "dongriarchive-cloudflare",
+            "bucket_exists": True,
+            "bucket_created": False,
+            "bucket_verified": False,
+            "sample_uploaded_keys": [],
+        },
+    )
+    monkeypatch.setattr(
+        rebuild_service,
+        "get_settings_map",
+        lambda _db: {
+            "cloudflare_blog_api_base_url": "https://api.dongriarchive.com",
+        },
+    )
+
+    def _fake_upload(*_args, **kwargs):
+        captured["upload_kwargs"] = kwargs
+        return (
+            "https://api.dongriarchive.com/assets/assets/media/cloudflare/dongri-archive/yeohaenggwa-girog/2026/04/travel-post/travel-post.webp",
+            {
+                "object_key": kwargs["object_key"],
+                "bucket": "dongriarchive-cloudflare",
+                "public_base_url": "https://api.dongriarchive.com/assets",
+                "upload_path": "integration_forced",
+            },
+            {"cloudflare": {"original_url": "https://api.dongriarchive.com/assets/assets/media/cloudflare/dongri-archive/yeohaenggwa-girog/2026/04/travel-post/travel-post.webp"}},
+        )
+
+    monkeypatch.setattr(rebuild_service, "upload_binary_to_cloudflare_r2", _fake_upload)
+    monkeypatch.setattr(rebuild_service, "_verify_public_image_url", lambda *_args, **_kwargs: (True, 200))
+    monkeypatch.setattr(
+        rebuild_service,
+        "_fetch_integration_post_detail",
+        lambda *_args, **_kwargs: {
+            "title": "Travel Post",
+            "contentMarkdown": "# Travel Post\n\n<img src=\"https://img.example.com/inline.webp\" alt=\"inline\" />",
+            "excerpt": "excerpt",
+            "seoTitle": "Travel Post",
+            "seoDescription": "excerpt",
+            "status": "published",
+            "category": {"slug": "여행과-기록"},
+            "tagNames": ["여행과-기록"],
+        },
+    )
+    monkeypatch.setattr(
+        rebuild_service,
+        "_integration_request",
+        lambda *_args, **kwargs: {"data": kwargs["json_payload"]},
+    )
+    monkeypatch.setattr(rebuild_service, "_integration_data_or_raise", lambda payload: payload["data"])
+    monkeypatch.setattr(rebuild_service, "sync_cloudflare_posts", lambda *_args, **_kwargs: {"status": "ok", "count": 1})
+
+    result = rebuild_service.rebuild_cloudflare_assets(
+        db,
+        mode="execute",
+        bucket_override="dongriarchive-cloudflare",
+        public_url_strategy="integration_assets",
+        update_live_posts=True,
+    )
+
+    assert result["uploaded_count"] == 1
+    assert result["updated_count"] == 1
+    assert result["public_url_strategy"] == "integration_assets"
+    assert result["public_url_verified_count"] == 1
+    assert captured["upload_kwargs"]["force_integration_proxy"] is True
+    assert captured["upload_kwargs"]["bucket_override"] is None
+    assert captured["upload_kwargs"]["public_base_url_override"] == "https://api.dongriarchive.com/assets"
+    assert row.thumbnail_url == "https://api.dongriarchive.com/assets/assets/media/cloudflare/dongri-archive/yeohaenggwa-girog/2026/04/travel-post/travel-post.webp"
+    assert result["items"][0]["resolved_public_url"] == row.thumbnail_url
+
+
+def test_rebuild_cloudflare_assets_uses_backup_tree_and_excludes_non_cloudflare_dirs(db: Session, tmp_path: Path) -> None:
+    storage_root = tmp_path / "storage" / "images"
+    local_root = storage_root / "Cloudflare"
+    _write_image(storage_root / "travel-post.png")
+    _write_image((storage_root / "Travel") / "travel-post-travel.png")
+    _write_image((storage_root / "mystery") / "travel-post-mystery.png")
+    _write_image((storage_root / "probe") / "travel-post-probe.png")
+    _write_image((storage_root / "Cloudflare" / "여행과-기록") / "travel-post-family-hero.png")
+    _write_image((storage_root / "Cloudflare" / "_manifests" / "manifest-ignored.png"))
+    _write_image((storage_root / "Cloudflare" / "여행과-기록") / "cover-ignored.png")
+
+    channel = _create_channel(db, local_root=local_root)
+    policy = get_cloudflare_asset_policy(channel)
+
+    candidates = rebuild_service._inventory_candidates(
+        policy,
+        ignore_filename_patterns=["cover"],
+        source_scope="cloudflare_backup_tree",
+    )
+
+    candidate_paths = {Path(item["path"]).as_posix() for item in candidates}
+    assert any(path.endswith("/travel-post.png") for path in candidate_paths)
+    assert any(path.endswith("/Cloudflare/여행과-기록/travel-post-family-hero.png") for path in candidate_paths)
+    assert all("/Travel/" not in path for path in candidate_paths)
+    assert all("/mystery/" not in path for path in candidate_paths)
+    assert all("/probe/" not in path for path in candidate_paths)
+    assert all("/_manifests/" not in path for path in candidate_paths)
+    assert all("cover-ignored" not in path for path in candidate_paths)
+
+
+def test_rebuild_cloudflare_assets_direct_public_strategy_rejects_api_base_url(
+    db: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage_root = tmp_path / "storage" / "images"
+    local_root = storage_root / "Cloudflare"
+    _write_image(storage_root / "travel-post.png")
+
+    channel = _create_channel(db, local_root=local_root)
+    _create_post(
+        db,
+        channel=channel,
+        slug="travel-post",
+        category_slug="여행과-기록",
+        thumbnail_url="https://api.dongriarchive.com/assets/media/posts/2026/04/travel-post/travel-post.webp",
+    )
+
+    monkeypatch.setattr(
+        rebuild_service,
+        "ensure_cloudflare_r2_bucket",
+        lambda *_args, **_kwargs: {
+            "bucket_name": "dongriarchive-cloudflare",
+            "bucket_exists": True,
+            "bucket_created": False,
+            "bucket_verified": False,
+            "sample_uploaded_keys": [],
+        },
+    )
+    monkeypatch.setattr(
+        rebuild_service,
+        "get_settings_map",
+        lambda _db: {
+            "cloudflare_r2_direct_public_base_url": "",
+            "cloudflare_r2_public_base_url": "https://api.dongriarchive.com",
+        },
+    )
+
+    with pytest.raises(ValueError, match="direct_public uploads cannot use api\\.dongriarchive\\.com"):
+        rebuild_service.rebuild_cloudflare_assets(
+            db,
+            mode="execute",
+            bucket_override="dongriarchive-cloudflare",
+        )
+
+
+def test_rebuild_cloudflare_assets_ignores_cover_files_without_thumbnail_fallback(
+    db: Session,
+    tmp_path: Path,
+) -> None:
+    storage_root = tmp_path / "storage" / "images"
+    local_root = storage_root / "Cloudflare"
+    _write_image(storage_root / "cover-travel-post.png")
+
+    channel = _create_channel(db, local_root=local_root)
+    _create_post(
+        db,
+        channel=channel,
+        slug="travel-post",
+        category_slug="여행과-기록",
+        thumbnail_url="https://api.dongriarchive.com/assets/media/posts/2026/04/travel-post/travel-post.webp",
+    )
+
+    result = rebuild_service.rebuild_cloudflare_assets(
+        db,
+        mode="dry_run",
+        ignore_filename_patterns=["cover"],
+        allow_thumbnail_fallback=False,
+    )
+
+    assert result["matched_count"] == 0
+    assert result["heuristic_matched_count"] == 0
+    assert result["unresolved_count"] == 1
+    assert result["ignore_filename_patterns"] == ["cover"]
+    assert result["allow_thumbnail_fallback"] is False
+
+
+def test_rebuild_cloudflare_assets_uses_root_pool_only(db: Session, tmp_path: Path) -> None:
+    storage_root = tmp_path / "storage" / "images"
+    local_root = storage_root / "Cloudflare"
+    _write_image(storage_root / "travel-post.png")
+    _write_image((storage_root / "Travel") / "travel-post.png")
+    _write_image((storage_root / "mystery") / "travel-post.png")
+    _write_image((storage_root / "Cloudflare" / "여행과-기록") / "travel-post.png")
+
+    channel = _create_channel(db, local_root=local_root)
+    _create_post(
+        db,
+        channel=channel,
+        slug="travel-post",
+        category_slug="여행과-기록",
+        thumbnail_url="https://api.dongriarchive.com/assets/media/posts/2026/04/travel-post/travel-post.webp",
+    )
+
+    result = rebuild_service.rebuild_cloudflare_assets(
+        db,
+        mode="dry_run",
+        source_scope="cloudflare_only_root_pool",
+    )
+
+    assert result["candidate_count"] == 1
+    assert result["matched_count"] == 1
+    assert result["items"][0]["resolved_local_source"].endswith("travel-post.png")
+
+
+def test_rebuild_cloudflare_assets_counts_slug_family_match(db: Session, tmp_path: Path) -> None:
+    storage_root = tmp_path / "storage" / "images"
+    local_root = storage_root / "Cloudflare"
+    _write_image(storage_root / "travel-post-hero.png")
+
+    channel = _create_channel(db, local_root=local_root)
+    _create_post(
+        db,
+        channel=channel,
+        slug="travel-post",
+        category_slug="여행과-기록",
+        thumbnail_url="https://api.dongriarchive.com/assets/assets/media/cloudflare/dongri-archive/yeohaenggwa-girog/2026/04/travel-post/cover-abc123.webp",
+    )
+
+    result = rebuild_service.rebuild_cloudflare_assets(db, mode="dry_run", source_scope="cloudflare_only_root_pool")
+
+    assert result["matched_count"] == 1
+    assert result["matched_by_slug_family"] == 1
+    assert result["items"][0]["match_source"] == "slug_family"
+
+
+def test_select_matches_accepts_slug_similarity_gap_rule(monkeypatch: pytest.MonkeyPatch) -> None:
+    post = {
+        "remote_post_id": "remote-1",
+        "slug": "travel-post",
+        "title": "Travel Post",
+        "category_slug": "여행과-기록",
+        "legacy_url_scheme": "legacy_media_posts",
+        "row": object(),
+    }
+    ranked = [
+        {
+            "path": "a.png",
+            "score": 88.0,
+            "match_source": "slug_similarity",
+            "reason": "slug_similarity",
+            "role": "hero",
+            "source_kind": "storage_pool",
+            "evidence_sources": ["url_asset_prefix"],
+            "category_aligned": True,
+        },
+        {
+            "path": "b.png",
+            "score": 82.0,
+            "match_source": "slug_similarity",
+            "reason": "slug_similarity",
+            "role": "hero",
+            "source_kind": "storage_pool",
+            "evidence_sources": ["url_asset_prefix"],
+            "category_aligned": True,
+        },
+    ]
+    monkeypatch.setattr(rebuild_service, "_rank_candidates_for_post", lambda *_args, **_kwargs: ranked)
+
+    matched, unresolved = rebuild_service._select_matches(
+        [post],
+        [],
+        use_fallback_heuristic=True,
+        source_category_history={},
+        stem_category_history={},
+        use_legacy_evidence=True,
+    )
+
+    assert len(matched) == 1
+    assert matched[0]["match_source"] == "slug_similarity_gap"
+    assert matched[0]["confidence"] == 88.0
+    assert unresolved == []
+
+
+def test_select_matches_marks_small_gap_as_ambiguous(monkeypatch: pytest.MonkeyPatch) -> None:
+    post = {
+        "remote_post_id": "remote-1",
+        "slug": "travel-post",
+        "title": "Travel Post",
+        "category_slug": "여행과-기록",
+        "legacy_url_scheme": "legacy_media_posts",
+        "row": object(),
+    }
+    ranked = [
+        {
+            "path": "a.png",
+            "score": 88.0,
+            "match_source": "slug_similarity",
+            "reason": "slug_similarity",
+            "role": "hero",
+            "source_kind": "storage_pool",
+        },
+        {
+            "path": "b.png",
+            "score": 84.5,
+            "match_source": "slug_similarity",
+            "reason": "slug_similarity",
+            "role": "hero",
+            "source_kind": "storage_pool",
+        },
+    ]
+    monkeypatch.setattr(rebuild_service, "_rank_candidates_for_post", lambda *_args, **_kwargs: ranked)
+
+    matched, unresolved = rebuild_service._select_matches(
+        [post],
+        [],
+        use_fallback_heuristic=True,
+        source_category_history={},
+        stem_category_history={},
+        use_legacy_evidence=True,
+    )
+
+    assert matched == []
+    assert len(unresolved) == 1
+    assert unresolved[0]["reason"] == "ambiguous_match"

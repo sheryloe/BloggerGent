@@ -16,7 +16,7 @@ $ts = Get-Date -Format "yyyyMMdd-HHmmss"
 $logPath = "TEST/logs/repair-blogger-missing-cover-$ts.log"
 
 if (-not $ReportPath) {
-    $ReportPath = "/app/storage/reports/repair-blogger-missing-cover-$ts.json"
+    $ReportPath = "/app/storage/_common/analysis/repair-blogger-missing-cover-$ts.json"
 }
 
 "[$(Get-Date -Format o)] mode=$Mode report_path=$ReportPath" | Tee-Object -FilePath $logPath -Append | Out-Null

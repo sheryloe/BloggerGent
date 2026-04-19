@@ -9,10 +9,13 @@ import {
   getChannelPromptFlow,
   getChannels,
   getCloudflarePosts,
+  getSettings,
+  getSettingsEnvSecretsStatus,
   getWorkspaceIntegrations,
   getWorkspaceOAuthStartUrl,
   getModelPolicy,
   refreshWorkspaceOAuth,
+  syncSettingsFromEnvSecrets,
   syncWorkspaceChannelMetrics,
   updateChannelPromptFlowStep,
   updateSettings,
@@ -26,6 +29,7 @@ import type {
   PromptFlowRead,
   PromptFlowStepRead,
   SettingRead,
+  SettingsEnvSecretsStatusRead,
   WorkspaceIntegrationOverviewRead,
   WorkflowStageType,
 } from "@/lib/types";
@@ -738,6 +742,10 @@ export function SettingsConsole({ settings, config, mode = "all" }: SettingsCons
   });
   const [workspaceIntegrationLoading, setWorkspaceIntegrationLoading] = useState(false);
   const [workspaceIntegrationError, setWorkspaceIntegrationError] = useState("");
+  const [envSecretStatus, setEnvSecretStatus] = useState<SettingsEnvSecretsStatusRead | null>(null);
+  const [envSecretLoading, setEnvSecretLoading] = useState(false);
+  const [envSecretError, setEnvSecretError] = useState("");
+  const [envSyncLoading, setEnvSyncLoading] = useState(false);
   const [integrationActionMessage, setIntegrationActionMessage] = useState("");
   const [integrationActionError, setIntegrationActionError] = useState("");
   const [integrationFocus, setIntegrationFocus] = useState<"google" | "blogger" | "youtube" | "instagram" | "cloudflare">("blogger");
@@ -1001,12 +1009,17 @@ export function SettingsConsole({ settings, config, mode = "all" }: SettingsCons
     try {
       setWorkspaceIntegrationLoading(true);
       setWorkspaceIntegrationError("");
-      const payload = await getWorkspaceIntegrations();
-      setWorkspaceIntegrations(payload);
+      setEnvSecretLoading(true);
+      setEnvSecretError("");
+      const [integrationPayload, envPayload] = await Promise.all([getWorkspaceIntegrations(), getSettingsEnvSecretsStatus()]);
+      setWorkspaceIntegrations(integrationPayload);
+      setEnvSecretStatus(envPayload);
     } catch {
       setWorkspaceIntegrationError("워크스페이스 연동 상태를 불러오지 못했습니다.");
+      setEnvSecretError("env 인증 키 상태를 불러오지 못했습니다.");
     } finally {
       setWorkspaceIntegrationLoading(false);
+      setEnvSecretLoading(false);
     }
   }
 
@@ -1016,6 +1029,35 @@ export function SettingsConsole({ settings, config, mode = "all" }: SettingsCons
     }
     void loadWorkspaceIntegrationState();
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== "integrations") {
+      return;
+    }
+    const interval = window.setInterval(() => {
+      void loadWorkspaceIntegrationState();
+    }, 60 * 60 * 1000);
+    return () => window.clearInterval(interval);
+  }, [activeTab]);
+
+  async function handleSyncSettingsFromEnvSecrets() {
+    try {
+      setEnvSyncLoading(true);
+      setIntegrationActionError("");
+      setIntegrationActionMessage("");
+      const result = await syncSettingsFromEnvSecrets();
+      const latestSettings = await getSettings();
+      const latestEntries = Object.fromEntries(latestSettings.map((item) => [item.key, item.value]));
+      setSavedSettings(latestEntries);
+      setLocalSettings(latestEntries);
+      await loadWorkspaceIntegrationState();
+      setIntegrationActionMessage(`env 키 동기화 완료 (${result.updatedCount}개).`);
+    } catch {
+      setIntegrationActionError("env 키 동기화에 실패했습니다.");
+    } finally {
+      setEnvSyncLoading(false);
+    }
+  }
 
   async function handleRefreshWorkspaceOAuth(channelId: string) {
     try {
@@ -1176,6 +1218,17 @@ export function SettingsConsole({ settings, config, mode = "all" }: SettingsCons
       baseUrlConfigured,
     };
   }, [integrationByChannel, integrationChannels, localSettings.cloudflare_blog_api_base_url]);
+  const connectionHealth = useMemo(() => {
+    const connected = envSecretStatus?.connection.connected ?? 0;
+    const total = envSecretStatus?.connection.total ?? 0;
+    const isConnected = total > 0 && connected === total;
+    return {
+      isConnected,
+      connected,
+      total,
+      checkedAt: envSecretStatus?.checkedAt ?? null,
+    };
+  }, [envSecretStatus]);
   const indexingAutomationEnabled = localSettings.automation_google_indexing_enabled === "true";
   const integrationOptions = useMemo(
     () => [
@@ -1695,25 +1748,68 @@ export function SettingsConsole({ settings, config, mode = "all" }: SettingsCons
                     <h3 className="text-xl font-semibold text-slate-950">채널 OAuth / 게시 연동</h3>
                     <p className="mt-1 text-sm text-slate-500">채널 단위 OAuth 시작/토큰 갱신/메트릭 동기화를 이 화면에서 바로 실행합니다.</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => void loadWorkspaceIntegrationState()}
-                    disabled={workspaceIntegrationLoading}
-                    className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
-                  >
-                    {workspaceIntegrationLoading ? "채널 상태 조회 중..." : "채널 상태 새로고침"}
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void loadWorkspaceIntegrationState()}
+                      disabled={workspaceIntegrationLoading || envSecretLoading}
+                      className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                    >
+                      {workspaceIntegrationLoading || envSecretLoading ? "연결 상태 판정 중..." : "연결 상태 재판정"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleSyncSettingsFromEnvSecrets()}
+                      disabled={envSyncLoading}
+                      className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                    >
+                      {envSyncLoading ? "env 동기화 중..." : "env 키 최신화"}
+                    </button>
+                  </div>
                 </div>
 
                 {workspaceIntegrationError ? (
                   <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{workspaceIntegrationError}</div>
                 ) : null}
+                {envSecretError ? <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{envSecretError}</div> : null}
                 {integrationActionError ? (
                   <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{integrationActionError}</div>
                 ) : null}
                 {integrationActionMessage ? (
                   <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">{integrationActionMessage}</div>
                 ) : null}
+
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-block h-3 w-3 rounded-full ${connectionHealth.isConnected ? "bg-blue-500" : "bg-red-500"}`} />
+                      <p className="font-semibold text-slate-900">현재 연결 상태</p>
+                    </div>
+                    <p className="mt-2">
+                      {connectionHealth.connected}/{connectionHealth.total} 채널 연결
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      1시간마다 자동 판정
+                      {connectionHealth.checkedAt ? ` · 마지막 판정 ${formatDateTime(connectionHealth.checkedAt)}` : ""}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                    <p className="font-semibold text-slate-900">env 인증 키 마스킹</p>
+                    <p className="mt-1 text-xs text-slate-500">앞 2글자 + 뒤 2글자만 표시</p>
+                    <div className="mt-2 max-h-28 space-y-1 overflow-auto text-xs">
+                      {(envSecretStatus?.secrets ?? []).length ? (
+                        (envSecretStatus?.secrets ?? []).map((item) => (
+                          <div key={item.key} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-2 py-1.5">
+                            <span className="truncate text-slate-500">{item.key}</span>
+                            <span className="shrink-0 font-mono text-slate-900">{item.maskedValue}</span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="rounded-xl border border-dashed border-slate-300 bg-white px-2 py-1.5 text-slate-500">env 키 없음</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
 
                 <div className="mt-5 grid gap-4 lg:grid-cols-2">
                   {visibleIntegrationChannels.map((channel) => {
@@ -1737,6 +1833,7 @@ export function SettingsConsole({ settings, config, mode = "all" }: SettingsCons
                             <p className="mt-1 text-xs text-slate-500">{channel.channelId}</p>
                           </div>
                           <div className="flex flex-wrap items-center gap-2">
+                            <span className={`inline-block h-2.5 w-2.5 rounded-full ${channel.status === "connected" ? "bg-blue-500" : "bg-red-500"}`} />
                             <FlagPill tone={channel.status === "connected" ? "emerald" : "amber"}>{connectionStatusLabel(channel.status)}</FlagPill>
                             <FlagPill tone={channel.oauthState === "connected" ? "emerald" : "slate"}>{oauthStateLabel(channel.oauthState)}</FlagPill>
                           </div>

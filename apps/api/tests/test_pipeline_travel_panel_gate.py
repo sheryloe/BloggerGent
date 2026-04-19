@@ -4,32 +4,34 @@ from zoneinfo import ZoneInfo
 
 from app.tasks.pipeline import (
     _build_travel_topic_discovery_override_prompt,
-    _travel_3x3_prompt_missing_requirements,
-    _travel_3x3_size_missing_requirements,
+)
+from app.services.content.travel_blog_policy import (
+    travel_panel_prompt_missing_requirements,
+    travel_panel_size_missing_requirements,
 )
 
 
 def test_travel_prompt_requirements_pass_when_all_keywords_present() -> None:
     prompt = (
-        "Create a 3x3 9-panel travel collage grid with visible white gutters. "
-        "The center panel is dominant and larger than surrounding panels."
+        "Create one square 1024x1024 editorial travel collage cover with exactly 8-panel layout. "
+        "Use visible white gutters, no text, and no logo."
     )
-    assert _travel_3x3_prompt_missing_requirements(prompt) == []
+    assert travel_panel_prompt_missing_requirements(prompt) == []
 
 
-def test_travel_prompt_requirements_fail_on_missing_center_emphasis() -> None:
-    prompt = "Create a 3x3 9-panel travel collage grid with visible white gutters."
-    missing = _travel_3x3_prompt_missing_requirements(prompt)
-    assert "missing_center_panel_emphasis" in missing
+def test_travel_prompt_requirements_fail_on_missing_gutters() -> None:
+    prompt = "Create one square 1024x1024 editorial travel collage cover with exactly 8-panel layout, no text, no logo."
+    missing = travel_panel_prompt_missing_requirements(prompt)
+    assert "missing_visible_gutters" in missing
 
 
-def test_travel_size_requirements_fail_for_landscape_image() -> None:
-    missing = _travel_3x3_size_missing_requirements(1792, 1024)
-    assert "not_portrait_ratio" in missing
+def test_travel_size_requirements_fail_for_non_square_image() -> None:
+    missing = travel_panel_size_missing_requirements(1792, 1024)
+    assert "not_1024_square" in missing
 
 
-def test_travel_size_requirements_pass_for_portrait_image() -> None:
-    assert _travel_3x3_size_missing_requirements(1024, 1536) == []
+def test_travel_size_requirements_pass_for_square_image() -> None:
+    assert travel_panel_size_missing_requirements(1024, 1024) == []
 
 
 def test_travel_topic_override_forces_blossom_on_2026_03_28() -> None:

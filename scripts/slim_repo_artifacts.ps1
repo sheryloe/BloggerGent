@@ -40,7 +40,7 @@ foreach ($target in $targets) {
     Remove-IfExists -PathValue (Join-Path $RepoRoot $target) -DoRemove ([bool]$Execute)
 }
 
-$backupRoot = Join-Path $RepoRoot "storage\backups"
+$backupRoot = "D:\Donggri_Runtime\BloggerGent\db\snapshots"
 if ($PruneBackups -and (Test-Path $backupRoot)) {
     $backupDirs = Get-ChildItem -Path $backupRoot -Directory | Sort-Object LastWriteTime -Descending
     $stale = $backupDirs | Select-Object -Skip ([Math]::Max(0, $KeepRecentBackups))
