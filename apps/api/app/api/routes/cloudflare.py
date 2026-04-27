@@ -1,13 +1,21 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.api.deps.admin_auth import AdminMutationRoute, require_admin_auth
 from app.schemas.api import (
     CloudflareGenerateRead,
     CloudflareGenerateRequest,
+    CloudflarePersonaFitPreviewRead,
+    CloudflarePersonaFitPreviewRequest,
+    CloudflarePersonaPackRead,
+    CloudflarePersonaPackUpdate,
     CloudflarePerformancePageRead,
+    CloudflarePrnPreviewRead,
+    CloudflarePrnPreviewRequest,
+    CloudflarePrnRunRead,
     CloudflareRefactorRead,
     CloudflareRefactorRequest,
     CloudflarePerformanceSummaryRead,
@@ -25,8 +33,23 @@ from app.services.cloudflare.cloudflare_channel_service import (
     generate_cloudflare_posts,
     get_cloudflare_overview,
     get_cloudflare_prompt_bundle,
+    list_cloudflare_categories,
     save_cloudflare_prompt,
     sync_cloudflare_prompts_from_files,
+)
+from app.services.cloudflare.cloudflare_persona_service import (
+    ensure_default_cloudflare_persona_packs,
+    get_cloudflare_persona_pack,
+    list_cloudflare_persona_packs,
+    score_persona_fit,
+    set_default_cloudflare_persona_pack,
+    upsert_cloudflare_persona_pack,
+)
+from app.services.cloudflare.cloudflare_prn_service import (
+    get_prn_run,
+    list_prn_runs,
+    normalize_prn_options,
+    preview_cloudflare_prn_titles,
 )
 from app.services.cloudflare.cloudflare_performance_service import (
     get_cloudflare_performance_page,
@@ -36,8 +59,21 @@ from app.services.cloudflare.cloudflare_refactor_service import refactor_cloudfl
 from app.services.cloudflare.cloudflare_sync_service import list_synced_cloudflare_posts, sync_cloudflare_posts
 from app.services.integrations.google_sheet_service import sync_google_sheet_snapshot
 from app.tasks.admin import run_cloudflare_low_score_refactor
+from app.models.entities import ManagedChannel
 
-router = APIRouter()
+router = APIRouter(route_class=AdminMutationRoute)
+
+
+def _get_cloudflare_channel(db: Session) -> ManagedChannel:
+    channel = (
+        db.query(ManagedChannel)
+        .filter(ManagedChannel.provider == "cloudflare")
+        .order_by(ManagedChannel.id.desc())
+        .first()
+    )
+    if channel is None:
+        raise HTTPException(status_code=404, detail="cloudflare_channel_not_configured")
+    return channel
 
 
 @router.get("/overview", response_model=IntegratedChannelSummaryRead)
@@ -141,6 +177,171 @@ def get_cloudflare_prompts(db: Session = Depends(get_db)) -> dict:
     return get_cloudflare_prompt_bundle(db)
 
 
+@router.get(
+    "/persona-packs",
+    response_model=list[CloudflarePersonaPackRead],
+    dependencies=[Depends(require_admin_auth)],
+)
+def list_cloudflare_persona_packs_route(
+    category_slug: str | None = None,
+    include_profiles: bool = False,
+    seed_defaults: bool = True,
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    channel = _get_cloudflare_channel(db)
+    if seed_defaults:
+        categories = [item for item in list_cloudflare_categories(db) if bool(item.get("isLeaf"))]
+        ensure_default_cloudflare_persona_packs(db, managed_channel=channel, categories=categories)
+        db.commit()
+    return list_cloudflare_persona_packs(
+        db,
+        managed_channel_id=channel.id,
+        category_slug=category_slug,
+        include_profiles=include_profiles,
+    )
+
+
+@router.get(
+    "/persona-packs/{category_slug}",
+    response_model=list[CloudflarePersonaPackRead],
+    dependencies=[Depends(require_admin_auth)],
+)
+def list_cloudflare_persona_packs_for_category_route(
+    category_slug: str,
+    include_profiles: bool = True,
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    channel = _get_cloudflare_channel(db)
+    return list_cloudflare_persona_packs(
+        db,
+        managed_channel_id=channel.id,
+        category_slug=category_slug,
+        include_profiles=include_profiles,
+    )
+
+
+@router.post("/persona-packs/{category_slug}", response_model=CloudflarePersonaPackRead)
+def upsert_cloudflare_persona_pack_route(
+    category_slug: str,
+    payload: CloudflarePersonaPackUpdate,
+    db: Session = Depends(get_db),
+) -> dict:
+    channel = _get_cloudflare_channel(db)
+    result = upsert_cloudflare_persona_pack(
+        db,
+        managed_channel_id=channel.id,
+        category_slug=category_slug,
+        payload=payload.model_dump(),
+    )
+    db.commit()
+    return result
+
+
+@router.patch("/persona-packs/{category_slug}/{pack_key}", response_model=CloudflarePersonaPackRead)
+def patch_cloudflare_persona_pack_route(
+    category_slug: str,
+    pack_key: str,
+    payload: CloudflarePersonaPackUpdate,
+    db: Session = Depends(get_db),
+) -> dict:
+    channel = _get_cloudflare_channel(db)
+    values = payload.model_dump()
+    values["pack_key"] = pack_key
+    result = upsert_cloudflare_persona_pack(
+        db,
+        managed_channel_id=channel.id,
+        category_slug=category_slug,
+        payload=values,
+    )
+    db.commit()
+    return result
+
+
+@router.post("/persona-packs/{category_slug}/{pack_key}/set-default", response_model=CloudflarePersonaPackRead)
+def set_default_cloudflare_persona_pack_route(
+    category_slug: str,
+    pack_key: str,
+    db: Session = Depends(get_db),
+) -> dict:
+    channel = _get_cloudflare_channel(db)
+    try:
+        result = set_default_cloudflare_persona_pack(
+            db,
+            managed_channel_id=channel.id,
+            category_slug=category_slug,
+            pack_key=pack_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    db.commit()
+    return result
+
+
+@router.post("/persona-fit/preview", response_model=CloudflarePersonaFitPreviewRead)
+def preview_cloudflare_persona_fit_route(
+    payload: CloudflarePersonaFitPreviewRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    channel = _get_cloudflare_channel(db)
+    pack = get_cloudflare_persona_pack(
+        db,
+        managed_channel_id=channel.id,
+        category_slug=payload.category_slug,
+        pack_key=payload.pack_key,
+    )
+    result = score_persona_fit(
+        pack,
+        title=payload.title,
+        body_html=payload.body_html,
+        excerpt=payload.excerpt,
+        labels=payload.labels,
+        article_pattern_id=payload.article_pattern_id,
+    )
+    if result.get("status") == "skipped":
+        result["reason"] = result.get("reason") or "persona_pack_not_found"
+    return result
+
+
+@router.post("/prn/preview", response_model=CloudflarePrnPreviewRead)
+def preview_cloudflare_prn_route(payload: CloudflarePrnPreviewRequest, db: Session = Depends(get_db)) -> dict:
+    channel = _get_cloudflare_channel(db)
+    pack = None
+    if payload.pack_key or payload.category_slug:
+        pack = get_cloudflare_persona_pack(
+            db,
+            managed_channel_id=channel.id,
+            category_slug=payload.category_slug,
+            pack_key=payload.pack_key,
+            active_only=not bool(payload.pack_key),
+        )
+    return preview_cloudflare_prn_titles(
+        keyword=payload.keyword,
+        category_slug=payload.category_slug,
+        category_name=payload.category_name,
+        persona_pack=pack,
+        article_pattern_id=payload.article_pattern_id,
+        article_pattern_version=payload.article_pattern_version,
+        existing_titles=payload.existing_titles,
+        planner_brief=payload.planner_brief,
+        options=normalize_prn_options(payload.options),
+    )
+
+
+@router.get("/prn/runs", response_model=list[CloudflarePrnRunRead], dependencies=[Depends(require_admin_auth)])
+def list_cloudflare_prn_runs_route(limit: int = 50, db: Session = Depends(get_db)) -> list[dict]:
+    channel = _get_cloudflare_channel(db)
+    return list_prn_runs(db, managed_channel_id=channel.id, limit=limit)
+
+
+@router.get("/prn/runs/{run_id}", response_model=CloudflarePrnRunRead, dependencies=[Depends(require_admin_auth)])
+def get_cloudflare_prn_run_route(run_id: int, db: Session = Depends(get_db)) -> dict:
+    channel = _get_cloudflare_channel(db)
+    result = get_prn_run(db, managed_channel_id=channel.id, run_id=run_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="cloudflare_prn_run_not_found")
+    return result
+
+
 @router.put("/prompts/{category}/{stage}", response_model=CloudflarePromptRead)
 def update_cloudflare_prompt(category: str, stage: str, payload: CloudflarePromptUpdate, db: Session = Depends(get_db)) -> dict:
     return save_cloudflare_prompt(
@@ -165,6 +366,9 @@ def generate_cloudflare_posts_route(payload: CloudflareGenerateRequest, db: Sess
         db,
         per_category=payload.per_category,
         category_slugs=payload.category_slugs or None,
+        category_plan=payload.category_plan or None,
+        persona_pack_key_by_category=payload.persona_pack_key_by_category or None,
+        prn=payload.prn or None,
         status=payload.status,
     )
     if payload.sync_sheet:

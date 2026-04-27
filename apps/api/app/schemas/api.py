@@ -5,7 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.models.entities import JobStatus, LogLevel, PostStatus, PublishMode, WorkflowStageType
+from app.models.entities import JobStatus, LogLevel, ManualImageSlotStatus, PostStatus, PublishMode, WorkflowStageType
 
 ChannelProvider = str
 ManagedChannelStatus = str
@@ -422,6 +422,8 @@ class ArticleListItemRead(BaseModel):
     reading_time_minutes: int
     article_pattern_id: str | None = None
     article_pattern_version: int | None = None
+    article_pattern_key: str | None = None
+    article_pattern_version_key: str | None = None
     editorial_category_key: str | None = None
     editorial_category_label: str | None = None
     created_at: datetime
@@ -629,8 +631,149 @@ class CloudflarePromptSyncRead(BaseModel):
 class CloudflareGenerateRequest(BaseModel):
     per_category: int = Field(default=1, ge=1, le=5)
     category_slugs: list[str] = Field(default_factory=list)
+    category_plan: dict[str, int] = Field(default_factory=dict)
+    persona_pack_key_by_category: dict[str, str] = Field(default_factory=dict)
+    prn: dict = Field(default_factory=dict)
     status: str = Field(default="published", pattern="^(published|draft)$")
     sync_sheet: bool = True
+    defer_images: bool = True
+
+
+class CloudflarePersonaPackRead(BaseModel):
+    id: int | None = None
+    managed_channel_id: int | None = None
+    category_slug: str
+    category_id: str | None = None
+    pack_key: str
+    display_name: str
+    description: str | None = None
+    primary_reader: str | None = None
+    reader_problem: str | None = None
+    tone_summary: str | None = None
+    trust_style: str | None = None
+    topic_guidance: list[str] = Field(default_factory=list)
+    title_rules: dict = Field(default_factory=dict)
+    ctr_rules: dict = Field(default_factory=dict)
+    category_emphasis: list[str] = Field(default_factory=list)
+    sanitized_profiles: list[dict] = Field(default_factory=list)
+    source_manifest_ref: str | None = None
+    attribution: str = "NVIDIA Nemotron-Personas-Korea, CC BY 4.0"
+    version: int = 1
+    is_active: bool = False
+    is_default: bool = False
+    sort_order: int = 100
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class CloudflarePersonaPackUpdate(BaseModel):
+    pack_key: str = Field(min_length=2, max_length=120)
+    category_id: str | None = None
+    display_name: str = Field(min_length=2, max_length=200)
+    description: str | None = None
+    primary_reader: str | None = None
+    reader_problem: str | None = None
+    tone_summary: str | None = None
+    trust_style: str | None = None
+    topic_guidance: list[str] = Field(default_factory=list)
+    title_rules: dict = Field(default_factory=dict)
+    ctr_rules: dict = Field(default_factory=dict)
+    category_emphasis: list[str] = Field(default_factory=list)
+    sanitized_profiles: list[dict] = Field(default_factory=list)
+    source_manifest_ref: str | None = None
+    attribution: str = "NVIDIA Nemotron-Personas-Korea, CC BY 4.0"
+    version: int = Field(default=1, ge=1)
+    is_active: bool = False
+    is_default: bool = False
+    sort_order: int = 100
+
+
+class CloudflarePersonaFitPreviewRequest(BaseModel):
+    category_slug: str
+    pack_key: str | None = None
+    title: str = ""
+    body_html: str = ""
+    excerpt: str = ""
+    labels: list[str] = Field(default_factory=list)
+    article_pattern_id: str | None = None
+
+
+class CloudflarePersonaFitPreviewRead(BaseModel):
+    status: str
+    score: float | None = None
+    band: str | None = None
+    pack_key: str | None = None
+    pack_version: int | None = None
+    checks: dict = Field(default_factory=dict)
+    penalty: float | None = None
+    reason: str | None = None
+    attribution: str | None = None
+
+
+class CloudflarePrnPreviewRequest(BaseModel):
+    category_slug: str
+    keyword: str
+    category_name: str = ""
+    pack_key: str | None = None
+    article_pattern_id: str | None = None
+    article_pattern_version: int | None = None
+    existing_titles: list[str] = Field(default_factory=list)
+    planner_brief: dict = Field(default_factory=dict)
+    options: dict = Field(default_factory=dict)
+
+
+class CloudflarePrnCandidateRead(BaseModel):
+    rank: int = 0
+    title: str
+    source: str = "heuristic_pre"
+    final_score: float | None = None
+    prn: float | None = None
+    ctr_quality: float | None = None
+    practicality: float | None = None
+    pattern_fit: float | None = None
+    forbidden_hygiene: float | None = None
+    article_pattern_id: str | None = None
+    article_pattern_version: int | None = None
+    decision: str = "candidate"
+    rejection_reason: str = ""
+    banned_hits: list[str] = Field(default_factory=list)
+
+
+class CloudflarePrnPreviewRead(BaseModel):
+    enabled: bool = True
+    version: int = 1
+    status: str
+    category_slug: str | None = None
+    category_name: str | None = None
+    keyword: str | None = None
+    article_pattern_id: str | None = None
+    article_pattern_version: int | None = None
+    persona_pack_key: str | None = None
+    persona_pack_version: int | None = None
+    selected_title: str = ""
+    selected_score: float | None = None
+    top_candidates: list[dict] = Field(default_factory=list)
+    candidates: list[CloudflarePrnCandidateRead] = Field(default_factory=list)
+    thresholds: dict = Field(default_factory=dict)
+
+
+class CloudflarePrnRunRead(BaseModel):
+    id: int
+    managed_channel_id: int
+    category_slug: str
+    keyword: str
+    article_pattern_id: str | None = None
+    article_pattern_version: int | None = None
+    persona_pack_key: str | None = None
+    persona_pack_version: int | None = None
+    prn_version: int = 1
+    selected_title: str = ""
+    selected_score: float | None = None
+    status: str
+    payload: dict = Field(default_factory=dict)
+    candidates: list[dict] = Field(default_factory=list)
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 class CloudflareGenerateItemRead(BaseModel):
@@ -641,7 +784,10 @@ class CloudflareGenerateItemRead(BaseModel):
     slug: str | None = None
     public_url: str | None = None
     category_id: str | None = None
+    manual_image_slots: list[dict] = Field(default_factory=list)
     quality_gate: dict | None = None
+    persona_fit: dict | None = None
+    prn: dict | None = None
     error: str | None = None
 
 
@@ -837,6 +983,7 @@ class JobCreate(BaseModel):
     topic_id: int | None = None
     publish_mode: PublishMode | None = None
     stop_after_status: JobStatus | None = None
+    defer_images: bool = True
 
 
 class DiscoveryRunRequest(BaseModel):
@@ -844,6 +991,7 @@ class DiscoveryRunRequest(BaseModel):
     publish_mode: PublishMode | None = None
     stop_after_status: JobStatus | None = None
     topic_count: int | None = Field(default=None, ge=1, le=20)
+    defer_images: bool = True
 
 
 class DiscoveryRunResponse(BaseModel):
@@ -854,6 +1002,48 @@ class DiscoveryRunResponse(BaseModel):
     message: str
     stop_after_status: JobStatus | None = None
     topic_count: int | None = None
+
+
+class ManualImageSlotRead(BaseModel):
+    id: int
+    serial_code: str
+    provider: str
+    blog_id: int | None = None
+    job_id: int | None = None
+    article_id: int | None = None
+    blogger_post_id: int | None = None
+    managed_channel_id: int | None = None
+    synced_cloudflare_post_id: int | None = None
+    remote_post_id: str | None = None
+    slot_role: str
+    prompt: str
+    status: ManualImageSlotStatus
+    file_path: str | None = None
+    public_url: str | None = None
+    object_key: str | None = None
+    batch_key: str | None = None
+    metadata: dict = Field(default_factory=dict, validation_alias="slot_metadata")
+    applied_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True, "populate_by_name": True}
+
+
+class ManualImageApplyItem(BaseModel):
+    serial_code: str = Field(min_length=1)
+    file_path: str = Field(min_length=1)
+
+
+class ManualImageApplyRequest(BaseModel):
+    items: list[ManualImageApplyItem] = Field(default_factory=list)
+
+
+class ManualImageApplyResponse(BaseModel):
+    status: str
+    applied_count: int = 0
+    failed_count: int = 0
+    items: list[ManualImageSlotRead] = Field(default_factory=list)
 
 
 class JobRetryResponse(BaseModel):
@@ -872,7 +1062,16 @@ class GeneratedDataResetResponse(BaseModel):
     deleted_publish_queue_items: int
     deleted_audit_logs: int
     deleted_storage_files: int
+    dry_run: bool = False
+    executed: bool = True
+    confirm_required: str | None = None
     message: str
+
+
+class GeneratedDataResetRequest(BaseModel):
+    dry_run: bool = True
+    confirm_text: str | None = None
+    reason: str | None = None
 
 
 class SettingItem(BaseModel):
@@ -1864,6 +2063,10 @@ class ContentItemRead(BaseModel):
     last_feedback: str | None = None
     blocked_reason: str | None = None
     last_score: dict = Field(default_factory=dict)
+    persona_pack_key: str | None = None
+    persona_pack_version: int | None = None
+    persona_fit_score: float | None = None
+    persona_fit_payload: dict = Field(default_factory=dict)
     created_by_agent: str | None = None
     latest_publication: PublicationRecordRead | None = None
     metric_count: int = 0
@@ -1905,6 +2108,32 @@ class ContentItemUpdate(BaseModel):
 class ContentItemReviewRequest(BaseModel):
     review_notes: list = Field(default_factory=list)
     last_feedback: str | None = None
+
+
+class ContentItemDuplicateCheckRequest(BaseModel):
+    provider: ChannelProvider | str
+    channel_id: str = Field(min_length=3)
+    content_type: ContentItemType | str
+    topic: str = Field(default="", max_length=500)
+    title: str = Field(default="", max_length=500)
+
+
+class ContentItemDuplicateMatchRead(BaseModel):
+    id: int
+    title: str
+    channel_id: str
+    provider: ChannelProvider | str
+    content_type: ContentItemType | str
+    lifecycle_status: ContentItemStatus | str
+    similarity_score: float
+    matched_field: str
+    updated_at: datetime
+
+
+class ContentItemDuplicateCheckRead(BaseModel):
+    is_duplicate: bool
+    risk_level: str
+    matched_items: list[ContentItemDuplicateMatchRead] = Field(default_factory=list)
 
 
 class AgentWorkerRead(BaseModel):
@@ -2356,6 +2585,8 @@ class AnalyticsArticleFactRead(BaseModel):
     most_similar_url: str | None = None
     article_pattern_id: str | None = None
     article_pattern_version: int | None = None
+    article_pattern_key: str | None = None
+    article_pattern_version_key: str | None = None
     status: str | None = None
     actual_url: str | None = None
     source_type: str
@@ -2448,7 +2679,7 @@ class AnalyticsDailySummaryListResponse(BaseModel):
 
 class AnalyticsArticleFactListResponse(BaseModel):
     blog_id: int
-    month: str
+    month: str | None = None
     total: int = 0
     page: int = 1
     page_size: int = 50

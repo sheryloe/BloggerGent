@@ -3,13 +3,17 @@ celery[redis]==5.4.0
 cryptography==45.0.4
 fastapi==0.115.6
 httpx==0.28.1
+huggingface_hub==0.36.0
 jinja2==3.1.4
 Pillow==11.0.0
 playwright==1.58.0
 psycopg2-binary==2.9.10
+pyarrow==22.0.0
 pydantic==2.10.4
 pydantic-settings==2.7.0
+PyMuPDF==1.24.14
 python-dateutil==2.9.0.post0
+python-multipart==0.0.20
 python-slugify==8.0.4
 rapidfuzz==3.14.1
 redis==5.2.1

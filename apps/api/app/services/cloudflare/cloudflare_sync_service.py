@@ -142,6 +142,15 @@ def _merge_synced_cloudflare_group(rows: list[SyncedCloudflarePost]) -> SyncedCl
         "quality_status",
         "article_pattern_id",
         "article_pattern_version",
+        "persona_pack_key",
+        "persona_pack_version",
+        "persona_fit_score",
+        "persona_fit_payload",
+        "prn_run_id",
+        "prn_version",
+        "title_candidate_count",
+        "title_final_score",
+        "title_rerank_payload",
         "render_metadata",
     )
     for field in field_specs:
@@ -339,12 +348,22 @@ def sync_cloudflare_posts(db: Session, *, include_non_published: bool = False) -
         incoming_pattern_id = _truncate(payload.get("article_pattern_id"), 100)
         incoming_pattern_version = _optional_int(payload.get("article_pattern_version"))
         incoming_render_metadata = payload.get("render_metadata") if isinstance(payload.get("render_metadata"), dict) else {}
+        incoming_prn_payload = incoming_render_metadata.get("prn") if isinstance(incoming_render_metadata.get("prn"), dict) else {}
         if incoming_pattern_id is not None:
             post.article_pattern_id = incoming_pattern_id
         if incoming_pattern_version is not None:
             post.article_pattern_version = incoming_pattern_version
         if incoming_render_metadata:
             post.render_metadata = dict(incoming_render_metadata)
+        if incoming_prn_payload:
+            post.prn_version = _optional_int(incoming_prn_payload.get("version")) or post.prn_version
+            top_candidates = incoming_prn_payload.get("top_candidates")
+            if isinstance(top_candidates, list):
+                post.title_candidate_count = len(top_candidates)
+            selected_score = _optional_float(incoming_prn_payload.get("selected_score"))
+            if selected_score is not None:
+                post.title_final_score = selected_score
+            post.title_rerank_payload = dict(incoming_prn_payload)
         post.synced_at = now
 
     if remote_ids:
@@ -430,6 +449,15 @@ def list_synced_cloudflare_posts(db: Session, *, include_non_published: bool = F
                 "quality_status": row.quality_status,
                 "article_pattern_id": row.article_pattern_id,
                 "article_pattern_version": row.article_pattern_version,
+                "persona_pack_key": row.persona_pack_key,
+                "persona_pack_version": row.persona_pack_version,
+                "persona_fit_score": row.persona_fit_score,
+                "persona_fit_payload": dict(row.persona_fit_payload or {}),
+                "prn_run_id": row.prn_run_id,
+                "prn_version": row.prn_version,
+                "title_candidate_count": row.title_candidate_count,
+                "title_final_score": row.title_final_score,
+                "title_rerank_payload": dict(row.title_rerank_payload or {}),
                 "published_at": row.published_at.isoformat() if row.published_at else None,
                 "updated_at": row.updated_at_remote.isoformat() if row.updated_at_remote else None,
                 "status": row.status,

@@ -27,6 +27,19 @@ from app.services.cloudflare.cloudflare_asset_policy import (
     build_cloudflare_r2_object_key,
     get_cloudflare_asset_policy,
 )
+from app.services.cloudflare.cloudflare_persona_service import (
+    build_persona_prompt_block,
+    ensure_default_cloudflare_persona_packs,
+    get_cloudflare_persona_pack,
+    score_persona_fit,
+)
+from app.services.cloudflare.cloudflare_prn_service import (
+    build_prn_prompt_block,
+    normalize_prn_options,
+    persist_prn_run,
+    preview_cloudflare_prn_titles,
+    rerank_prn_after_article,
+)
 from app.services.content.article_pattern_service import (
     apply_pattern_defaults,
     build_article_pattern_prompt_block,
@@ -120,6 +133,7 @@ CLOUDFLARE_BODY_ADS_SINGLE_PLACEMENT_BY_CATEGORY: dict[str, str] = {
 CLOUDFLARE_BODY_ADS_EXPERIMENTAL_TWO_SLOT_CATEGORY = "주식의-흐름"
 CLOUDFLARE_BODY_ADS_TWO_SLOT_MIN_KOREAN_SYLLABLES = 4000
 CLOUDFLARE_BODY_ADS_TWO_SLOT_MIN_H2 = 5
+CLOUDFLARE_BODY_ADS_INLINE_ENABLED = False
 CLOUDFLARE_LAYOUT_TEMPLATE_BY_CATEGORY: dict[str, str] = {
     "여행과-기록": "route-hero-card",
     "축제와-현장": "event-hero",
@@ -944,6 +958,8 @@ def _build_cloudflare_body_ads_metadata(*, category_slug: str, body_markdown: st
         return disabled("category_missing")
     if category_slug in CLOUDFLARE_BODY_ADS_DISABLED_CATEGORIES:
         return disabled("category_policy_disabled")
+    if not CLOUDFLARE_BODY_ADS_INLINE_ENABLED:
+        return disabled("body_inline_ads_disabled_layout_managed")
     primary_placement = CLOUDFLARE_BODY_ADS_SINGLE_PLACEMENT_BY_CATEGORY.get(category_slug)
     if not primary_placement:
         return disabled("category_policy_missing")
@@ -1760,11 +1776,12 @@ def _build_cloudflare_master_article_prompt(
     current_date: str,
     planner_brief: str,
     prompt_template: str | None = None,
+    pattern_selection: Any | None = None,
 ) -> str:
     category_name = str(category.get("name") or category.get("slug") or "").strip()
     category_slug = str(category.get("slug") or "").strip()
     category_description = str(category.get("description") or "").strip()
-    pattern_selection = select_cloudflare_article_pattern(db, category_slug=category_slug)
+    pattern_selection = pattern_selection or select_cloudflare_article_pattern(db, category_slug=category_slug)
     base_prompt_template = str(prompt_template or "").strip() or _build_default_article_prompt(category)
     rendered = render_prompt_template(
         base_prompt_template,
@@ -4439,10 +4456,13 @@ def generate_cloudflare_posts(
     per_category: int = 1,
     category_slugs: list[str] | None = None,
     category_plan: dict[str, int] | None = None,
+    persona_pack_key_by_category: dict[str, str] | None = None,
+    prn: dict[str, Any] | None = None,
     manual_topic_plan: dict[str, list[dict[str, Any]]] | None = None,
     status: str = "published",
 ) -> dict:
     normalized_per_category = max(1, min(int(per_category), 5))
+    prn_options = normalize_prn_options(prn)
     normalized_status = "published" if status.strip().lower() != "draft" else "draft"
     settings_map = get_settings_map(db)
     schedule_timezone = (settings_map.get("schedule_timezone") or DEFAULT_CATEGORY_TIMEZONE).strip() or DEFAULT_CATEGORY_TIMEZONE
@@ -4512,6 +4532,9 @@ def generate_cloudflare_posts(
     cloudflare_channel = db.execute(
         select(ManagedChannel).where(ManagedChannel.provider == "cloudflare", ManagedChannel.channel_id == "cloudflare:dongriarchive")
     ).scalar_one_or_none()
+    if cloudflare_channel is not None:
+        ensure_default_cloudflare_persona_packs(db, managed_channel=cloudflare_channel, categories=categories)
+        db.commit()
     cloudflare_asset_policy = get_cloudflare_asset_policy(cloudflare_channel)
     inline_images_enabled = _cloudflare_inline_images_enabled(settings_map) and not cloudflare_asset_policy.hero_only
     require_cover_image = _cloudflare_require_cover_image(settings_map)
@@ -4639,6 +4662,25 @@ def generate_cloudflare_posts(
         topic_prompt_template = prompt_map.get("topic_discovery") or default_topic_prompt_template
         article_prompt_template = prompt_map.get("article_generation") or _default_prompt_for_stage(category, "article_generation")
         image_prompt_template = prompt_map.get("image_prompt_generation") or _default_prompt_for_stage(category, "image_prompt_generation")
+        requested_persona_pack_key = ""
+        if persona_pack_key_by_category:
+            requested_persona_pack_key = str(
+                persona_pack_key_by_category.get(category_slug)
+                or persona_pack_key_by_category.get(category_id)
+                or ""
+            ).strip()
+        persona_pack = None
+        if cloudflare_channel is not None:
+            persona_pack = get_cloudflare_persona_pack(
+                db,
+                managed_channel_id=cloudflare_channel.id,
+                category_slug=category_slug,
+                pack_key=requested_persona_pack_key or None,
+                active_only=not bool(requested_persona_pack_key),
+            )
+        persona_topic_block = build_persona_prompt_block(persona_pack, stage="topic_discovery")
+        persona_article_block = build_persona_prompt_block(persona_pack, stage="article_generation")
+        persona_ctr_block = build_persona_prompt_block(persona_pack, stage="ctr")
         mysteria_source_block = _build_mysteria_blogger_source_block(
             db,
             category_id=category_id,
@@ -4729,6 +4771,7 @@ def generate_cloudflare_posts(
                     topic_count=requested_topic_count,
                 )
                 + category_gate
+                + persona_topic_block
                 + cloudflare_sheet_exclusion_prompt
                 + runtime_exclusion_prompt
                 + runtime_blocked_prompt
@@ -4971,6 +5014,19 @@ def generate_cloudflare_posts(
             is_mysteria_category = _is_mysteria_story_category(category_id=category_id, category_slug=category_slug)
             inline_images_enabled_for_category = inline_images_enabled and not is_mysteria_category
             try:
+                locked_pattern_selection = select_cloudflare_article_pattern(db, category_slug=category_slug)
+                prn_preview = preview_cloudflare_prn_titles(
+                    keyword=keyword,
+                    category_slug=category_slug,
+                    category_name=category_name,
+                    persona_pack=persona_pack,
+                    article_pattern_id=getattr(locked_pattern_selection, "pattern_id", None),
+                    article_pattern_version=getattr(locked_pattern_selection, "pattern_version", None),
+                    existing_titles=all_titles,
+                    planner_brief=planner_brief,
+                    options=prn_options,
+                )
+                prn_prompt_block = build_prn_prompt_block(prn_preview)
                 article_prompt = _build_cloudflare_master_article_prompt(
                     db,
                     category=category,
@@ -4978,8 +5034,9 @@ def generate_cloudflare_posts(
                     current_date=current_date,
                     planner_brief=planner_brief_block,
                     prompt_template=article_prompt_template,
+                    pattern_selection=locked_pattern_selection,
                 )
-                article_prompt = f"{article_prompt}{category_gate}"
+                article_prompt = f"{article_prompt}{category_gate}{persona_article_block}{persona_ctr_block}{prn_prompt_block}"
                 article_prompt = _append_no_inline_image_rule(article_prompt, disallow_inline=is_mysteria_category)
                 article_model = article_requested_model
                 if runtime.provider_mode == "live":
@@ -5004,7 +5061,7 @@ def generate_cloudflare_posts(
                 )
                 article_output = apply_pattern_defaults(
                     article_output,
-                    select_cloudflare_article_pattern(db, category_slug=category_slug),
+                    locked_pattern_selection,
                 )
                 if is_mysteria_category:
                     article_output.inline_collage_prompt = None
@@ -5064,7 +5121,7 @@ def generate_cloudflare_posts(
                     )
                     article_output = apply_pattern_defaults(
                         article_output,
-                        select_cloudflare_article_pattern(db, category_slug=category_slug),
+                        locked_pattern_selection,
                     )
                     article_output.html_article = _sanitize_cloudflare_public_body(
                         article_output.html_article,
@@ -5082,6 +5139,24 @@ def generate_cloudflare_posts(
                     "ctr_score": 0,
                     "attempt": 1,
                 }
+                persona_fit_payload = score_persona_fit(
+                    persona_pack,
+                    title=article_output.title,
+                    body_html=article_output.html_article,
+                    excerpt=article_output.excerpt,
+                    labels=list(article_output.labels or []),
+                    article_pattern_id=getattr(article_output, "article_pattern_id", None),
+                )
+                prn_preview = rerank_prn_after_article(
+                    prn_preview,
+                    article_title=article_output.title,
+                    article_excerpt=article_output.excerpt,
+                    article_body=article_output.html_article,
+                    persona_fit_score=persona_fit_payload.get("score"),
+                    quality_gate={"scores": final_quality},
+                )
+                if prn_preview.get("selected_title"):
+                    article_output.title = str(prn_preview.get("selected_title") or article_output.title).strip()
                 quality_gate_payload = {
                     "enabled": bool(quality_thresholds.get("enabled", 1.0)),
                     "passed": bool(final_quality.get("passed")),
@@ -5093,8 +5168,16 @@ def generate_cloudflare_posts(
                         "seo_score": final_quality.get("seo_score"),
                         "geo_score": final_quality.get("geo_score"),
                         "ctr_score": final_quality.get("ctr_score"),
+                        "persona_fit_score": persona_fit_payload.get("score"),
                         "korean_syllable_count": final_quality.get("korean_syllable_count"),
                         "plain_text_length_reference": final_quality.get("plain_text_length_reference"),
+                    },
+                    "persona_fit": persona_fit_payload,
+                    "prn": {
+                        "enabled": bool(prn_preview.get("enabled")),
+                        "selected_title": prn_preview.get("selected_title"),
+                        "selected_score": prn_preview.get("selected_score"),
+                        "top_candidates": prn_preview.get("top_candidates", []),
                     },
                     "thresholds": {
                         "similarity_threshold": quality_thresholds.get("similarity_threshold"),
@@ -5138,6 +5221,8 @@ def generate_cloudflare_posts(
                             "category_id": category_id,
                             "topic_novelty": topic_novelty,
                             "quality_gate": quality_gate_payload,
+                            "persona_fit": persona_fit_payload,
+                            "prn": prn_preview,
                             "error": "quality_gate_failed",
                         }
                     )
@@ -5186,7 +5271,7 @@ def generate_cloudflare_posts(
                         current_date=current_date,
                         keyword=keyword,
                         topic_count=requested_for_category,
-                    ) + category_gate + planner_brief_block
+                    ) + category_gate + persona_article_block + planner_brief_block
                     image_prompt_base = _append_hero_only_visual_rule(image_prompt_base, is_mysteria=is_mysteria_category)
                     prompt_model = prompt_requested_model
                     if runtime.provider_mode == "live":
@@ -5280,6 +5365,8 @@ def generate_cloudflare_posts(
                             "category_id": category_id,
                             "topic_novelty": topic_novelty,
                             "quality_gate": quality_gate_payload,
+                            "persona_fit": persona_fit_payload,
+                            "prn": prn_preview,
                             "error": "cover_image_missing",
                             "image_warning": image_warning or "cover_image_missing",
                         }
@@ -5373,6 +5460,14 @@ def generate_cloudflare_posts(
                     category_slug=category_slug,
                     body_markdown=body_markdown,
                 )
+                if prn_preview.get("enabled"):
+                    render_metadata["prn"] = {
+                        "version": prn_preview.get("version"),
+                        "selected_title": prn_preview.get("selected_title"),
+                        "selected_score": prn_preview.get("selected_score"),
+                        "top_candidates": prn_preview.get("top_candidates", []),
+                        "thresholds": prn_preview.get("thresholds", {}),
+                    }
                 target_remote_post_id = str(planner_brief.get("remote_post_id") or "").strip()
                 # Resolve the actual leaf slug for the Cloudflare API
                 from app.services.cloudflare.cloudflare_asset_policy import resolve_cloudflare_category_leaf
@@ -5478,11 +5573,30 @@ def generate_cloudflare_posts(
                     created_post_created_at = created_post_updated_at
                 if not created_post_published_at and normalized_status == "published":
                     created_post_published_at = created_post_updated_at or created_post_created_at
+                prn_run = persist_prn_run(
+                    db,
+                    managed_channel_id=getattr(cloudflare_channel, "id", None),
+                    prn_preview=prn_preview,
+                    status="generated",
+                )
                 if created_post_id:
                     created_pattern_map[created_post_id] = {
                         "article_pattern_id": getattr(article_output, "article_pattern_id", None),
                         "article_pattern_version": getattr(article_output, "article_pattern_version", None),
                         "render_metadata": render_metadata,
+                        "persona_pack_key": getattr(persona_pack, "pack_key", None),
+                        "persona_pack_version": getattr(persona_pack, "version", None),
+                        "persona_fit_score": persona_fit_payload.get("score"),
+                        "persona_fit_payload": persona_fit_payload,
+                        "prn_run_id": getattr(prn_run, "id", None),
+                        "prn_version": prn_preview.get("version"),
+                        "title_candidate_count": len(prn_preview.get("candidates") or []),
+                        "title_final_score": prn_preview.get("selected_score"),
+                        "title_rerank_payload": {
+                            "selected_title": prn_preview.get("selected_title"),
+                            "selected_score": prn_preview.get("selected_score"),
+                            "top_candidates": prn_preview.get("top_candidates", []),
+                        },
                     }
                 items.append(
                     {
@@ -5495,6 +5609,8 @@ def generate_cloudflare_posts(
                         "category_id": category_id,
                         "topic_novelty": topic_novelty,
                         "quality_gate": quality_gate_payload,
+                        "persona_fit": persona_fit_payload,
+                        "prn": prn_preview,
                         "error": "; ".join(value for value in (image_warning, category_fix_warning) if value) or None,
                     }
                 )
@@ -5647,6 +5763,15 @@ def generate_cloudflare_posts(
                 pattern_id = str(metadata.get("article_pattern_id") or "").strip() or None
                 pattern_version = metadata.get("article_pattern_version")
                 render_metadata = _normalize_cloudflare_render_metadata(metadata.get("render_metadata"))
+                persona_pack_key = str(metadata.get("persona_pack_key") or "").strip() or None
+                persona_pack_version = metadata.get("persona_pack_version")
+                persona_fit_score = metadata.get("persona_fit_score")
+                persona_fit_payload = metadata.get("persona_fit_payload") if isinstance(metadata.get("persona_fit_payload"), dict) else {}
+                prn_run_id = metadata.get("prn_run_id")
+                prn_version = metadata.get("prn_version")
+                title_candidate_count = metadata.get("title_candidate_count")
+                title_final_score = metadata.get("title_final_score")
+                title_rerank_payload = metadata.get("title_rerank_payload") if isinstance(metadata.get("title_rerank_payload"), dict) else {}
                 if pattern_id and synced_row.article_pattern_id != pattern_id:
                     synced_row.article_pattern_id = pattern_id
                     synced_changed = True
@@ -5655,6 +5780,43 @@ def generate_cloudflare_posts(
                     synced_changed = True
                 if render_metadata and synced_row.render_metadata != render_metadata:
                     synced_row.render_metadata = render_metadata
+                    synced_changed = True
+                if persona_pack_key and synced_row.persona_pack_key != persona_pack_key:
+                    synced_row.persona_pack_key = persona_pack_key
+                    synced_changed = True
+                if isinstance(persona_pack_version, int) and synced_row.persona_pack_version != persona_pack_version:
+                    synced_row.persona_pack_version = persona_pack_version
+                    synced_changed = True
+                if persona_fit_score is not None:
+                    try:
+                        normalized_persona_fit_score = float(persona_fit_score)
+                    except (TypeError, ValueError):
+                        normalized_persona_fit_score = None
+                    if normalized_persona_fit_score is not None and synced_row.persona_fit_score != normalized_persona_fit_score:
+                        synced_row.persona_fit_score = normalized_persona_fit_score
+                        synced_changed = True
+                if persona_fit_payload and synced_row.persona_fit_payload != persona_fit_payload:
+                    synced_row.persona_fit_payload = persona_fit_payload
+                    synced_changed = True
+                if isinstance(prn_run_id, int) and synced_row.prn_run_id != prn_run_id:
+                    synced_row.prn_run_id = prn_run_id
+                    synced_changed = True
+                if isinstance(prn_version, int) and synced_row.prn_version != prn_version:
+                    synced_row.prn_version = prn_version
+                    synced_changed = True
+                if isinstance(title_candidate_count, int) and synced_row.title_candidate_count != title_candidate_count:
+                    synced_row.title_candidate_count = title_candidate_count
+                    synced_changed = True
+                if title_final_score is not None:
+                    try:
+                        normalized_title_final_score = float(title_final_score)
+                    except (TypeError, ValueError):
+                        normalized_title_final_score = None
+                    if normalized_title_final_score is not None and synced_row.title_final_score != normalized_title_final_score:
+                        synced_row.title_final_score = normalized_title_final_score
+                        synced_changed = True
+                if title_rerank_payload and synced_row.title_rerank_payload != title_rerank_payload:
+                    synced_row.title_rerank_payload = title_rerank_payload
                     synced_changed = True
                 if str(synced_row.status or "").strip().lower() in {"published", "live"}:
                     try:

@@ -35,6 +35,7 @@ class JobStatus(str, enum.Enum):
     STOPPED = "STOPPED"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+    FAILED_TEMP = "FAILED_TEMP"
 
 
 class PublishMode(str, enum.Enum):
@@ -71,6 +72,13 @@ class LogLevel(str, enum.Enum):
     ERROR = "ERROR"
 
 
+class ManualImageSlotStatus(str, enum.Enum):
+    PENDING = "pending"
+    APPLIED = "applied"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
 class Blog(TimestampMixin, Base):
     __tablename__ = "blogs"
 
@@ -102,6 +110,11 @@ class Blog(TimestampMixin, Base):
     jobs: Mapped[list["Job"]] = relationship(back_populates="blog")
     articles: Mapped[list["Article"]] = relationship(back_populates="blog")
     blogger_posts: Mapped[list["BloggerPost"]] = relationship(back_populates="blog")
+    manual_image_slots: Mapped[list["ManualImageSlot"]] = relationship(
+        back_populates="blog",
+        cascade="all, delete-orphan",
+        order_by="ManualImageSlot.id.desc()",
+    )
     synced_blogger_posts: Mapped[list["SyncedBloggerPost"]] = relationship(
         back_populates="blog",
         cascade="all, delete-orphan",
@@ -230,6 +243,11 @@ class Job(TimestampMixin, Base):
     article: Mapped["Article | None"] = relationship(back_populates="job", uselist=False)
     image: Mapped["Image | None"] = relationship(back_populates="job", uselist=False)
     blogger_post: Mapped["BloggerPost | None"] = relationship(back_populates="job", uselist=False)
+    manual_image_slots: Mapped[list["ManualImageSlot"]] = relationship(
+        back_populates="job",
+        cascade="all, delete-orphan",
+        order_by="ManualImageSlot.id.desc()",
+    )
     ai_usage_events: Mapped[list["AIUsageEvent"]] = relationship(
         back_populates="job",
         cascade="all, delete-orphan",
@@ -264,6 +282,8 @@ class Article(TimestampMixin, Base):
     assembled_html: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     article_pattern_id: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
     article_pattern_version: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    article_pattern_key: Mapped[str | None] = mapped_column(sa.String(100), nullable=True, index=True)
+    article_pattern_version_key: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
     render_metadata: Mapped[dict] = mapped_column(sa.JSON, default=dict, nullable=False)
     reading_time_minutes: Mapped[int] = mapped_column(sa.Integer, default=4, nullable=False)
     quality_similarity_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
@@ -306,6 +326,11 @@ class Article(TimestampMixin, Base):
     topic: Mapped[Topic | None] = relationship(back_populates="articles")
     image: Mapped["Image | None"] = relationship(back_populates="article", uselist=False)
     blogger_post: Mapped["BloggerPost | None"] = relationship(back_populates="article", uselist=False)
+    manual_image_slots: Mapped[list["ManualImageSlot"]] = relationship(
+        back_populates="article",
+        cascade="all, delete-orphan",
+        order_by="ManualImageSlot.id.desc()",
+    )
     ai_usage_events: Mapped[list["AIUsageEvent"]] = relationship(
         back_populates="article",
         cascade="all, delete-orphan",
@@ -412,6 +437,60 @@ class BloggerPost(TimestampMixin, Base):
     job: Mapped[Job] = relationship(back_populates="blogger_post")
     blog: Mapped[Blog] = relationship(back_populates="blogger_posts")
     article: Mapped[Article | None] = relationship(back_populates="blogger_post")
+    manual_image_slots: Mapped[list["ManualImageSlot"]] = relationship(
+        back_populates="blogger_post",
+        order_by="ManualImageSlot.id.desc()",
+    )
+
+
+class ManualImageSlot(TimestampMixin, Base):
+    __tablename__ = "manual_image_slots"
+    __table_args__ = (
+        sa.UniqueConstraint("serial_code", name="uq_manual_image_slots_serial_code"),
+        sa.UniqueConstraint("provider", "remote_post_id", "slot_role", name="uq_manual_image_slots_provider_remote_slot"),
+        sa.Index("ix_manual_image_slots_provider_status", "provider", "status"),
+        sa.Index("ix_manual_image_slots_blog_status", "blog_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    serial_code: Mapped[str] = mapped_column(sa.String(32), nullable=False, default="", index=True)
+    provider: Mapped[str] = mapped_column(sa.String(30), nullable=False, index=True)
+    blog_id: Mapped[int | None] = mapped_column(sa.ForeignKey("blogs.id", ondelete="CASCADE"), nullable=True, index=True)
+    job_id: Mapped[int | None] = mapped_column(sa.ForeignKey("jobs.id", ondelete="CASCADE"), nullable=True, index=True)
+    article_id: Mapped[int | None] = mapped_column(sa.ForeignKey("articles.id", ondelete="CASCADE"), nullable=True, index=True)
+    blogger_post_id: Mapped[int | None] = mapped_column(sa.ForeignKey("blogger_posts.id", ondelete="SET NULL"), nullable=True, index=True)
+    managed_channel_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("managed_channels.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    synced_cloudflare_post_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("synced_cloudflare_posts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    remote_post_id: Mapped[str | None] = mapped_column(sa.String(255), nullable=True, index=True)
+    slot_role: Mapped[str] = mapped_column(sa.String(40), nullable=False, default="hero", index=True)
+    prompt: Mapped[str] = mapped_column(sa.Text, nullable=False, default="")
+    status: Mapped[ManualImageSlotStatus] = mapped_column(
+        sa.Enum(ManualImageSlotStatus, name="manual_image_slot_status", values_callable=_enum_values),
+        default=ManualImageSlotStatus.PENDING,
+        nullable=False,
+        index=True,
+    )
+    file_path: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    public_url: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    object_key: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    batch_key: Mapped[str | None] = mapped_column(sa.String(120), nullable=True, index=True)
+    slot_metadata: Mapped[dict] = mapped_column("metadata", sa.JSON, default=dict, nullable=False)
+    applied_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+
+    blog: Mapped[Blog | None] = relationship(back_populates="manual_image_slots")
+    job: Mapped[Job | None] = relationship(back_populates="manual_image_slots")
+    article: Mapped[Article | None] = relationship(back_populates="manual_image_slots")
+    blogger_post: Mapped[BloggerPost | None] = relationship(back_populates="manual_image_slots")
+    managed_channel: Mapped["ManagedChannel | None"] = relationship(back_populates="manual_image_slots")
+    synced_cloudflare_post: Mapped["SyncedCloudflarePost | None"] = relationship(back_populates="manual_image_slots")
 
 
 class AIUsageEvent(TimestampMixin, Base):
@@ -554,6 +633,19 @@ class SyncedCloudflarePost(TimestampMixin, Base):
     quality_status: Mapped[str | None] = mapped_column(sa.String(50), nullable=True)
     article_pattern_id: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
     article_pattern_version: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    persona_pack_key: Mapped[str | None] = mapped_column(sa.String(120), nullable=True, index=True)
+    persona_pack_version: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    persona_fit_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    persona_fit_payload: Mapped[dict] = mapped_column(sa.JSON, default=dict, nullable=False)
+    prn_run_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("cloudflare_prn_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    prn_version: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    title_candidate_count: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    title_final_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    title_rerank_payload: Mapped[dict] = mapped_column(sa.JSON, default=dict, nullable=False)
     render_metadata: Mapped[dict] = mapped_column(sa.JSON, default=dict, nullable=False)
     synced_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True),
@@ -563,6 +655,119 @@ class SyncedCloudflarePost(TimestampMixin, Base):
     )
 
     managed_channel: Mapped["ManagedChannel"] = relationship(back_populates="synced_cloudflare_posts")
+    prn_run: Mapped["CloudflarePrnRun | None"] = relationship(back_populates="synced_posts")
+    manual_image_slots: Mapped[list["ManualImageSlot"]] = relationship(
+        back_populates="synced_cloudflare_post",
+        order_by="ManualImageSlot.id.desc()",
+    )
+
+
+class CloudflareCategoryPersonaPack(TimestampMixin, Base):
+    __tablename__ = "cloudflare_category_persona_packs"
+    __table_args__ = (
+        sa.UniqueConstraint(
+            "managed_channel_id",
+            "category_slug",
+            "pack_key",
+            name="uq_cloudflare_category_persona_pack",
+        ),
+        sa.Index(
+            "ix_cloudflare_category_persona_packs_channel_category_active",
+            "managed_channel_id",
+            "category_slug",
+            "is_active",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    managed_channel_id: Mapped[int] = mapped_column(
+        sa.ForeignKey("managed_channels.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    category_slug: Mapped[str] = mapped_column(sa.String(120), nullable=False, index=True)
+    category_id: Mapped[str | None] = mapped_column(sa.String(120), nullable=True)
+    pack_key: Mapped[str] = mapped_column(sa.String(120), nullable=False, index=True)
+    display_name: Mapped[str] = mapped_column(sa.String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    primary_reader: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    reader_problem: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    tone_summary: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    trust_style: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    topic_guidance: Mapped[list] = mapped_column(sa.JSON, default=list, nullable=False)
+    title_rules: Mapped[dict] = mapped_column(sa.JSON, default=dict, nullable=False)
+    ctr_rules: Mapped[dict] = mapped_column(sa.JSON, default=dict, nullable=False)
+    category_emphasis: Mapped[list] = mapped_column(sa.JSON, default=list, nullable=False)
+    sanitized_profiles: Mapped[list] = mapped_column(sa.JSON, default=list, nullable=False)
+    source_manifest_ref: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    attribution: Mapped[str] = mapped_column(sa.String(500), nullable=False, default="NVIDIA Nemotron-Personas-Korea, CC BY 4.0")
+    version: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=1)
+    is_active: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False, index=True)
+    is_default: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False, index=True)
+    sort_order: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=100)
+
+    managed_channel: Mapped["ManagedChannel"] = relationship(back_populates="cloudflare_persona_packs")
+
+
+class CloudflarePrnRun(TimestampMixin, Base):
+    __tablename__ = "cloudflare_prn_runs"
+    __table_args__ = (
+        sa.Index("ix_cloudflare_prn_runs_channel_category_created", "managed_channel_id", "category_slug", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    managed_channel_id: Mapped[int] = mapped_column(
+        sa.ForeignKey("managed_channels.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    category_slug: Mapped[str] = mapped_column(sa.String(120), nullable=False, index=True)
+    keyword: Mapped[str] = mapped_column(sa.String(500), nullable=False, default="")
+    article_pattern_id: Mapped[str | None] = mapped_column(sa.String(100), nullable=True, index=True)
+    article_pattern_version: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    persona_pack_key: Mapped[str | None] = mapped_column(sa.String(120), nullable=True, index=True)
+    persona_pack_version: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    prn_version: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=1)
+    selected_title: Mapped[str] = mapped_column(sa.String(500), nullable=False, default="")
+    selected_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="preview", index=True)
+    payload: Mapped[dict] = mapped_column(sa.JSON, default=dict, nullable=False)
+
+    managed_channel: Mapped["ManagedChannel"] = relationship(back_populates="cloudflare_prn_runs")
+    title_candidates: Mapped[list["CloudflarePrnTitleCandidate"]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+        order_by="CloudflarePrnTitleCandidate.rank.asc(), CloudflarePrnTitleCandidate.id.asc()",
+    )
+    synced_posts: Mapped[list["SyncedCloudflarePost"]] = relationship(back_populates="prn_run")
+
+
+class CloudflarePrnTitleCandidate(TimestampMixin, Base):
+    __tablename__ = "cloudflare_prn_title_candidates"
+    __table_args__ = (
+        sa.Index("ix_cloudflare_prn_title_candidates_run_rank", "run_id", "rank"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    run_id: Mapped[int] = mapped_column(
+        sa.ForeignKey("cloudflare_prn_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(sa.String(500), nullable=False)
+    rank: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    source: Mapped[str] = mapped_column(sa.String(50), nullable=False, default="heuristic")
+    final_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    prn_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    ctr_quality_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    practicality_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    pattern_fit_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    forbidden_hygiene_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    decision: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="candidate", index=True)
+    rejection_reason: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    payload: Mapped[dict] = mapped_column(sa.JSON, default=dict, nullable=False)
+
+    run: Mapped["CloudflarePrnRun"] = relationship(back_populates="title_candidates")
 
 
 class R2AssetRelayoutMapping(TimestampMixin, Base):
@@ -992,6 +1197,8 @@ class AnalyticsArticleFact(TimestampMixin, Base):
     most_similar_url: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
     article_pattern_id: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
     article_pattern_version: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    article_pattern_key: Mapped[str | None] = mapped_column(sa.String(100), nullable=True, index=True)
+    article_pattern_version_key: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
     status: Mapped[str | None] = mapped_column(sa.String(50), nullable=True)
     actual_url: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
     source_type: Mapped[str] = mapped_column(sa.String(50), nullable=False, default="generated")
@@ -1072,6 +1279,21 @@ class ManagedChannel(TimestampMixin, Base):
         cascade="all, delete-orphan",
         order_by="SyncedCloudflarePost.id.desc()",
     )
+    cloudflare_persona_packs: Mapped[list["CloudflareCategoryPersonaPack"]] = relationship(
+        back_populates="managed_channel",
+        cascade="all, delete-orphan",
+        order_by="CloudflareCategoryPersonaPack.sort_order.asc(), CloudflareCategoryPersonaPack.id.asc()",
+    )
+    cloudflare_prn_runs: Mapped[list["CloudflarePrnRun"]] = relationship(
+        back_populates="managed_channel",
+        cascade="all, delete-orphan",
+        order_by="CloudflarePrnRun.created_at.desc()",
+    )
+    manual_image_slots: Mapped[list["ManualImageSlot"]] = relationship(
+        back_populates="managed_channel",
+        cascade="all, delete-orphan",
+        order_by="ManualImageSlot.id.desc()",
+    )
     publication_records: Mapped[list["PublicationRecord"]] = relationship(
         back_populates="managed_channel",
         cascade="all, delete-orphan",
@@ -1145,6 +1367,10 @@ class ContentItem(TimestampMixin, Base):
     last_feedback: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     blocked_reason: Mapped[str | None] = mapped_column(sa.String(120), nullable=True, index=True)
     last_score: Mapped[dict] = mapped_column(sa.JSON, nullable=False, default=dict)
+    persona_pack_key: Mapped[str | None] = mapped_column(sa.String(120), nullable=True, index=True)
+    persona_pack_version: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    persona_fit_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    persona_fit_payload: Mapped[dict] = mapped_column(sa.JSON, nullable=False, default=dict)
     created_by_agent: Mapped[str | None] = mapped_column(sa.String(120), nullable=True)
 
     managed_channel: Mapped[ManagedChannel] = relationship(back_populates="content_items")
