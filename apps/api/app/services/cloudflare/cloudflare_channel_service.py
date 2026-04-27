@@ -1,7 +1,8 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
+from html import unescape
 import hashlib
 from html.parser import HTMLParser
 import io
@@ -86,6 +87,39 @@ CLOUDFLARE_PROMPT_CATEGORY_PATH_MAP: dict[str, str] = {
     "축제와-현장": "정보의 기록/cugjewa-hyeonjang",
     "문화와-공간": "정보의 기록/munhwawa-gonggan",
 }
+CLOUDFLARE_ADSENSE_FORBIDDEN_BODY_TOKENS: tuple[str, ...] = (
+    "<script",
+    '<ins class="adsbygoogle"',
+    "<ins class='adsbygoogle'",
+    "adsbygoogle",
+    "data-ad-client",
+    "data-ad-slot",
+    "ca-pub-",
+    "googlesyndication",
+    "doubleclick",
+    "<!--adsense",
+    "[ad_slot",
+    "광고 위치",
+)
+CLOUDFLARE_BODY_ADS_DISABLED_CATEGORIES = {
+    "일상과-메모",
+    "동그리의-생각",
+    "미스테리아-스토리",
+}
+CLOUDFLARE_BODY_ADS_SINGLE_PLACEMENT_BY_CATEGORY: dict[str, str] = {
+    "개발과-프로그래밍": "after_h2_2",
+    "여행과-기록": "after_h2_1",
+    "삶을-유용하게": "after_h2_1",
+    "삶의-기름칠": "after_h2_1",
+    "문화와-공간": "after_h2_1",
+    "축제와-현장": "after_h2_1",
+    "크립토의-흐름": "after_h2_2",
+    "나스닥의-흐름": "after_h2_2",
+    "주식의-흐름": "after_h2_1",
+}
+CLOUDFLARE_BODY_ADS_EXPERIMENTAL_TWO_SLOT_CATEGORY = "주식의-흐름"
+CLOUDFLARE_BODY_ADS_TWO_SLOT_MIN_KOREAN_SYLLABLES = 4000
+CLOUDFLARE_BODY_ADS_TWO_SLOT_MIN_H2 = 5
 CLOUDFLARE_LAYOUT_TEMPLATE_BY_CATEGORY: dict[str, str] = {
     "여행과-기록": "route-hero-card",
     "축제와-현장": "event-hero",
@@ -169,6 +203,8 @@ DEFAULT_TOPIC_NOVELTY_CLUSTER_THRESHOLD = 0.85
 DEFAULT_TOPIC_NOVELTY_ANGLE_THRESHOLD = 0.75
 DEFAULT_TOPIC_SOFT_PENALTY_THRESHOLD = 2
 OPENAI_TEXT_RUNTIME_KIND = "openai"
+CLOUDFLARE_MIN_KOREAN_SYLLABLES = 2000
+CLOUDFLARE_KOREAN_LENGTH_FAIL_REASON = "korean_body_below_min"
 _CLOUDFLARE_CODEX_REFACTOR_STAGE_NAMES = {
     "article_generation_retry",
     "cloudflare_refactor",
@@ -544,7 +580,67 @@ def _normalize_cloudflare_render_metadata(value: Any) -> dict[str, Any]:
         cleaned_viewpoints = [str(item).strip() for item in viewpoints if str(item).strip()]
         if cleaned_viewpoints:
             metadata["viewpoints"] = cleaned_viewpoints[:4]
+    body_ads = _normalize_cloudflare_body_ads_metadata(value.get("body_ads") or value.get("bodyAds"))
+    if body_ads:
+        metadata["body_ads"] = body_ads
     return metadata
+
+
+def _normalize_cloudflare_body_ads_metadata(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    placements: list[dict[str, Any]] = []
+    raw_placements = value.get("placements")
+    if isinstance(raw_placements, list):
+        for raw in raw_placements:
+            if not isinstance(raw, dict):
+                continue
+            slot_key = str(raw.get("slot_key") or raw.get("slotKey") or "").strip()
+            placement = str(raw.get("placement") or "").strip()
+            if not slot_key or not placement:
+                continue
+            try:
+                max_count = int(raw.get("max_count") or raw.get("maxCount") or 1)
+            except (TypeError, ValueError):
+                max_count = 1
+            placements.append(
+                {
+                    "slot_key": slot_key,
+                    "placement": placement,
+                    "max_count": max(1, min(max_count, 2)),
+                }
+            )
+    enabled = bool(value.get("enabled")) and bool(placements)
+    normalized: dict[str, Any] = {
+        "version": 1,
+        "provider": "adsense",
+        "enabled": enabled,
+        "expand_mode": "renderer",
+        "placements": placements if enabled else [],
+    }
+    skip_reason = str(value.get("skip_reason") or value.get("skipReason") or "").strip()
+    if skip_reason:
+        normalized["skip_reason"] = skip_reason
+    placement_guard = str(value.get("placement_guard") or value.get("placementGuard") or "").strip()
+    if placement_guard:
+        normalized["placement_guard"] = placement_guard
+    structure = value.get("structure")
+    if isinstance(structure, dict):
+        def _safe_structure_int(field: str) -> int:
+            try:
+                return int(structure.get(field) or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        normalized["structure"] = {
+            "h2_count": _safe_structure_int("h2_count"),
+            "has_faq": bool(structure.get("has_faq")),
+            "has_closing_record": bool(structure.get("has_closing_record")),
+            "table_count": _safe_structure_int("table_count"),
+            "checklist_count": _safe_structure_int("checklist_count"),
+            "korean_syllable_count": _safe_structure_int("korean_syllable_count"),
+        }
+    return normalized
 
 
 def _fallback_us_stock_slide_sections(
@@ -601,6 +697,8 @@ def _build_cloudflare_render_metadata(
     article_output: Any,
     planner_brief: dict[str, Any] | None,
     title: str,
+    category_slug: str = "",
+    body_markdown: str | None = None,
 ) -> dict[str, Any]:
     planner_brief = planner_brief if isinstance(planner_brief, dict) else {}
     metadata: dict[str, Any] = {}
@@ -636,6 +734,11 @@ def _build_cloudflare_render_metadata(
 
     if str(metadata.get("series_variant") or "").strip() == "us-stock-dialogue-v1":
         metadata["viewpoints"] = ["동그리", "햄니"]
+    if category_slug:
+        metadata["body_ads"] = _build_cloudflare_body_ads_metadata(
+            category_slug=category_slug,
+            body_markdown=body_markdown,
+        )
     return metadata
 
 
@@ -759,6 +862,130 @@ def _quality_gate_thresholds(values: dict[str, str]) -> dict[str, float]:
     }
 
 
+def _strip_body_for_korean_syllable_count(text: str | None) -> str:
+    """Return visible body text used only for the Cloudflare pure-Korean length gate."""
+    cleaned = str(text or "")
+    cleaned = re.sub(r"(?is)```.*?```", " ", cleaned)
+    cleaned = re.sub(r"(?is)<figure\b[^>]*>.*?</figure>", " ", cleaned)
+    cleaned = re.sub(r"(?is)<figcaption\b[^>]*>.*?</figcaption>", " ", cleaned)
+    cleaned = re.sub(r"(?is)<!--.*?-->", " ", cleaned)
+    cleaned = re.sub(r"!\[[^\]]*]\([^)]*\)", " ", cleaned)
+    cleaned = re.sub(r"\[([^\]]+)]\((?:https?://|www\.)[^)]*\)", r"\1", cleaned)
+    cleaned = re.sub(r"https?://\S+|www\.\S+", " ", cleaned)
+    cleaned = re.sub(r"(?is)<script\b[^>]*>.*?</script>", " ", cleaned)
+    cleaned = re.sub(r"(?is)<style\b[^>]*>.*?</style>", " ", cleaned)
+    cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+    cleaned = re.sub(r"^[#>\-\*\+\s]+", " ", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"[*_`~|]", " ", cleaned)
+    return unescape(cleaned)
+
+
+def count_korean_syllables_for_body(text: str | None) -> int:
+    """Count only complete Hangul syllables in visible Cloudflare body content."""
+    return len(re.findall(r"[가-힣]", _strip_body_for_korean_syllable_count(text)))
+
+
+def _plain_text_length_reference_for_body(text: str | None) -> int:
+    cleaned = _strip_body_for_korean_syllable_count(text)
+    return len(re.sub(r"\s+", "", cleaned))
+
+
+def validate_min_korean_syllables(text: str | None, minimum: int = CLOUDFLARE_MIN_KOREAN_SYLLABLES) -> bool:
+    return count_korean_syllables_for_body(text) >= minimum
+
+
+def adsense_body_token_violations(text: str | None) -> list[str]:
+    body = str(text or "").casefold()
+    return [token for token in CLOUDFLARE_ADSENSE_FORBIDDEN_BODY_TOKENS if token in body]
+
+
+def validate_no_adsense_tokens_in_body(text: str | None) -> bool:
+    return not adsense_body_token_violations(text)
+
+
+def _cloudflare_h2_count(body_markdown: str | None) -> int:
+    body = str(body_markdown or "")
+    return len(re.findall(r"(?is)<h2\b", body)) + len(re.findall(r"(?m)^##\s+", body))
+
+
+def _analyze_cloudflare_body_ad_structure(body_markdown: str | None) -> dict[str, int | bool]:
+    body = str(body_markdown or "")
+    lowered = body.casefold()
+    h2_count = _cloudflare_h2_count(body)
+    return {
+        "h2_count": h2_count,
+        "has_faq": bool(re.search(r"(?is)<h2[^>]*>\s*(faq|자주 묻는 질문)\s*</h2>", body))
+        or bool(re.search(r"(?m)^##\s*(FAQ|자주 묻는 질문)\s*$", body, flags=re.IGNORECASE)),
+        "has_closing_record": "마무리 기록" in body or "closing-record" in lowered,
+        "table_count": len(re.findall(r"(?is)<table\b", body)) + len(re.findall(r"(?m)^\s*\|.+\|\s*$", body)),
+        "checklist_count": len(re.findall(r"(?m)^\s*[-*]\s+\[[ xX]\]\s+", body)),
+        "korean_syllable_count": count_korean_syllables_for_body(body),
+    }
+
+
+def _build_cloudflare_body_ads_metadata(*, category_slug: str, body_markdown: str | None) -> dict[str, Any]:
+    category_slug = str(category_slug or "").strip()
+    structure = _analyze_cloudflare_body_ad_structure(body_markdown)
+    h2_count = int(structure["h2_count"])
+    korean_syllable_count = int(structure["korean_syllable_count"])
+
+    def disabled(reason: str) -> dict[str, Any]:
+        return {
+            "version": 1,
+            "provider": "adsense",
+            "enabled": False,
+            "expand_mode": "renderer",
+            "placements": [],
+            "skip_reason": reason,
+            "structure": structure,
+        }
+
+    if not category_slug:
+        return disabled("category_missing")
+    if category_slug in CLOUDFLARE_BODY_ADS_DISABLED_CATEGORIES:
+        return disabled("category_policy_disabled")
+    primary_placement = CLOUDFLARE_BODY_ADS_SINGLE_PLACEMENT_BY_CATEGORY.get(category_slug)
+    if not primary_placement:
+        return disabled("category_policy_missing")
+    required_h2 = 2 if primary_placement == "after_h2_2" else 1
+    if h2_count < required_h2:
+        return disabled("h2_count_insufficient")
+    if korean_syllable_count < CLOUDFLARE_MIN_KOREAN_SYLLABLES:
+        return disabled("korean_body_below_min")
+
+    placements = [
+        {
+            "slot_key": "body_inline_primary",
+            "placement": primary_placement,
+            "max_count": 1,
+        }
+    ]
+    if (
+        category_slug == CLOUDFLARE_BODY_ADS_EXPERIMENTAL_TWO_SLOT_CATEGORY
+        and h2_count >= CLOUDFLARE_BODY_ADS_TWO_SLOT_MIN_H2
+        and korean_syllable_count >= CLOUDFLARE_BODY_ADS_TWO_SLOT_MIN_KOREAN_SYLLABLES
+    ):
+        placements.append(
+            {
+                "slot_key": "body_inline_secondary",
+                "placement": "after_h2_3",
+                "max_count": 1,
+            }
+        )
+
+    metadata: dict[str, Any] = {
+        "version": 1,
+        "provider": "adsense",
+        "enabled": True,
+        "expand_mode": "renderer",
+        "placements": placements,
+        "structure": structure,
+    }
+    if category_slug in {"문화와-공간", "축제와-현장"}:
+        metadata["placement_guard"] = "do_not_split_period_place_hours_route_block"
+    return metadata
+
+
 def _quality_gate_fail_reasons(
     *,
     similarity_score: float,
@@ -769,7 +996,11 @@ def _quality_gate_fail_reasons(
     min_seo_score: float,
     min_geo_score: float,
     min_ctr_score: float,
+    korean_syllable_count: int | None = None,
+    min_korean_syllable_required: int = CLOUDFLARE_MIN_KOREAN_SYLLABLES,
+    category_slug: str = "",
 ) -> list[str]:
+    _ = category_slug
     reasons: list[str] = []
     if similarity_score >= similarity_threshold:
         reasons.append("similarity_threshold")
@@ -779,6 +1010,8 @@ def _quality_gate_fail_reasons(
         reasons.append("geo_below_min")
     if ctr_score < min_ctr_score:
         reasons.append("ctr_below_min")
+    if korean_syllable_count is not None and korean_syllable_count < min_korean_syllable_required:
+        reasons.append(CLOUDFLARE_KOREAN_LENGTH_FAIL_REASON)
     return reasons
 
 
@@ -1262,16 +1495,16 @@ def _category_image_guidance(category_slug: str) -> str:
         return "한국 생활 맥락에서 산책, 식사, 습관, 앱 사용, 정리, 운동처럼 바로 실천하는 장면이 보이는 현실 사진이 맞습니다."
     if category_slug == "삶의-기름칠":
         return "정부24, 안내문, 상담 창구, 준비 서류, 생활 지원 신청처럼 정책·복지 맥락이 읽히는 현실 사진이 맞습니다."
-    if category_slug == "개발과-프로그래밍":
-        return "한국형 업무 환경에서 노트북, IDE, 터미널, 협업 문서, 자동화 흐름이 보이는 실사 장면이 맞습니다."
+    if category_slug in ("개발과-프로그래밍", "IT-정보-기술"):
+        return "세련된 IT 정보 기술 스타일의 일러스트가 맞습니다. 자동화, AI 흐름, 도구의 조화가 보이는 디지털 아트 스타일입니다."
+    if category_slug == "일상과-메모":
+        return "따뜻하고 편안한 느낌의 힐링 사진이나 일러스트가 맞습니다. 차분한 감성과 일상의 온기가 느껴지는 장면입니다."
     if any(token in normalized for token in ("mystery", "mysteria", "case", "archive", "legend", "미스터리", "괴담", "전설")):
         return "문서, 장소, 흔적, 조사 분위기가 바로 읽히는 다큐멘터리형 장면이 맞습니다."
     if any(token in normalized for token in ("travel", "festival", "culture", "food", "여행", "축제", "문화", "맛집")):
-        return "독자가 가고 싶어지는 실제 장소성과 현장 밀도를 먼저 보여주는 장면이 맞습니다."
-    if any(token in normalized for token in ("stock", "crypto", "coin", "주식", "코인")):
-        return "추상 아이콘보다 화면, 차트 맥락, 의사결정 분위기가 느껴지는 현실적인 장면이 맞습니다."
-    if any(token in normalized for token in ("dev", "tool", "ai", "tech", "개발", "도구", "기술")):
-        return "실무 도구를 다루는 손, 화면, 작업 환경처럼 사용 맥락이 보이는 장면이 맞습니다."
+        return "현장감이 살아있는 실제스러운 느낌이 맞습니다. 독자가 직접 그 장소에 있는 것 같은 현장 밀도를 보여주세요."
+    if any(token in normalized for token in ("stock", "crypto", "coin", "주식", "코인", "나스닥", "nasdaq")):
+        return "그날의 이슈를 애니 캐릭터로 표현한 카툰 스타일의 12컷 콜라쥬 이미지가 맞습니다. 각 컷이 글의 요약을 담고 있어야 합니다."
     return "글의 핵심 약속이 한눈에 읽히는 현실적인 대표 장면이 맞습니다."
 
 
@@ -1395,66 +1628,59 @@ def _cloudflare_faq_rule(category_slug: str) -> str:
 def _category_article_policy_rules(category_slug: str) -> tuple[str, ...]:
     if category_slug == "여행과-기록":
         return (
-            "Write as an experience-led travel blog for Korean readers, not as a report or checklist memo.",
-            "Center the article on movement, place atmosphere, route flow, and what felt worth seeing or eating.",
-            "Only choose real places and routeable visit plans. Never turn this category into a blog, archive, or category introduction.",
-            "Do not add source, verification, or fact-audit blocks as standalone sections.",
-            "Use vivid place scenes, route pacing, and practical visit tips naturally instead of management language.",
+            "Write as an experience-led travel blog for Korean readers, avoiding generic checklists.",
+            "Pattern [Structure]: 1. Intro with local vibe, 2. Detailed route flow, 3. Signature spots/food, 4. Practical visit tips, 5. Closing summary.",
+            "Pattern [Content]: 1. Sensory place descriptions, 2. Real-time movement feel, 3. Hidden local secrets, 4. Budget/timing accuracy, 5. High-quality imagery descriptions.",
+            "Maintain a length of 3500+ Korean characters.",
         )
     if category_slug == "축제와-현장":
         return (
-            "Structure the article around on-site mood, visit timing, practical tips, good food nearby, lodging, and cautions.",
-            "Choose a real event, fair, night market, or seasonal field event. Do not write a generic festival appreciation essay.",
-            "Keep FAQ only as a short final appendix with around four items.",
-            "Make the article feel like a real field visit, not an event report.",
+            "Capture the live energy and field atmosphere of the event.",
+            "Pattern [Structure]: 1. Field intro, 2. Event schedule/highlights, 3. On-site food & stay, 4. Route/cautions, 5. Final verdict.",
+            "Pattern [Content]: 1. Crowd/mood density, 2. Interactive event elements, 3. Logistics (parking/wait), 4. Value-for-money analysis, 5. Local context/history.",
+            "Maintain a length of 3500+ Korean characters.",
         )
     if category_slug == "문화와-공간":
         return (
-            "Explain why the event or space matters, then connect artist, origin, signature works, and viewing points naturally.",
-            "Choose a real exhibition, museum, gallery, or cultural venue. Do not drift into archive, blog, or brand self-introductions.",
-            "Keep the tone like a field guide, not an exhibition report.",
+            "Connect the cultural significance with a real physical venue.",
+            "Pattern [Structure]: 1. Cultural hook, 2. Space/venue walkthrough, 3. Artist/work deep-dive, 4. Key viewing checkpoints, 5. Future outlook.",
+            "Pattern [Content]: 1. Artistic interpretation, 2. Architectural/spatial feel, 3. Historical background, 4. Visitor experience flow, 5. Cultural impact.",
+            "Maintain a length of 3500+ Korean characters.",
         )
     if category_slug == "미스테리아-스토리":
         return (
-            "Use a narrative rise and fall with records, clues, competing interpretations, and current tracking status.",
-            "Allow only one brief trailing note for sources instead of a full verification section.",
+            "Focus on factual records vs speculative interpretations.",
+            "Pattern [Structure]: 1. Case intro, 2. Detailed record analysis, 3. Clues & evidence, 4. Modern tracking/theories, 5. Mystery closing.",
+            "Pattern [Content]: 1. Document-based narrative, 2. Suspenseful pacing, 3. Contradictory evidence, 4. Investigative tone, 5. Unsolved status emphasis.",
+            "Maintain a length of 4000+ Korean characters.",
         )
     if category_slug == "개발과-프로그래밍":
         return (
-            "Focus on AI coding, LLM agents, automation workflows, free vs paid tradeoffs, and practical setup.",
-            "Replace pros and cons with advantages and cautions that matter in real use.",
-        )
-    if category_slug == "주식의-흐름":
-        return (
-            "Write in a three-voice market conversation format with A, B, and C viewpoints.",
-            "Keep the article substantial enough to exceed 5000 Korean characters without filler.",
-            "Use chat-thread and data-card style HTML structure instead of flat prose blocks.",
+            "Provide practical AI/Coding automation value.",
+            "Pattern [Structure]: 1. Tech problem, 2. Solution/Tool intro, 3. Detailed workflow/setup, 4. Result/Performance, 5. Pro vs Con summary.",
+            "Pattern [Content]: 1. Code-centric logic, 2. Efficiency gain analysis, 3. Free vs Paid breakdown, 4. Scalability/Edge cases, 5. Practical code snippets.",
+            "Maintain a length of 3000+ Korean characters.",
         )
     if category_slug == "나스닥의-흐름":
         return (
-            "Write in Korean with exactly two voices: 동그리 as the aggressive analyst and 햄니 as the conservative analyst.",
-            "Anchor the piece on one real Nasdaq-listed company and cover trend, business model, earnings context, valuation, and risk.",
-            "End the article with a '마무리 기록' section and then render the TradingView chart metadata as the last visual block.",
+            "Two-voice deep dive into Nasdaq stock performance.",
+            "Pattern [Structure]: 1. Macro context, 2. Core stock analysis, 3. Bull vs Bear technicals, 4. Donggri vs Hamni dialogue, 5. Final checkpoints & Chart.",
+            "Pattern [Content]: 1. Aggressive growth outlook, 2. Conservative risk control, 3. Sector-wide impact, 4. Technical support levels, 5. Real-time data integration.",
+            "Maintain a length of 4500+ Korean characters. Force high information density.",
         )
     if category_slug == "크립토의-흐름":
         return (
-            "Explain the day's main crypto event in plain language, then finish with a table for the top 10 market-cap coins and daily change.",
-            "Keep the bottom market-cap table compact and readable inside sanitized HTML.",
+            "Daily crypto event summary and market-cap analysis.",
+            "Pattern [Structure]: 1. Main event hook, 2. On-chain data analysis, 3. Whale movement tracking, 4. Market-cap table, 5. Future price scenario.",
+            "Pattern [Content]: 1. Technical signal detection, 2. Regulatory impact, 3. Correlation with Nasdaq, 4. Project fundamental check, 5. Retail vs Institutional sentiment.",
+            "Maintain a length of 3000+ Korean characters.",
         )
-    if category_slug == "동그리의-생각":
+    if category_slug == "일상과-메모":
         return (
-            "Keep the piece reflective and personal. Avoid management language, score language, or self-help checklist structure.",
-            "Do not turn the article into a productivity memo, execution strategy, or operational routine guide.",
-        )
-    if category_slug == "삶을-유용하게":
-        return (
-            "Stay with practical life topics such as health, habits, food, walking, running, apps, and mental steadiness.",
-            "Prefer useful everyday routines and health-minded actions over policy, subsidy, or welfare explainers.",
-        )
-    if category_slug == "삶의-기름칠":
-        return (
-            "Keep it fact-based and practical: who qualifies, what changed, how much, when to apply, and where to apply.",
-            "This category is for policy, welfare, benefits, and support programs rather than mindset essays.",
+            "Healing-oriented reflective essays and useful life notes.",
+            "Pattern [Structure]: 1. Daily hook, 2. Emotional/Reflective body, 3. Useful life tip, 4. Healing photo description, 5. Closing thought.",
+            "Pattern [Content]: 1. Warm/Personal tone, 2. Small joy discovery, 3. Mental steadiness, 4. Minimalist living, 5. Gentle guidance.",
+            "Maintain a length of 2500+ Korean characters.",
         )
     return ()
 
@@ -1576,10 +1802,10 @@ def _build_cloudflare_master_article_prompt(
         f"{base_rendered}\n\n"
         f"{build_article_pattern_prompt_block(pattern_selection)}\n"
         "[HTML structure policy]\n"
-        "- Allowed tags only: <section>, <article>, <div>, <aside>, <blockquote>, <table>, <thead>, <tbody>, <tr>, <th>, <td>, <details>, <summary>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <span>, <br>, <hr>.\n"
+        "- Allowed tags only: <section>, <article>, <div>, <aside>, <blockquote>, <table>, <thead>, <tbody>, <tr>, <th>, <td>, <details>, <summary>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <span>, <br>, <hr>, <iframe>.\n"
         "- Allowed class presets only: callout, timeline, card-grid, fact-box, caution-box, quote-box, chat-thread, comparison-table, route-steps, route-hero-card, step-flow, timing-box, timing-table, local-tip-box, event-checklist, event-hero, crowd-timing-box, food-lodging-table, field-caution-box, policy-summary, summary-box, comparison-matrix, workflow-strip, scene-intro, scene-divider, note-block, note-aside, closing-record, viewing-order-box, highlight-table, curator-note, case-summary, timeline-board, evidence-table, interpretation-compare, checklist-box, step-box, friction-table, eligibility-table, process-strip, document-checklist, market-summary, factor-table, viewpoint-compare, company-brief, dialogue-thread, checkpoint-box, checkpoint-strip, risk-factor-table, reflection-scene, thought-block.\n"
         "- Return article_pattern_id and article_pattern_version in the JSON output.\n"
-        f"{_article_output_contract()}"
+        f"{_article_output_contract(is_mysteria=_is_mysteria_story_category(category_slug))}"
     )
 
 
@@ -1620,7 +1846,7 @@ def _build_mysteria_blogger_source_block(
         blog_ids = (
             db.execute(
                 select(Blog.id)
-                .where(Blog.profile_key == "world_mystery")
+                .where(Blog.id == 35, Blog.profile_key == "world_mystery")
                 .order_by(Blog.is_active.desc(), Blog.id.desc())
             )
             .scalars()
@@ -1757,7 +1983,9 @@ def _build_default_image_prompt(category: dict) -> str:
     category_name = str(category.get("name") or category.get("slug") or "Cloudflare").strip()
     category_slug = str(category.get("slug") or "").strip()
     category_description = str(category.get("description") or "").strip()
-    return f"""You are preparing one final English hero-image prompt for the Cloudflare blog category \"{category_name}\".
+
+    if _is_mysteria_story_category(category_id=str(category.get("id") or ""), category_slug=category_slug):
+        return f"""You are preparing one final English hero-image prompt for the Cloudflare blog category "{category_name}".
 
 Current date: {{current_date}}
 Topic: {{keyword}}
@@ -1766,14 +1994,36 @@ Image guidance: {_category_image_guidance(category_slug)}
 
 Rules:
 - Return plain text only.
-- Write one final prompt for a single 3x3 hero collage with exactly 9 distinct panels.
+- Write one final prompt for one single flattened 5x4 panel grid collage hero image.
+- Keep visible white gutters and a clean grid layout.
+- Keep one balanced composition inside the single final image.
+- Do not request 20 separate images or later compositing.
+- Do not request inline_collage_prompt, supporting 3x2 images, or body images.
+- Keep the visual grounded in realistic documentary tone.
+- No text overlays, no logos, no infographic styling, and no generic checklist visuals.
+"""
+
+    is_finance = any(token in category_slug.lower() for token in ("stock", "crypto", "nasdaq"))
+    collage_layout = "3x4 grid with exactly 12 distinct panels" if is_finance else "3x3 grid with exactly 9 distinct panels"
+
+    return f"""You are preparing one final English hero-image prompt for the Cloudflare blog category "{category_name}".
+
+Current date: {{current_date}}
+Topic: {{keyword}}
+Category guidance: {_category_topic_guidance(category_slug, category_name, category_description)}
+Image guidance: {_category_image_guidance(category_slug)}
+
+Rules:
+- Return plain text only.
+- Write one final prompt for a single {collage_layout}.
+- Each panel should represent a specific segment or summary point of the article.
 - Write one final supporting 3x2 collage prompt separately when the schema requests inline_collage_prompt.
 - Use visible white gutters and one dominant center panel.
 - Keep the visual grounded in realistic Korean context when the topic is Korea-facing.
-- Use realistic editorial photography language, not illustration language.
+- For financial categories, use a vibrant anime/cartoon character style as requested.
 - No text overlays, no logos, no infographic styling, and no generic checklist visuals.
 - Avoid generic stock-photo mood. Show the real problem and the real usage scene.
-- Match the category tone of \"{category_name}\" rather than a generic stock-photo mood.
+- Match the category tone of "{category_name}" rather than a generic stock-photo mood.
 """
 
 
@@ -2170,6 +2420,8 @@ def _cloudflare_public_body_quality_reasons(body_markdown: str, *, category_slug
         token in text for token in ("블로그 소개", "아카이브 소개", "카테고리 소개")
     ):
         reasons.append("category_intro_leak")
+    if adsense_body_token_violations(body_markdown):
+        reasons.append("adsense_body_token_present")
     return reasons
 
 
@@ -3260,7 +3512,37 @@ def _build_history_exclusion_prompt_from_entries(entries: Sequence[Any], *, limi
     )
 
 
-def _article_output_contract() -> str:
+def _article_output_contract(*, is_mysteria: bool = False) -> str:
+    inline_contract = (
+        '  "inline_collage_prompt": null\n'
+        if is_mysteria
+        else '  "inline_collage_prompt": "string"\n'
+    )
+    layout_rule = (
+        "- Use the same live layout pattern as the exemplar post: one left-aligned lead section, 4 or 5 H2 sections, optional H3 subsections, at least one bordered table, one inline FAQ section near the end, and a final closing section.\n"
+        if is_mysteria
+        else "- Use the same live layout pattern as the exemplar post: one left-aligned lead section, 4 to 6 H2 sections, optional H3 subsections, at least one bordered table, one inline FAQ section near the end, and a final closing section.\n"
+    )
+    inline_rule = (
+        "- The final live article must contain no supporting body image blocks, and inline_collage_prompt must be null.\n"
+        if is_mysteria
+        else "- The final live article must end up with exactly one mid-article inline image. If downstream insertion is used, leave a natural gap after the middle table or section break.\n"
+    )
+    hero_rule = (
+        '- image_collage_prompt must be one final English prompt for one single flattened "5x4 panel grid collage" hero image with visible white gutters, clean grid layout, no text, and no logos.\n'
+        if is_mysteria
+        else "- image_collage_prompt must be one final English prompt for one hero 3x3 collage with exactly 9 distinct panels.\n"
+    )
+    panel_rule = (
+        "- Keep the grid balanced as one single composed hero image, and do not request 20 separate panels for later compositing.\n"
+        if is_mysteria
+        else "- The center panel must be visually dominant and the panel borders must remain visible.\n"
+    )
+    inline_prompt_rule = (
+        ""
+        if is_mysteria
+        else "- inline_collage_prompt must be one final English prompt for one supporting 3x2 collage with exactly 6 distinct panels.\n"
+    )
     return (
         "\n\n[Output contract]\n"
         "Return only one JSON object (no markdown fence) using exact keys:\n"
@@ -3283,25 +3565,33 @@ def _article_output_contract() -> str:
         '  "chart_symbol": "string or null",\n'
         '  "chart_interval": "string or null",\n'
         '  "slide_sections": [{"title":"string","summary":"string","speaker":"string","key_points":["string"]}],\n'
-        '  "inline_collage_prompt": "string"\n'
+        f"{inline_contract}"
         "}\n"
         "- html_article must be valid sanitized HTML-ready article content.\n"
-        "- Use the same live layout pattern as the exemplar post: one left-aligned lead section, 4 to 6 H2 sections, optional H3 subsections, at least one bordered table, one inline FAQ section near the end, and a final closing section.\n"
+        f"{layout_rule}"
         "- Keep structure SEO-friendly, readable, and blog-like rather than report-like.\n"
         "- Allowed tags only: <section>, <article>, <div>, <aside>, <blockquote>, <table>, <thead>, <tbody>, <tr>, <th>, <td>, <details>, <summary>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <span>, <br>, <hr>.\n"
         "- Allowed class presets only: callout, timeline, card-grid, fact-box, caution-box, quote-box, chat-thread, comparison-table, route-steps, route-hero-card, step-flow, timing-box, timing-table, local-tip-box, event-checklist, event-hero, crowd-timing-box, food-lodging-table, field-caution-box, policy-summary, summary-box, comparison-matrix, workflow-strip, scene-intro, scene-divider, note-block, note-aside, closing-record, viewing-order-box, highlight-table, curator-note, case-summary, timeline-board, evidence-table, interpretation-compare, checklist-box, step-box, friction-table, eligibility-table, process-strip, document-checklist, market-summary, factor-table, viewpoint-compare, company-brief, dialogue-thread, checkpoint-box, checkpoint-strip, risk-factor-table, reflection-scene, thought-block.\n"
         "- Do not use a centered wrapper, one giant card container, max-width hero box, or visible source/meta block.\n"
-        "- The final live article must end up with exactly one mid-article inline image. If downstream insertion is used, leave a natural gap after the middle table or section break.\n"
+        f"{inline_rule}"
         "- meta_description and excerpt must not appear as visible duplicated summary lines inside html_article.\n"
         "- The FAQ should read correctly inline as one H2 section near the end of the article body. faq_section is legacy optional only and must not be the sole source of the public FAQ layout.\n"
         "- series_variant/company_name/ticker/exchange/chart_provider/chart_symbol/chart_interval/slide_sections are optional, but must be included when the planner brief explicitly requests a hybrid stock-series post.\n"
-        "- image_collage_prompt must be one final English prompt for one hero 3x3 collage with exactly 9 distinct panels.\n"
-        "- The center panel must be visually dominant and the panel borders must remain visible.\n"
-        "- inline_collage_prompt must be one final English prompt for one supporting 3x2 collage with exactly 6 distinct panels.\n"
+        f"{hero_rule}"
+        f"{panel_rule}"
+        f"{inline_prompt_rule}"
     )
 
 
-def _append_no_inline_image_rule(prompt: str) -> str:
+def _append_no_inline_image_rule(prompt: str, *, disallow_inline: bool = False) -> str:
+    if disallow_inline:
+        return (
+            f"{prompt}\n\n"
+            "[Inline image policy]\n"
+            "- Do not output inline image tags or markdown image syntax in the public body.\n"
+            "- inline_collage_prompt must be null or empty.\n"
+            "- The final live article must contain no supporting body image blocks.\n"
+        )
     return (
         f"{prompt}\n\n"
         "[Inline image policy]\n"
@@ -3310,7 +3600,6 @@ def _append_no_inline_image_rule(prompt: str) -> str:
         "- Do not use side-by-side galleries, centered figure wrappers, or caption-heavy image blocks.\n"
         "- If downstream insertion is used, inline_collage_prompt must still describe one supporting image distinct from the cover.\n"
     )
-
 
 def _append_cloudflare_seo_trust_guard(prompt: str, *, category_slug: str, current_date: str) -> str:
     guard_lines = [
@@ -3325,7 +3614,7 @@ def _append_cloudflare_seo_trust_guard(prompt: str, *, category_slug: str, curre
         guard_lines.append("- For forward-looking analysis, label scenarios as possibilities, not certainties.")
     if category_slug in {"문화와-공간", "축제와-현장", "여행과-기록"}:
         guard_lines.append("- Keep the tone experiential and blog-like. Do not add standalone source or verification sections.")
-    if category_slug == "미스테리아-스토리":
+    if _is_mysteria_story_category(category_id="", category_slug=category_slug):
         guard_lines.append("- Separate documented records, interpretations, and retellings in different blocks without turning the piece into a legal brief.")
 
     if _is_mysteria_story_category(category_id="", category_slug=category_slug):
@@ -3339,7 +3628,17 @@ def _append_cloudflare_seo_trust_guard(prompt: str, *, category_slug: str, curre
     return f"{prompt}\n\n" + "\n".join(guard_lines) + "\n"
 
 
-def _append_hero_only_visual_rule(prompt: str) -> str:
+def _append_hero_only_visual_rule(prompt: str, *, is_mysteria: bool = False) -> str:
+    if is_mysteria:
+        return (
+            f"{prompt}\n\n"
+            "[Hero image policy]\n"
+            "- Generate one cover-image prompt only.\n"
+            "- Use one single flattened 5x4 panel grid collage hero image.\n"
+            "- Keep visible white gutters and a clean grid layout.\n"
+            "- Do not request inline, supplementary, infographic, or chart body images.\n"
+            "- Do not request 20 separate images or later panel compositing.\n"
+        )
     return (
         f"{prompt}\n\n"
         "[Hero image policy]\n"
@@ -3348,7 +3647,6 @@ def _append_hero_only_visual_rule(prompt: str) -> str:
         "- Keep visible white gutters and make the center panel visually dominant.\n"
         "- Do not request inline, supplementary, infographic, or chart body images.\n"
     )
-
 
 def _category_hard_gate(category_slug: str, category_name: str) -> str:
     lines = [
@@ -3410,6 +3708,34 @@ def _extract_integration_asset(payload: object) -> dict[str, Any] | None:
             return data.get("asset")
         return data
     return None
+
+
+def _fix_cloudflare_meta_description(text: str | None) -> str:
+    normalized = str(text or "").strip()
+    if len(normalized) < 90:
+        normalized = (normalized + " " + "Mysteria Story Mystery Documentary Archives.")[:170]
+    if len(normalized) > 170:
+        normalized = normalized[:167] + "..."
+    if len(normalized) < 90:
+        normalized = normalized.ljust(90, ".")
+    return normalized
+
+
+def _prepare_markdown_body(title: str, body: str) -> str:
+    """게시물 본문을 준비하며 중복 제목 방지 및 HTML 호환성 로직을 포함합니다."""
+    cleaned = (body or "").strip()
+    if not cleaned:
+        return f"# {title}\n\n본문이 생성되지 않았습니다."
+
+    # 제목 중복 제거 (이미 제목이 본문에 포함된 경우)
+    header_pattern = rf"^(#\s*|##\s*|###\s*){re.escape(title)}"
+    if re.match(header_pattern, cleaned, re.IGNORECASE):
+        # 이미 H1이나 H2로 제목이 있으면 그대로 사용 (다만 H1인 경우 H2로 낮추는 것이 블로그 구조상 좋음)
+        if cleaned.startswith("# "):
+            return "## " + cleaned[2:].strip()
+        return cleaned
+
+    return f"## {title}\n\n{cleaned}"
 
 
 def _integration_request(
@@ -3572,13 +3898,7 @@ def _ensure_unique_title(title: str, existing_titles: list[str]) -> str:
         suffix += 1
 
 
-def _prepare_markdown_body(title: str, body: str) -> str:
-    cleaned = (body or "").strip()
-    if not cleaned:
-        return f"# {title}\n\n蹂몃Ц???앹꽦?섏? 紐삵뻽?듬땲??"
-    if cleaned.startswith("# "):
-        return cleaned
-    return f"# {title}\n\n{cleaned}"
+# Deleted duplicate _prepare_markdown_body and _convert_html_to_markdown to prevent tag stripping.
 
 
 def _hash_image_bytes(image_bytes: bytes | None) -> str:
@@ -3597,8 +3917,11 @@ def _strip_generated_body_images(body_markdown: str) -> str:
     body = (body_markdown or "").strip()
     if not body:
         return ""
-    cleaned = re.sub(r"(?is)<figure\b[^>]*>.*?</figure>", "", body)
+    # Only strip figure tags that DO NOT contain an iframe
+    cleaned = re.sub(r"(?is)<figure\b[^>]*>(?!.*?<iframe).*?</figure>", "", body)
     cleaned = re.sub(r"(?is)<img\b[^>]*>", "", cleaned)
+    # Strip style attributes from any HTML tags EXCEPT iframes
+    cleaned = re.sub(r"(?i)(?<!<iframe)\s+style\s*=\s*(['\"]).*?\1", "", cleaned)
     cleaned = re.sub(r"(?m)^\s*!\[[^\]]*\]\([^)]+\)\s*$", "", cleaned)
     cleaned = re.sub(r"!\[[^\]]*\]\([^)]+\)", "", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
@@ -3946,6 +4269,9 @@ def _assess_cloudflare_quality_gate(
     seo_score = float(seo_geo.get("seo_score", 0) or 0)
     geo_score = float(seo_geo.get("geo_score", 0) or 0)
     ctr_score = float(seo_geo.get("ctr_score", 0) or 0)
+    korean_syllable_count = count_korean_syllables_for_body(body_markdown)
+    min_korean_syllable_required = CLOUDFLARE_MIN_KOREAN_SYLLABLES
+    plain_text_length_reference = _plain_text_length_reference_for_body(body_markdown)
     reasons = _quality_gate_fail_reasons(
         similarity_score=similarity_score,
         seo_score=seo_score,
@@ -3955,6 +4281,8 @@ def _assess_cloudflare_quality_gate(
         min_seo_score=float(thresholds["min_seo_score"]),
         min_geo_score=float(thresholds["min_geo_score"]),
         min_ctr_score=float(thresholds["min_ctr_score"]),
+        korean_syllable_count=korean_syllable_count,
+        min_korean_syllable_required=min_korean_syllable_required,
     )
     trust_assessment = assess_publish_trust_requirements(body_markdown)
     for trust_reason in trust_assessment.get("reasons", []):
@@ -3977,6 +4305,10 @@ def _assess_cloudflare_quality_gate(
         "ctr_score": int(round(ctr_score)),
         "trust_gate": trust_assessment,
         "structure_gate": structure_assessment,
+        "korean_syllable_count": korean_syllable_count,
+        "min_korean_syllable_required": min_korean_syllable_required,
+        "korean_length_pass": korean_syllable_count >= min_korean_syllable_required,
+        "plain_text_length_reference": plain_text_length_reference,
     }
 
 
@@ -4222,6 +4554,11 @@ def generate_cloudflare_posts(
             assess_topic_novelty_against_history,
             build_sheet_topic_exclusion_prompt_cloudflare,
             list_sheet_topic_history_entries_cloudflare,
+        )
+
+        from app.services.integrations.telegram_service import (
+            send_telegram_error_notification,
+            send_telegram_post_notification,
         )
 
         assess_novelty = assess_topic_novelty_against_history
@@ -4631,6 +4968,8 @@ def generate_cloudflare_posts(
                         ]
                     )
                 planner_brief_block = "\n".join(planner_lines)
+            is_mysteria_category = _is_mysteria_story_category(category_id=category_id, category_slug=category_slug)
+            inline_images_enabled_for_category = inline_images_enabled and not is_mysteria_category
             try:
                 article_prompt = _build_cloudflare_master_article_prompt(
                     db,
@@ -4641,7 +4980,7 @@ def generate_cloudflare_posts(
                     prompt_template=article_prompt_template,
                 )
                 article_prompt = f"{article_prompt}{category_gate}"
-                article_prompt = _append_no_inline_image_rule(article_prompt)
+                article_prompt = _append_no_inline_image_rule(article_prompt, disallow_inline=is_mysteria_category)
                 article_model = article_requested_model
                 if runtime.provider_mode == "live":
                     article_model = _route_cloudflare_text_model(
@@ -4667,6 +5006,8 @@ def generate_cloudflare_posts(
                     article_output,
                     select_cloudflare_article_pattern(db, category_slug=category_slug),
                 )
+                if is_mysteria_category:
+                    article_output.inline_collage_prompt = None
                 article_output.html_article = _sanitize_cloudflare_public_body(
                     article_output.html_article,
                     category_slug=category_slug,
@@ -4752,17 +5093,41 @@ def generate_cloudflare_posts(
                         "seo_score": final_quality.get("seo_score"),
                         "geo_score": final_quality.get("geo_score"),
                         "ctr_score": final_quality.get("ctr_score"),
+                        "korean_syllable_count": final_quality.get("korean_syllable_count"),
+                        "plain_text_length_reference": final_quality.get("plain_text_length_reference"),
                     },
                     "thresholds": {
                         "similarity_threshold": quality_thresholds.get("similarity_threshold"),
                         "min_seo_score": quality_thresholds.get("min_seo_score"),
                         "min_geo_score": effective_quality_thresholds.get("min_geo_score"),
                         "min_ctr_score": quality_thresholds.get("min_ctr_score"),
+                        "min_korean_syllable_required": final_quality.get(
+                            "min_korean_syllable_required",
+                            CLOUDFLARE_MIN_KOREAN_SYLLABLES,
+                        ),
+                    },
+                    "korean_length": {
+                        "korean_syllable_count": final_quality.get("korean_syllable_count"),
+                        "min_korean_syllable_required": final_quality.get(
+                            "min_korean_syllable_required",
+                            CLOUDFLARE_MIN_KOREAN_SYLLABLES,
+                        ),
+                        "korean_length_pass": final_quality.get("korean_length_pass"),
+                        "plain_text_length_reference": final_quality.get("plain_text_length_reference"),
+                        "message": "순수 한글 본문 글자 수가 2000글자 미만입니다. HTML, 숫자, 영어, 공백, URL, 이미지 설명은 카운트하지 않습니다.",
                     },
                 }
                 if not quality_gate_payload["enabled"]:
                     quality_gate_payload["passed"] = True
                     quality_gate_payload["reason"] = "disabled"
+                if final_quality.get("korean_length_pass") is False:
+                    quality_gate_payload["passed"] = False
+                    existing_reason = str(quality_gate_payload.get("reason") or "").strip()
+                    quality_gate_payload["reason"] = ",".join(
+                        value
+                        for value in (existing_reason, CLOUDFLARE_KOREAN_LENGTH_FAIL_REASON)
+                        if value
+                    )
                 if not quality_gate_payload["passed"]:
                     failed_count += 1
                     items.append(
@@ -4808,13 +5173,13 @@ def generate_cloudflare_posts(
                 reuse_article_prompts, article_visual_prompt_valid, inline_visual_prompt_valid = should_reuse_article_collage_prompts(
                     hero_prompt=article_visual_prompt,
                     inline_prompt=inline_visual_prompt,
-                    inline_required=inline_images_enabled,
+                    inline_required=inline_images_enabled_for_category,
                 )
                 visual_prompt = ""
                 visual_prompt_source = "article_generation_reuse"
 
                 if reuse_article_prompts:
-                    visual_prompt = _append_hero_only_visual_rule(article_visual_prompt)
+                    visual_prompt = _append_hero_only_visual_rule(article_visual_prompt, is_mysteria=is_mysteria_category)
                 else:
                     image_prompt_base = _render_prompt_template(
                         image_prompt_template,
@@ -4822,7 +5187,7 @@ def generate_cloudflare_posts(
                         keyword=keyword,
                         topic_count=requested_for_category,
                     ) + category_gate + planner_brief_block
-                    image_prompt_base = _append_hero_only_visual_rule(image_prompt_base)
+                    image_prompt_base = _append_hero_only_visual_rule(image_prompt_base, is_mysteria=is_mysteria_category)
                     prompt_model = prompt_requested_model
                     if runtime.provider_mode == "live":
                         prompt_model = _route_cloudflare_text_model(
@@ -4842,7 +5207,7 @@ def generate_cloudflare_posts(
                     generated_visual_prompt, _visual_raw = prompt_provider.generate_visual_prompt(image_prompt_base)
                     generated_visual_prompt = normalize_visual_prompt(generated_visual_prompt)
                     if is_valid_collage_prompt(generated_visual_prompt):
-                        visual_prompt = _append_hero_only_visual_rule(generated_visual_prompt)
+                        visual_prompt = _append_hero_only_visual_rule(generated_visual_prompt, is_mysteria=is_mysteria_category)
                         visual_prompt_source = "image_prompt_generation_fallback"
                     else:
                         visual_prompt_source = "image_prompt_generation_validation_failed"
@@ -4954,7 +5319,7 @@ def generate_cloudflare_posts(
                     )
                 )
                 inline_prompt = normalize_visual_prompt(getattr(article_output, "inline_collage_prompt", "") or "")
-                if inline_images_enabled and is_valid_collage_prompt(inline_prompt, minimum_length=30):
+                if inline_images_enabled_for_category and is_valid_collage_prompt(inline_prompt, minimum_length=30):
                     try:
                         inline_bytes, _inline_raw = image_provider.generate_image(inline_prompt, f"{slug_candidate}-inline-3x2")
                         if cover_image_url and _is_inline_duplicate(cover_hash, inline_bytes):
@@ -4979,7 +5344,7 @@ def generate_cloudflare_posts(
                             for value in (image_warning, f"inline_collage_failed:{inline_exc}")
                             if value
                         )
-                elif inline_images_enabled and inline_prompt:
+                elif inline_images_enabled_for_category and inline_prompt:
                     image_warning = "; ".join(
                         value
                         for value in (image_warning, "inline_collage_skipped:validation_failed")
@@ -5005,27 +5370,35 @@ def generate_cloudflare_posts(
                     article_output=article_output,
                     planner_brief=planner_brief,
                     title=title,
+                    category_slug=category_slug,
+                    body_markdown=body_markdown,
                 )
                 target_remote_post_id = str(planner_brief.get("remote_post_id") or "").strip()
+                # Resolve the actual leaf slug for the Cloudflare API
+                from app.services.cloudflare.cloudflare_asset_policy import resolve_cloudflare_category_leaf
+                try:
+                    leaf_slug = resolve_cloudflare_category_leaf(category_slug, policy=cloudflare_asset_policy)
+                except Exception:
+                    leaf_slug = category_slug or category_id
+
+                fixed_meta = _fix_cloudflare_meta_description(article_output.meta_description)
                 create_payload = {
                     "title": title,
                     "content": _prepare_markdown_body(title, body_markdown),
-                    "excerpt": article_output.excerpt,
+                    "excerpt": fixed_meta,
                     "seoTitle": title,
-                    "seoDescription": article_output.meta_description,
+                    "seoDescription": fixed_meta,
                     "tagNames": tag_names,
                     "status": normalized_status,
+                    "categorySlug": leaf_slug,
                 }
-                if target_remote_post_id:
-                    create_payload["categoryId"] = category_id
-                else:
-                    create_payload["categorySlug"] = category_slug or category_id
                 if render_metadata:
                     create_payload["metadata"] = render_metadata
                 if cover_image_url:
                     create_payload["coverImage"] = cover_image_url
                     create_payload["coverAlt"] = cover_alt
                 if target_remote_post_id:
+                    # UPDATE path
                     create_response = _integration_request(
                         db,
                         method="PUT",
@@ -5034,13 +5407,43 @@ def generate_cloudflare_posts(
                         timeout=120.0,
                     )
                 else:
-                    create_response = _integration_request(
+                    # CREATE path (2-step to ensure category resolution)
+                    # Step 1: POST as draft with categorySlug
+                    temp_payload = create_payload.copy()
+                    temp_payload["status"] = "draft"
+                    temp_payload["categorySlug"] = leaf_slug
+                    if "categoryId" in temp_payload:
+                        del temp_payload["categoryId"]
+
+                    post_response = _integration_request(
                         db,
                         method="POST",
                         path="/api/integrations/posts",
-                        json_payload=create_payload,
+                        json_payload=temp_payload,
                         timeout=120.0,
                     )
+
+                    if not post_response.is_success:
+                        create_response = post_response
+                    else:
+                        post_data = _integration_data_or_raise(post_response)
+                        new_post_id = post_data.get("id")
+                        if not new_post_id:
+                            create_response = post_response
+                        else:
+                            # Step 2: PUT to target status with categoryId
+                            final_payload = create_payload.copy()
+                            final_payload["categoryId"] = category_id
+                            if "categorySlug" in final_payload:
+                                del final_payload["categorySlug"]
+
+                            create_response = _integration_request(
+                                db,
+                                method="PUT",
+                                path=f"/api/integrations/posts/{new_post_id}",
+                                json_payload=final_payload,
+                                timeout=120.0,
+                            )
                 created_post = _integration_data_or_raise(create_response)
                 if not isinstance(created_post, dict):
                     raise ValueError("Cloudflare create/update post returned an invalid payload.")
@@ -5095,6 +5498,16 @@ def generate_cloudflare_posts(
                         "error": "; ".join(value for value in (image_warning, category_fix_warning) if value) or None,
                     }
                 )
+                try:
+                    send_telegram_post_notification(
+                        db,
+                        blog_name="Mysteria Story",
+                        article_title=str(created_post.get("title") or title),
+                        post_url=str(created_post.get("publicUrl") or "").strip(),
+                        post_status=normalized_status,
+                    )
+                except Exception:
+                    pass
                 generated_similarity_corpus.append(
                     {
                         "key": f"generated-{len(generated_similarity_corpus) + 1}",

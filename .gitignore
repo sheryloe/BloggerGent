@@ -27,10 +27,12 @@ apps/api/celerybeat-schedule
 .codex/
 .agents/
 .playwright-cli/
+.wrangler/
 .docker-data/
 backup/
 output/
 TEST/
+scratch/
 
 # local utility directories
 env/
@@ -57,6 +59,12 @@ apps/api/storage/*
 !apps/api/storage/.gitkeep
 !apps/api/storage/README.md
 apps/storage/
+apps/api/scratch/
+apps/api/bloggent.db
+
+# local browser/debug scratch files
+.tmp_pw_eval*.js
+cloudflare_full_inspection_report.json
 
 # refactoring workspace artifacts
 refactoring/

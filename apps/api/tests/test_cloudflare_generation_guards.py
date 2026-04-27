@@ -9,6 +9,10 @@ from app.services.cloudflare.cloudflare_channel_service import (
     _resolve_cloudflare_requested_models,
     _sanitize_cloudflare_public_body,
     _would_exceed_blossom_cap,
+    adsense_body_token_violations,
+    count_korean_syllables_for_body,
+    validate_no_adsense_tokens_in_body,
+    validate_min_korean_syllables,
 )
 from app.services.providers.base import RuntimeProviderConfig
 
@@ -19,13 +23,71 @@ def test_cloudflare_quality_gate_fail_reasons() -> None:
         seo_score=58.0,
         geo_score=55.0,
         ctr_score=59.0,
+        category_slug="여행과-기록",
         similarity_threshold=70.0,
         min_seo_score=60.0,
         min_geo_score=60.0,
         min_ctr_score=60.0,
+        korean_syllable_count=1999,
+        min_korean_syllable_required=2000,
     )
 
-    assert reasons == ["similarity_threshold", "seo_below_min", "geo_below_min", "ctr_below_min"]
+    assert reasons == [
+        "similarity_threshold",
+        "seo_below_min",
+        "geo_below_min",
+        "ctr_below_min",
+        "korean_body_below_min",
+    ]
+
+
+def test_count_korean_syllables_for_body_ignores_markup_urls_images_and_non_korean() -> None:
+    body = """
+    <h2>제목</h2>
+    <p>가나다 https://example.com 123 ABC</p>
+    ![이미지설명](https://example.com/a.webp)
+    ```python
+    print("한글")
+    ```
+    <figure><img alt="숨은한글" /><figcaption>캡션한글</figcaption></figure>
+    [링크한글](https://example.com)
+    """
+
+    assert count_korean_syllables_for_body(body) == len("제목가나다링크한글")
+
+
+def test_validate_min_korean_syllables_uses_complete_hangul_syllables_only() -> None:
+    assert validate_min_korean_syllables("가" * 2000) is True
+    assert validate_min_korean_syllables("가" * 1999 + "abc123ㄱㄴ") is False
+
+
+def test_validate_no_adsense_tokens_in_body_rejects_raw_adsense_code_and_placeholders() -> None:
+    body = """
+    <h2>본문</h2>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>
+    <ins class="adsbygoogle" data-ad-client="ca-pub-123" data-ad-slot="456"></ins>
+    <!--ADSENSE:inline-1-->
+    [AD_SLOT_1]
+    광고 위치
+    """
+
+    assert validate_no_adsense_tokens_in_body(body) is False
+    violations = adsense_body_token_violations(body)
+    assert "<script" in violations
+    assert "adsbygoogle" in violations
+    assert "data-ad-client" in violations
+    assert "data-ad-slot" in violations
+    assert "ca-pub-" in violations
+    assert "googlesyndication" in violations
+    assert "<!--adsense" in violations
+    assert "[ad_slot" in violations
+    assert "광고 위치" in violations
+
+
+def test_validate_no_adsense_tokens_in_body_allows_pure_article_content() -> None:
+    body = "<h2>핵심 요약</h2><p>광고 수익 이야기가 아니라 본문 정책을 설명하는 문장입니다.</p>"
+
+    assert validate_no_adsense_tokens_in_body(body) is True
 
 
 def test_sanitize_cloudflare_public_body_removes_trace_leaks_and_appends_closing_record() -> None:
@@ -51,8 +113,10 @@ def test_default_prompt_for_stage_prefers_channel_prompt_files() -> None:
         "article_generation",
     )
 
-    assert "[Category delta]" in prompt
-    assert "Build the article around one real place" in prompt
+    assert "[minimum_korean_body_gate]" in prompt
+    assert "순수 한글 본문 2000글자 이상" in prompt
+    assert "[adsense_body_policy]" in prompt
+    assert "route-first-story" in prompt
 
 
 def test_build_cloudflare_render_metadata_uses_hamni_viewpoint() -> None:
@@ -74,6 +138,63 @@ def test_build_cloudflare_render_metadata_uses_hamni_viewpoint() -> None:
     )
 
     assert metadata["viewpoints"] == ["동그리", "햄니"]
+
+
+def test_build_cloudflare_render_metadata_disables_body_ads_for_daily_memo() -> None:
+    article_output = SimpleNamespace(slide_sections=[])
+
+    metadata = _build_cloudflare_render_metadata(
+        article_output=article_output,
+        planner_brief={},
+        title="아침 루틴 기록",
+        category_slug="일상과-메모",
+        body_markdown="<h2>장면</h2><p>" + ("가" * 2200) + "</p><h2>마무리 기록</h2><p>정리합니다.</p>",
+    )
+
+    assert metadata["body_ads"]["enabled"] is False
+    assert metadata["body_ads"]["skip_reason"] == "category_policy_disabled"
+    assert metadata["body_ads"]["structure"]["h2_count"] == 2
+
+
+def test_build_cloudflare_render_metadata_plans_single_body_ad_after_second_h2() -> None:
+    article_output = SimpleNamespace(slide_sections=[])
+
+    metadata = _build_cloudflare_render_metadata(
+        article_output=article_output,
+        planner_brief={},
+        title="개발 도구 운영 가이드",
+        category_slug="개발과-프로그래밍",
+        body_markdown="<h2>핵심 요약</h2><p>"
+        + ("가" * 1100)
+        + "</p><h2>운영 기준</h2><p>"
+        + ("나" * 1100)
+        + "</p><h2>마무리 기록</h2><p>정리합니다.</p>",
+    )
+
+    assert metadata["body_ads"]["enabled"] is True
+    assert metadata["body_ads"]["placements"] == [
+        {"slot_key": "body_inline_primary", "placement": "after_h2_2", "max_count": 1}
+    ]
+    assert metadata["body_ads"]["structure"]["has_closing_record"] is True
+
+
+def test_build_cloudflare_render_metadata_plans_stock_second_slot_only_for_long_body() -> None:
+    article_output = SimpleNamespace(slide_sections=[])
+    long_body = "".join(f"<h2>섹션 {idx}</h2><p>{'가' * 850}</p>" for idx in range(1, 6))
+
+    metadata = _build_cloudflare_render_metadata(
+        article_output=article_output,
+        planner_brief={},
+        title="주식 시장 점검",
+        category_slug="주식의-흐름",
+        body_markdown=long_body,
+    )
+
+    assert metadata["body_ads"]["enabled"] is True
+    assert metadata["body_ads"]["placements"] == [
+        {"slot_key": "body_inline_primary", "placement": "after_h2_1", "max_count": 1},
+        {"slot_key": "body_inline_secondary", "placement": "after_h2_3", "max_count": 1},
+    ]
 
 
 def test_cloudflare_blossom_cap_allows_bootstrap_pick() -> None:

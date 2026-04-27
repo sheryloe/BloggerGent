@@ -29,6 +29,7 @@ from app.services.cloudflare.cloudflare_channel_service import (
     _strip_generated_body_images,
     get_cloudflare_prompt_category_relative_path,
     list_cloudflare_categories,
+    validate_no_adsense_tokens_in_body,
 )
 from app.services.cloudflare.cloudflare_sync_service import sync_cloudflare_posts
 from app.services.content.prompt_service import render_prompt_template
@@ -111,6 +112,13 @@ DAILY_MEMO_AXIS_TOKENS: dict[str, tuple[str, ...]] = {
     "commute_5min": ("출퇴근", "통근", "5분", "짬", "이동", "버스", "지하철", "걷기"),
     "daily_observation": ("심심한 일상", "일상 관찰", "사소한", "장면", "관찰", "저녁", "아침", "기록"),
 }
+MYSTERIA_CATEGORY_SLUG = "?????-???"
+
+
+def _is_mysteria_category_slug(category_slug: str | None) -> bool:
+    return _normalize_space(category_slug) == MYSTERIA_CATEGORY_SLUG
+
+
 CLOSING_RECORD_INLINE_STYLE = (
     "display:block;"
     "margin:12px 0 0 0;"
@@ -791,6 +799,8 @@ def _wrap_closing_record_block(content_body: str) -> str:
 
 def _canonical_content_body(payload: dict[str, Any]) -> str:
     title = _normalize_space(payload.get("title"))
+    category_slug = _normalize_space(payload.get("category_slug"))
+    is_mysteria = _is_mysteria_category_slug(category_slug)
     inline_image = payload.get("inline_image") if isinstance(payload.get("inline_image"), dict) else {}
     inline_url = _normalize_space(inline_image.get("url"))
     inline_alt = _normalize_space(inline_image.get("alt") or title)
@@ -798,28 +808,30 @@ def _canonical_content_body(payload: dict[str, Any]) -> str:
     if content_body:
         normalized = _strip_leading_title_heading(content_body)
         normalized = _strip_all_inline_images(normalized)
-        normalized = _insert_inline_image_before_faq_or_closing(
-            normalized,
-            inline_url=inline_url,
-            inline_alt=inline_alt,
-        )
+        if not is_mysteria:
+            normalized = _insert_inline_image_before_faq_or_closing(
+                normalized,
+                inline_url=inline_url,
+                inline_alt=inline_alt,
+            )
         normalized = _insert_inline_faq_before_closing_record(normalized, payload.get("faq_section"))
         normalized = _normalize_single_live_section(normalized)
         normalized = _wrap_closing_record_block(normalized)
-        payload["content_body"] = f"# {title}\n\n{normalized}".strip()
+        payload["content_body"] = normalized.strip() if is_mysteria else f"# {title}\n\n{normalized}".strip()
         return payload["content_body"]
 
     legacy_body = _strip_all_inline_images(str(payload.get("html_article") or ""))
     legacy_body = _strip_leading_title_heading(legacy_body)
-    legacy_body = _insert_inline_image_before_faq_or_closing(
-        legacy_body,
-        inline_url=inline_url,
-        inline_alt=inline_alt,
-    )
+    if not is_mysteria:
+        legacy_body = _insert_inline_image_before_faq_or_closing(
+            legacy_body,
+            inline_url=inline_url,
+            inline_alt=inline_alt,
+        )
     legacy_body = _insert_inline_faq_before_closing_record(legacy_body, payload.get("faq_section"))
     legacy_body = _normalize_single_live_section(legacy_body)
     legacy_body = _wrap_closing_record_block(legacy_body)
-    payload["content_body"] = f"# {title}\n\n{legacy_body}".strip()
+    payload["content_body"] = legacy_body.strip() if is_mysteria else f"# {title}\n\n{legacy_body}".strip()
     return payload["content_body"]
 
 
@@ -832,6 +844,20 @@ def _inline_faq_heading_count(content_body: str) -> int:
 
 def _inline_image_count(content_body: str) -> int:
     return len(_extract_existing_image_urls(content_body))
+
+
+def _body_h1_count(content_body: str) -> int:
+    body = str(content_body or "")
+    markdown_count = len(re.findall(r"(?m)^\s*#\s+.+$", body))
+    html_count = len(re.findall(r"(?is)<h1[^>]*>.*?</h1>", body))
+    return markdown_count + html_count
+
+
+def _h2_count(content_body: str) -> int:
+    body = str(content_body or "")
+    markdown_count = len(re.findall(r"(?m)^\s*##\s+.+$", body))
+    html_count = len(re.findall(r"(?is)<h2[^>]*>.*?</h2>", body))
+    return markdown_count + html_count
 
 
 def _extract_closing_record_paragraph(content_body: str) -> str:
@@ -1360,15 +1386,19 @@ def _build_generated_collage_prompt(
             article_context=body,
             current_date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         ).strip()
+    is_mysteria = _is_mysteria_category_slug(category_slug)
     if slot == "cover":
         directive = (
-            "Create one hero-cover editorial 3x3 collage with exactly 9 distinct panels, "
-            "realistic photography style, visible white gutters, center panel dominant, no text, no logo."
+            "Create one single flattened 5x4 panel grid collage hero image, "
+            "realistic documentary style, visible white gutters, clean grid layout, no text, no logo."
+            if is_mysteria
+            else "Create one hero-cover editorial 3x3 collage with exactly 9 distinct panels, realistic photography style, visible white gutters, center panel dominant, no text, no logo."
         )
     else:
         directive = (
-            "Create one supporting inline editorial 3x2 collage with exactly 6 distinct panels, "
-            "realistic photography style, no text, no logo, clearly different from cover."
+            "Do not request or generate any inline image for this category."
+            if is_mysteria
+            else "Create one supporting inline editorial 3x2 collage with exactly 6 distinct panels, realistic photography style, no text, no logo, clearly different from cover."
         )
     prompt = "\n\n".join(part for part in [rendered, directive] if part).strip()
     if not prompt:
@@ -1603,7 +1633,7 @@ def _collect_live_image_inventory(
 
 
 def _reserve_payload_images(payload: dict[str, Any], *, used_urls: set[str], used_asset_keys: set[str]) -> None:
-    for field_name in ("cover_image", "inline_image"):
+    for field_name in (("cover_image",) if is_mysteria else ("cover_image", "inline_image")):
         image = payload.get(field_name) if isinstance(payload.get(field_name), dict) else {}
         url = _normalize_space(image.get("url"))
         asset_key = _normalize_space(image.get("asset_key"))
@@ -1659,6 +1689,34 @@ def _resolve_payload_images(
     resolved_inline_url = _resolve_reachable_asset_url(inline_image.get("url"), public_base_url=public_base_url)
     resolved_cover_key = _normalize_space(cover_image.get("asset_key")) or _asset_key_from_url(resolved_cover_url, public_base_url=public_base_url)
     resolved_inline_key = _normalize_space(inline_image.get("asset_key")) or _asset_key_from_url(resolved_inline_url, public_base_url=public_base_url)
+    if is_mysteria and resolved_cover_url and _is_cloudflare_media_asset(resolved_cover_url, asset_key=resolved_cover_key, public_base_url=public_base_url) and _image_is_available_for_post(
+        resolved_cover_url,
+        resolved_cover_key,
+        used_urls=working_urls,
+        used_asset_keys=working_asset_keys,
+    ):
+        payload["cover_image"] = {
+            "url": resolved_cover_url,
+            "alt": _normalize_space(cover_image.get("alt") or payload.get("meta_description") or title),
+            "source": _normalize_space(cover_image.get("source") or "current_live"),
+            "asset_key": resolved_cover_key,
+        }
+        payload["inline_image"] = {"url": "", "alt": "", "source": "", "asset_key": ""}
+        image_uniqueness["cover_hash_or_key"] = resolved_cover_key or resolved_cover_url
+        image_uniqueness["inline_hash_or_key"] = ""
+        image_uniqueness["is_distinct_within_post"] = True
+        image_uniqueness["is_distinct_across_blog"] = True
+        backup_resolution["status"] = "resolved"
+        backup_resolution["candidate_count"] = 0
+        backup_resolution["cover"] = {
+            "source": payload["cover_image"]["source"],
+            "source_ref": "current_live",
+            "asset_key": payload["cover_image"]["asset_key"],
+            "url": payload["cover_image"]["url"],
+        }
+        backup_resolution["inline"] = None
+        return
+
     if (
         resolved_cover_url
         and resolved_inline_url
@@ -1790,6 +1848,31 @@ def _resolve_payload_images(
                 working_asset_keys.add(selected_cover["asset_key"])
             remaining_candidates = [item for item in remaining_candidates if item.get("candidate_id") != cover_candidate.get("candidate_id")]
             break
+
+    if is_mysteria and selected_cover is not None:
+        payload["cover_image"] = {
+            "url": _normalize_space(selected_cover.get("url")),
+            "alt": _normalize_space(cover_image.get("alt") or payload.get("meta_description") or title),
+            "source": _normalize_space(selected_cover.get("source")),
+            "asset_key": _normalize_space(selected_cover.get("asset_key")),
+        }
+        payload["inline_image"] = {"url": "", "alt": "", "source": "", "asset_key": ""}
+        image_uniqueness["cover_hash_or_key"] = _normalize_space(selected_cover.get("hash_or_key"))
+        image_uniqueness["inline_hash_or_key"] = ""
+        image_uniqueness["is_distinct_within_post"] = True
+        image_uniqueness["is_distinct_across_blog"] = True
+        backup_resolution["status"] = "resolved"
+        backup_resolution["cover"] = {
+            "source": payload["cover_image"]["source"],
+            "source_ref": _normalize_space(selected_cover.get("source_ref")),
+            "asset_key": payload["cover_image"]["asset_key"],
+            "url": payload["cover_image"]["url"],
+        }
+        backup_resolution["inline"] = None
+        backup_resolution["notes"] = []
+        source_post["current_cover_image_url"] = _normalize_space(source_post.get("current_cover_image_url") or cover_image.get("url"))
+        source_post["current_inline_image_urls"] = []
+        return
 
     if selected_inline is None:
         inline_candidates = sorted(
@@ -1927,7 +2010,7 @@ def _seed_package_from_post(row: SyncedCloudflarePost, detail: dict[str, Any]) -
     cover_image_url = _canonicalize_cloudflare_asset_url(detail.get("coverImage") or row.thumbnail_url)
     cover_alt = _normalize_space(detail.get("coverAlt") or meta_description or title)
     inline_image_url, inline_alt = _inline_image_from_detail(detail, cover_image_url=cover_image_url)
-    inline_image_urls = _extract_existing_image_urls(current_content)
+    inline_image_urls = [] if _is_mysteria_category_slug(category_slug) else _extract_existing_image_urls(current_content)
     faq_section = detail.get("faqSection") if isinstance(detail.get("faqSection"), list) else []
     return {
         "remote_post_id": _normalize_space(row.remote_post_id),
@@ -1965,16 +2048,21 @@ def _seed_package_from_post(row: SyncedCloudflarePost, detail: dict[str, Any]) -
             "source": "current_live",
             "asset_key": _asset_key_from_url(cover_image_url),
         },
-        "inline_image": {
+        "inline_image": ({
+            "url": "",
+            "alt": "",
+            "source": "",
+            "asset_key": "",
+        } if _is_mysteria_category_slug(category_slug) else {
             "url": _canonicalize_cloudflare_asset_url(inline_image_url),
             "alt": inline_alt or title,
             "source": "current_live",
             "asset_key": _asset_key_from_url(inline_image_url),
-        },
+        }),
         "image_uniqueness": {
             "cover_hash_or_key": _asset_key_from_url(cover_image_url),
-            "inline_hash_or_key": _asset_key_from_url(inline_image_url),
-            "is_distinct_within_post": bool(cover_image_url and inline_image_url and cover_image_url != inline_image_url),
+            "inline_hash_or_key": "" if _is_mysteria_category_slug(category_slug) else _asset_key_from_url(inline_image_url),
+            "is_distinct_within_post": True if _is_mysteria_category_slug(category_slug) else bool(cover_image_url and inline_image_url and cover_image_url != inline_image_url),
             "is_distinct_across_blog": False,
         },
         "backup_image_resolution": {
@@ -2138,6 +2226,7 @@ def _validate_codex_write_package(
         if not _normalize_space(payload.get(key)):
             errors.append(f"missing:{key}")
     category_slug = _normalize_space(payload.get("category_slug"))
+    is_mysteria = _is_mysteria_category_slug(category_slug)
     title = _normalize_space(payload.get("title"))
     content_body = _canonical_content_body(payload)
     if not _normalize_space(content_body):
@@ -2154,6 +2243,8 @@ def _validate_codex_write_package(
         errors.append(f"body_length:{plain_length}")
     if not _matches_live_html_contract(content_body):
         errors.append("content_body_not_live_html_contract")
+    if not validate_no_adsense_tokens_in_body(content_body):
+        errors.append("adsense_body_token_present")
     headings = _extract_headings(content_body)
     if not headings or headings[-1] != "마무리 기록":
         errors.append("closing_record_missing")
@@ -2172,17 +2263,28 @@ def _validate_codex_write_package(
     faq_heading_count = _inline_faq_heading_count(content_body)
     if faq_heading_count != 1:
         errors.append("faq_inline_missing")
-    if _inline_image_count(content_body) != 1:
+    if is_mysteria:
+        if _inline_image_count(content_body) != 0:
+            errors.append("inline_image_count_invalid")
+        if _body_h1_count(content_body) != 0:
+            errors.append("body_h1_invalid")
+        if _h2_count(content_body) not in {4, 5}:
+            errors.append("body_h2_count_invalid")
+        if not _normalize_space(payload.get("article_pattern_id")):
+            errors.append("article_pattern_id_missing")
+        if not payload.get("article_pattern_version"):
+            errors.append("article_pattern_version_missing")
+    elif _inline_image_count(content_body) != 1:
         errors.append("inline_image_count_invalid")
     if not _normalize_space(cover_image.get("url")):
         errors.append("cover_image_missing")
-    if not _normalize_space(inline_image.get("url")):
+    if not is_mysteria and not _normalize_space(inline_image.get("url")):
         errors.append("inline_image_missing")
     resolved_cover_url = _resolve_reachable_asset_url(cover_image.get("url"), public_base_url=public_base_url)
     resolved_inline_url = _resolve_reachable_asset_url(inline_image.get("url"), public_base_url=public_base_url)
     if _normalize_space(cover_image.get("url")) and not resolved_cover_url:
         errors.append("cover_image_unreachable")
-    if _normalize_space(inline_image.get("url")) and not resolved_inline_url:
+    if not is_mysteria and _normalize_space(inline_image.get("url")) and not resolved_inline_url:
         errors.append("inline_image_unreachable")
     if resolved_cover_url:
         cover_image["url"] = resolved_cover_url
@@ -2196,13 +2298,13 @@ def _validate_codex_write_package(
         public_base_url=public_base_url,
     ):
         errors.append("invalid_image_prefix")
-    if _normalize_space(inline_image.get("url")) and not _is_cloudflare_media_asset(
+    if not is_mysteria and _normalize_space(inline_image.get("url")) and not _is_cloudflare_media_asset(
         inline_image.get("url"),
         asset_key=inline_image.get("asset_key", ""),
         public_base_url=public_base_url,
     ):
         errors.append("invalid_image_prefix")
-    if _normalize_space(cover_image.get("url")) and _normalize_space(inline_image.get("url")):
+    if not is_mysteria and _normalize_space(cover_image.get("url")) and _normalize_space(inline_image.get("url")):
         if not _images_are_distinct(
             cover_image.get("url", ""),
             cover_image.get("asset_key", ""),
@@ -2212,7 +2314,7 @@ def _validate_codex_write_package(
             errors.append("duplicate_image_within_post")
     image_uniqueness["cover_hash_or_key"] = _normalize_space(image_uniqueness.get("cover_hash_or_key") or cover_image.get("asset_key") or cover_image.get("url"))
     image_uniqueness["inline_hash_or_key"] = _normalize_space(image_uniqueness.get("inline_hash_or_key") or inline_image.get("asset_key") or inline_image.get("url"))
-    image_uniqueness["is_distinct_within_post"] = _images_are_distinct(
+    image_uniqueness["is_distinct_within_post"] = True if is_mysteria else _images_are_distinct(
         cover_image.get("url", ""),
         cover_image.get("asset_key", ""),
         inline_image.get("url", ""),
