@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import calendar
 import json
@@ -20,6 +20,8 @@ from app.models.entities import (
     BlogTheme,
     ContentPlanDay,
     ContentPlanSlot,
+    Job,
+    JobStatus,
     PlannerBriefRun,
     PublishMode,
     Topic,
@@ -1235,11 +1237,13 @@ def _load_monthly_signal_payload(db: Session, *, blog: Blog, month: str) -> dict
         .order_by(AnalyticsThemeMonthlyStat.theme_name.asc())
         .all()
     )
+    lookback_date = datetime.now() - timedelta(days=20)
     facts = (
         db.query(AnalyticsArticleFact)
-        .filter(AnalyticsArticleFact.blog_id == blog.id, AnalyticsArticleFact.month == month)
+        .filter(AnalyticsArticleFact.blog_id == blog.id)
+        .filter(sa.or_(AnalyticsArticleFact.month == month, AnalyticsArticleFact.published_at >= lookback_date))
         .order_by(AnalyticsArticleFact.published_at.desc(), AnalyticsArticleFact.id.desc())
-        .limit(40)
+        .limit(100)
         .all()
     )
     pairs = {
@@ -2149,12 +2153,72 @@ def _ensure_sequential_order(db: Session, slot: ContentPlanSlot) -> None:
     if prior is not None:
         raise ValueError("earlier planner slots must run first")
 
+
+def _dispatch_existing_travel_sync_job(db: Session, slot: ContentPlanSlot) -> bool:
+    payload = slot.result_payload if isinstance(slot.result_payload, dict) else {}
+    marker = payload.get("travel_cross_sync") if isinstance(payload.get("travel_cross_sync"), dict) else None
+    if not isinstance(marker, dict) or int(slot.job_id or 0) <= 0:
+        return False
+
+    job = db.query(Job).filter(Job.id == int(slot.job_id)).one_or_none()
+    if job is None:
+        slot.status = "failed"
+        slot.error_message = f"linked travel sync job not found: {slot.job_id}"
+        slot.last_run_at = datetime.now(UTC).replace(tzinfo=None)
+        db.add(slot)
+        db.commit()
+        return True
+
+    prompts = dict(job.raw_prompts or {})
+    schedule_payload = prompts.get("pipeline_schedule") if isinstance(prompts.get("pipeline_schedule"), dict) else {}
+    schedule_payload = dict(schedule_payload)
+    schedule_payload["mode"] = "publish"
+    schedule_payload["scheduled_for"] = slot.scheduled_for.isoformat() if slot.scheduled_for else None
+    schedule_payload.setdefault("interval_minutes", 10)
+    schedule_payload.setdefault("slot_index", 0)
+    schedule_payload.setdefault("topic_count", 1)
+    prompts["pipeline_schedule"] = schedule_payload
+
+    planner_payload = prompts.get("planner_brief") if isinstance(prompts.get("planner_brief"), dict) else {}
+    planner_payload = dict(planner_payload)
+    planner_payload["scheduled_for"] = slot.scheduled_for.isoformat() if slot.scheduled_for else None
+    prompts["planner_brief"] = planner_payload
+    job.raw_prompts = prompts
+
+    if job.status == JobStatus.COMPLETED:
+        slot.status = "generated"
+        slot.article_id = int(job.article.id) if job.article is not None else slot.article_id
+        slot.error_message = None
+        slot.last_run_at = datetime.now(UTC).replace(tzinfo=None)
+        db.add(slot)
+        db.add(job)
+        db.commit()
+        return True
+
+    force_retry = job.status in {JobStatus.FAILED, JobStatus.STOPPED}
+    if force_retry:
+        job.status = JobStatus.PENDING
+        job.end_time = None
+
+    slot.status = "queued"
+    slot.error_message = None
+    slot.last_run_at = datetime.now(UTC).replace(tzinfo=None)
+    db.add(job)
+    db.add(slot)
+    db.commit()
+    run_job.delay(int(job.id), force_retry=force_retry)
+    return True
+
+
 def _run_blogger_slot_generation(
     db: Session,
     slot: ContentPlanSlot,
     *,
     publish_mode_override: PublishMode | None = None,
 ) -> None:
+    if _dispatch_existing_travel_sync_job(db, slot):
+        return
+
     if slot.plan_day.blog is None:
         raise ValueError("blog channel context is missing")
 

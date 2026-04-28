@@ -22,7 +22,20 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 10,
-      "backup_relative_path": "channels/blogger/the-midnight-archives/mystery_topic_discovery.md"
+      "backup_relative_path": "channels/blogger/the-midnight-archives/mystery_topic_discovery.md",
+      "text_generation_route": "codex_cli",
+      "policy_config": {
+        "scope_lock": "blogger:mystery-blog-35-only",
+        "allowed_patterns": [
+          "case-timeline",
+          "evidence-breakdown",
+          "legend-context",
+          "scene-investigation",
+          "scp-dossier"
+        ],
+        "target_plain_text_range": "3200-4200",
+        "title_policy": "ctr_curiosity_not_raw_topic_echo"
+      }
     },
     {
       "id": "42",
@@ -42,7 +55,29 @@
       "is_required": true,
       "prompt_enabled": true,
       "sort_order": 20,
-      "backup_relative_path": "channels/blogger/the-midnight-archives/mystery_article_generation.md"
+      "backup_relative_path": "channels/blogger/the-midnight-archives/mystery_article_generation.md",
+      "text_generation_route": "codex_cli",
+      "policy_config": {
+        "plain_text_min": 3000,
+        "plain_text_target_min": 3200,
+        "plain_text_target_max": 4200,
+        "body_h1_allowed": false,
+        "h2_count_allowed": [
+          4,
+          5
+        ],
+        "faq_count": 3,
+        "hero_only": true,
+        "inline_images": false,
+        "allowed_patterns": [
+          "case-timeline",
+          "evidence-breakdown",
+          "legend-context",
+          "scene-investigation",
+          "scp-dossier"
+        ],
+        "success_basis": "live_verified"
+      }
     },
     {
       "id": "43",
@@ -57,7 +92,15 @@
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 30,
-      "backup_relative_path": "channels/blogger/the-midnight-archives/mystery_collage_prompt.md"
+      "backup_relative_path": "channels/blogger/the-midnight-archives/mystery_collage_prompt.md",
+      "text_generation_route": "codex_cli",
+      "image_layout_policy": "5x4-panel-grid-collage",
+      "policy_config": {
+        "hero_only": true,
+        "inline_images": false,
+        "layout": "5x4-panel-grid-collage",
+        "size": "1024x1024"
+      }
     },
     {
       "id": "44",
@@ -89,7 +132,15 @@
       "is_required": true,
       "prompt_enabled": false,
       "sort_order": 50,
-      "backup_relative_path": null
+      "backup_relative_path": null,
+      "image_layout_policy": "5x4-panel-grid-collage",
+      "policy_config": {
+        "hero_only": true,
+        "inline_images": false,
+        "layout": "5x4-panel-grid-collage",
+        "size": "1024x1024",
+        "output_format": "webp"
+      }
     },
     {
       "id": "46",
@@ -119,7 +170,26 @@
       "is_required": true,
       "prompt_enabled": false,
       "sort_order": 70,
-      "backup_relative_path": null
+      "backup_relative_path": null,
+      "policy_config": {
+        "success_basis": "live_verified",
+        "required_live_fields": [
+          "published_url",
+          "hero_image_url",
+          "live_verify_ok"
+        ],
+        "required_live_status_code": 200
+      }
     }
-  ]
+  ],
+  "generation_gate_policy": {
+    "duplicate_gate": "hard",
+    "scope": "blogger:mystery-blog-35-only",
+    "stop_before_article_generation": true,
+    "stop_before_image_prompt_generation": true,
+    "stop_before_image_generation": true,
+    "no_db_write_for_blocked_topic": true,
+    "no_publish_payload_for_blocked_topic": true,
+    "body_h1_policy": "article_body_must_not_emit_h1"
+  }
 }

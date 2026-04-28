@@ -468,7 +468,9 @@ def test_rebuild_cloudflare_assets_execute_can_update_live_posts_when_enabled(
 
     assert result["uploaded_count"] == 1
     assert result["updated_count"] == 1
-    assert "<img" not in str(captured["payload"]["content"])
+    if "content" in captured["payload"]:
+        assert "<img" not in str(captured["payload"]["content"])
+    assert captured["payload"]["coverImage"] == row.thumbnail_url
     assert row.thumbnail_url.endswith("/dev-post/dev-post.webp")
     assert captured["upload_kwargs"]["public_base_url_override"] == "https://pub.example.dev"
     assert captured["upload_kwargs"]["force_integration_proxy"] is False

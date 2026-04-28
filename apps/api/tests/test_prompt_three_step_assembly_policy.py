@@ -46,8 +46,10 @@ def test_travel_channel_models_are_locked_to_planner_pass_and_image_policy() -> 
             violations.append(f"{path}: planner_provider_model={steps['article_generation'].get('planner_provider_model')}")
         if steps["article_generation"].get("pass_provider_model") != route_models["pass_provider_model"]:
             violations.append(f"{path}: pass_provider_model={steps['article_generation'].get('pass_provider_model')}")
-        if steps["article_generation"].get("structure_mode") != "kisungjeongyeol_4beat":
-            violations.append(f"{path}: structure_mode={steps['article_generation'].get('structure_mode')}")
+        structure_mode = steps["article_generation"].get("structure_mode")
+        policy_structure_mode = (steps["article_generation"].get("policy_config") or {}).get("structure_mode")
+        if structure_mode != "kisungjeongyeol_4beat" and policy_structure_mode != "kisungjeongyeol_4beat":
+            violations.append(f"{path}: structure_mode={structure_mode}")
         image_route = steps["image_prompt_generation"].get("text_generation_route") or route
         image_route_models = resolve_travel_text_route_models(str(image_route))
         if steps["image_prompt_generation"]["provider_model"] != image_route_models["image_prompt_provider_model"]:
@@ -67,10 +69,14 @@ def test_travel_article_prompts_are_hero_only() -> None:
     for folder in TRAVEL_CHANNELS:
         article_prompt = root / "prompts" / "channels" / "blogger" / folder / "travel_article_generation.md"
         text = article_prompt.read_text(encoding="utf-8")
-        if "inline_collage_prompt" in text:
+        if "inline_collage_prompt" in text and "null or empty" not in text:
             violations.append(str(article_prompt))
-        if "8-panel" not in text and "8 panel" not in text:
-            violations.append(f"{article_prompt}: missing 8-panel rule")
+        has_twenty_panel = "20 panel" in text or "20-panel" in text or "20 visible panels" in text
+        has_legacy_eight_panel = "8-panel" in text or "8 panel" in text
+        if not (has_twenty_panel or has_legacy_eight_panel):
+            violations.append(f"{article_prompt}: missing panel rule")
+        if has_twenty_panel and "5x4" not in text and "5 columns x 4 rows" not in text:
+            violations.append(f"{article_prompt}: missing 5x4 rule")
     assert not violations, f"Travel prompt hero-only violations: {violations}"
 
 

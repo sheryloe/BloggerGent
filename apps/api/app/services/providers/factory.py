@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from sqlalchemy.orm import Session
 
 from app.models.entities import Blog
+from app.services.integrations.secret_service import decrypt_secret_value
 from app.services.ops.model_policy_service import (
     CODEX_TEXT_RUNTIME_KIND,
     CODEX_TEXT_RUNTIME_MODEL,
@@ -24,6 +27,8 @@ from app.services.providers.openai import (
     resolve_enforced_openai_image_model,
 )
 from app.services.blogger.blogger_oauth_service import BloggerOAuthError, get_valid_blogger_access_token
+from app.services.platform.platform_oauth_service import PlatformOAuthError, refresh_platform_access_token
+from app.services.platform.platform_service import get_channel_credential, get_managed_channel_by_channel_id
 from app.services.integrations.settings_service import get_settings_map
 
 
@@ -120,6 +125,28 @@ def get_image_provider(db: Session, model_override: str | None = None):
 def get_blogger_provider(db: Session, blog: Blog):
     runtime = get_runtime_config(db)
     if runtime.provider_mode == "live" and (blog.blogger_blog_id or "").strip():
+        # Prefer per-channel OAuth credentials (blogger:{blog_id}) for Blogger travel channels.
+        blog_pk = getattr(blog, "id", None)
+        if blog_pk is not None:
+            channel_id = f"blogger:{int(blog_pk)}"
+            channel = get_managed_channel_by_channel_id(db, channel_id)
+            if channel is not None:
+                credential = get_channel_credential(channel, provider="blogger")
+                if credential is not None and credential.is_valid:
+                    try:
+                        expires_at = credential.expires_at
+                        should_refresh = bool(
+                            expires_at is not None and expires_at <= datetime.now(UTC) + timedelta(minutes=1)
+                        )
+                        effective_credential = (
+                            refresh_platform_access_token(db, channel_id=channel_id) if should_refresh else credential
+                        )
+                        access_token = decrypt_secret_value(effective_credential.access_token_encrypted)
+                        if access_token:
+                            return BloggerPublishingProvider(access_token=access_token, blog_id=blog.blogger_blog_id or "")
+                    except PlatformOAuthError:
+                        # Fall back to legacy Blogger OAuth setting token path.
+                        pass
         try:
             access_token = get_valid_blogger_access_token(db)
         except BloggerOAuthError as exc:

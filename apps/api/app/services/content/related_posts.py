@@ -181,6 +181,41 @@ def _resolve_related_thumbnail(image: Image | None) -> str:
     return _normalize_related_thumbnail_url(str(image.public_url or "").strip())
 
 
+def _thumbnail_key(url: str | None) -> str:
+    return _normalize_related_thumbnail_url(url).strip().casefold()
+
+
+def _thumbnail_keys_for_image(image: Image | None) -> set[str]:
+    if not image:
+        return set()
+
+    keys: set[str] = set()
+
+    def add(value: str | None) -> None:
+        key = _thumbnail_key(value)
+        if key:
+            keys.add(key)
+
+    # Travel images can carry stale delivery metadata from older fallback assets.
+    # Keep both keys so related cards never repeat the live/current hero URL.
+    add(image.public_url)
+    add(_resolve_related_thumbnail(image))
+
+    metadata = image.image_metadata if isinstance(image.image_metadata, dict) else {}
+    delivery = metadata.get("delivery") if isinstance(metadata, dict) else None
+    if isinstance(delivery, dict):
+        add(delivery.get("local_public_url"))
+        add(delivery.get("public_url"))
+        cloudflare_meta = delivery.get("cloudflare")
+        if isinstance(cloudflare_meta, dict):
+            add(cloudflare_meta.get("original_url"))
+        cloudinary_meta = delivery.get("cloudinary")
+        if isinstance(cloudinary_meta, dict):
+            add(cloudinary_meta.get("secure_url_original"))
+
+    return keys
+
+
 def _build_synced_related_candidate_maps(
     synced_candidates: list[SyncedBloggerPost],
 ) -> tuple[dict[str, SyncedBloggerPost], dict[str, SyncedBloggerPost]]:
@@ -259,6 +294,7 @@ def find_related_articles(db: Session, article: Article, limit: int | None = Non
     synced_by_link_key, synced_by_title_key = _build_synced_related_candidate_maps(synced_candidates)
     base_embedding = text_to_embedding(f"{article.title} {article.excerpt}")
     current_url = article.blogger_post.published_url if article.blogger_post else None
+    current_thumbnail_keys = _thumbnail_keys_for_image(article.image)
 
     ranked: list[tuple[float, dict[str, Any]]] = []
 
@@ -281,20 +317,17 @@ def find_related_articles(db: Session, article: Article, limit: int | None = Non
             continue
         ranked.append((score, payload))
 
+    # Simple label-based similarity
     for candidate in synced_candidates:
         if _urls_match(candidate.url, current_url) or _titles_match(candidate.title, article.title):
             continue
-        candidate_text = " ".join(
-            [
-                candidate.title,
-                candidate.excerpt_text or "",
-                " ".join(candidate.labels or []),
-            ]
-        ).strip()
-        candidate_embedding = text_to_embedding(candidate_text)
-        embedding_score = cosine_similarity(base_embedding, candidate_embedding)
-        label_score = _label_similarity(article.labels or [], candidate.labels or [])
-        score = (label_score * 0.6) + (embedding_score * 0.4)
+        
+        # Calculate label overlap
+        score = _label_similarity(article.labels or [], candidate.labels or [])
+        # Add a small boost for being in the same category
+        if article.editorial_category_label and article.editorial_category_label in (candidate.labels or []):
+            score += 0.2
+            
         ranked.append((score, _payload_for_synced_candidate(candidate=candidate, score=score)))
 
     ranked.sort(
@@ -313,6 +346,8 @@ def find_related_articles(db: Session, article: Article, limit: int | None = Non
     for _, payload in ranked:
         link_key = _normalize_link_key(payload.get("link"))
         if not link_key:
+            continue
+        if _thumbnail_key(payload.get("thumbnail")) in current_thumbnail_keys:
             continue
 
         normalized_title = _normalize_text(payload.get("title"))
@@ -366,6 +401,8 @@ def find_related_articles(db: Session, article: Article, limit: int | None = Non
                 break
             link_key = _normalize_link_key(payload.get("link"))
             if not link_key:
+                continue
+            if _thumbnail_key(payload.get("thumbnail")) in current_thumbnail_keys:
                 continue
             normalized_title = _normalize_text(payload.get("title"))
             if link_key in seen_links:

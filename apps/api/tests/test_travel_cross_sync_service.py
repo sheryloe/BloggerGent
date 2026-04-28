@@ -139,7 +139,7 @@ def test_build_travel_sync_groups_uses_hero_url_and_reports_missing_languages(db
     assert summary["article_count"] == 3
     assert summary["group_count"] >= 2
     assert any(item.target_language == "ja" for item in backlog)
-    assert any(item.target_language == "en" for item in backlog)
+    assert not any(item.target_language == "en" for item in backlog)
     assert any(item.target_language == "es" for item in backlog)
     assert any(group.hero_url.endswith("busan-night-guide.webp") for group in groups)
 

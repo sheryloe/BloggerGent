@@ -8,69 +8,90 @@
 - Editorial category key: {editorial_category_key}
 - Editorial category label: {editorial_category_label}
 - Editorial category guidance: {editorial_category_guidance}
+- Selected article pattern id: {article_pattern_id}
 
 [Mission]
-- Write one publish-ready Korean blog article package for Dongri Archive.
-- Make the article useful to a real reader, not a report, audit memo, score sheet, or prompt explanation.
-- Use the planner brief, but do not expose planner wording or internal archive operations.
+- Write one publish-ready Korean article package for Dongri Archive Cloudflare channel.
+- Category: 축제와 현장 (`축제와-현장`).
+- Minimum body length: 4000+ Korean characters excluding markup.
+        [minimum_korean_body_gate]
 
-[Category Fit]
-- Quick brief: {content_brief}
-- Core focus: keep the topic inside this category and anchor it to one concrete subject.
-- Key entities: include the specific places, tools, companies, events, records, or people needed for reader trust.
-- Treat this file as an internal archive instruction source only. Do not write an internal archive introduction.
-- This category is only for actual places, products, events, cases, entities, or decisions that a reader can understand concretely.
+        [adsense_body_policy]
+        - Do not output raw AdSense code inside `html_article`.
+        - Forbidden in `html_article`: `<script`, `<ins class="adsbygoogle"`, `adsbygoogle`, `data-ad-client`, `data-ad-slot`, `ca-pub-`, `googlesyndication`, `doubleclick`, `<!--ADSENSE`, `[AD_SLOT`, and visible Korean text such as `?? ??`.
+        - Do not invent AdSense client ids, slot ids, loader scripts, iframe widgets, ad labels, or visible ad placeholders.
+        - Body ad placement is server-owned metadata only: `render_metadata.body_ads` is computed after generation and expanded by the public renderer.
+        - Keep `html_article` as pure article content with no advertisement code or advertisement marker text.
 
-[Category delta]
-- Build the article around one real festival, local event, seasonal field visit, or venue-based crowd situation.
-- Focus on timing, route, queue, transport, food, stay, and on-site caution points.
-- Make the article feel like field guidance, not a brochure.
-- Use one real event, local festival, fair, venue-based crowd flow, food/lodging cue, and visit caution.
-- This category is only for actual places, events, venues, and public field visits.
+        - Hard gate: 순수 한글 본문 2000글자 이상.
+        - Count only complete Hangul syllables `[가-힣]` after removing HTML tags, Markdown syntax, code blocks, URLs, image alt/caption text, numbers, English, symbols, and whitespace.
+        - Do not treat byte length, markup length, Markdown length, or whitespace-included string length as the passing standard.
+        - Category target length can be higher, but any output below 2000 pure Korean body syllables must be considered invalid.
+- Keep the article useful to a real visitor. This category is a field guide, not a mood essay.
+- Use the planner brief, but never expose planner wording, internal archive operations, score reports, or prompt notes.
 
-[Blog Style]
-- Use natural Korean blog prose with clear section flow.
-- Keep the tone experiential and practical; avoid generic roundup language.
-- Do not expose any internal helper phrases, prompt notes, planner labels, model names, or quality-control labels unless the topic itself requires them.
-- Do not create standalone source, verification, audit, or score-report sections.
+[required_event_facts]
+Every article must state these facts near the beginning of `html_article`:
+- 행사명 또는 축제명
+- 개최 장소와 정확한 지역
+- 개최 기간
+- 운영 시간 또는 주요 프로그램 시간
+- 가장 혼잡한 시간대
+- 추천 방문 시간대
+- 접근 동선: 대중교통, 주차, 입구, 이동 순서
+- 현장 리스크: 대기줄, 우천, 야간 이동, 매진/예약, 교통 통제
 
-[Body Rules]
-- Start with a reader-facing lead that explains why this topic matters now.
-- Use <h2> and <h3> section headings that sound like real blog headings.
-- The final body section title must be exactly <h2>마무리 기록</h2>.
-- Do not output visible meta_description or excerpt lines inside html_article.
-- Do not insert image tags inside html_article.
-- Keep FAQ only as a short final appendix when it genuinely helps.
+If the period is unknown, write `기간 미확인` or `공식 확인 필요`. If the event has already ended, write it as `방문 기록` or `다음 회차 참고`, never as if it is currently running.
 
-[Content Requirements]
-- Quick brief, Core focus, and Key entities must be reflected in the article naturally.
-- Include concrete dates, places, tools, companies, or route details when relevant.
-- Explain tradeoffs, timing, risk, or reader action instead of listing abstract facts.
-- Keep the article inside the category; do not write a category introduction or operations memo.
-- Preserve reader trust without adding a separate source-audit block.
+[allowed_article_patterns]
+1. `info-deep-dive` - 기간, 장소, 공식 정보, 행사 배경, 운영 구성을 전체 맥락으로 정리한다.
+2. `curation-top-points` - 방문 전 확인할 핵심 5가지에 기간, 장소, 시간, 교통, 현장 리스크를 포함한다.
+3. `insider-field-guide` - 최적 방문 시간, 입장 위치, 대기 회피, 교통, 준비물 중심의 현장 가이드다.
+4. `expert-perspective` - 행사와 지역 문화의 의미를 기간, 장소, 운영 방식과 연결해 분석한다.
+5. `experience-synthesis` - 방문 흐름, 시간대별 체감, 다시 간다면 바꿀 점을 정리한다.
 
-[Output Contract]
-Return one JSON object only with these keys:
+[pattern_selection_rule]
+- Use only one pattern from `allowed_article_patterns`.
+- If `article_pattern_id` is provided and valid, follow it.
+- If it is missing or invalid, choose the best pattern from the topic and expose the selected id only in the JSON field.
+- Return `article_pattern_version = 4`.
+
+[body_structure]
+- Start with `## 핵심 요약` or the first pattern-specific H2. Never use body-level H1.
+- `info-deep-dive`: `## 행사 개요` -> `## 기간과 장소` -> `## 현장 구성` -> `## 방문 동선` -> `## 마무리 기록`
+- `curation-top-points`: `## 핵심 요약` -> `## 놓치면 아쉬운 5가지` -> `## 시간대별 방문 전략` -> `## 이동과 대기` -> `## 마무리 기록`
+- `insider-field-guide`: `## 현장 기본 정보` -> `## 최적 시간과 위치` -> `## 대기 줄이는 법` -> `## 교통과 준비물` -> `## 마무리 기록`
+- `expert-perspective`: `## 행사의 맥락` -> `## 장소가 만드는 의미` -> `## 현장에서 볼 지점` -> `## 방문 판단 기준` -> `## 마무리 기록`
+- `experience-synthesis`: `## 현장에 들어서며` -> `## 시간대별 체감` -> `## 좋았던 점과 불편했던 점` -> `## 다시 간다면` -> `## 마무리 기록`
+
+[faq_policy]
+- Category default: optional.
+- Add FAQ only when it helps with 일정, 교통, 입장, 준비물, 우천, 예약 questions.
+- Do not add FAQ just to fill space.
+
+[image_prompt_policy]
+- `image_collage_prompt` must be English.
+- Cloudflare is hero-only: create one representative hero image prompt only.
+- Include event scene, visitor route, queue, booth/stage, entrance/transport, and time-of-day mood.
+- Do not request body images, inline images, multiple generated assets, logos, readable text, or watermarks.
+
+[forbidden_outputs]
+- No body-level H1.
+- Do not insert `<img>`, markdown images, scripts, iframes, or raw external widgets inside `html_article`.
+- Do not include `meta_description` or `excerpt` visibly inside `html_article`.
+- Do not mention Antigravity, Codex, Gemini, BloggerGent, pipeline, score, audit, or internal planner unless the topic itself is explicitly about those tools.
+- Do not write an event as currently available unless the period is confirmed.
+- Do not move outside the category topic just because the keyword is broad.
+
+[Output JSON]
+Return valid JSON only with these fields:
 - title
 - meta_description
-- labels
-- slug
 - excerpt
+- labels
 - html_article
 - faq_section
 - image_collage_prompt
-- inline_collage_prompt
+- inline_collage_prompt: return an empty string
 - article_pattern_id
 - article_pattern_version
-
-[Output Rules]
-- All reader-facing text in title, meta_description, excerpt, html_article, and FAQ answers must be Korean.
-- labels: 5 to 7 items, first label should match the editorial category label when natural.
-- slug: lowercase ASCII with hyphens only.
-- excerpt: exactly 2 Korean sentences.
-- Return JSON only.
-
-[Image Prompt Rules]
-- image_collage_prompt must be English, realistic editorial collage direction, no text, no logo.
-- inline_collage_prompt must be English, realistic supporting collage direction, no text, no logo.
-- Keep image prompts grounded in the actual topic, not abstract symbolism.

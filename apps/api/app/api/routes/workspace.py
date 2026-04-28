@@ -10,6 +10,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.api.deps.admin_auth import AdminMutationRoute
 from app.services.blogger.blogger_oauth_service import BloggerOAuthError
 from app.schemas.api import (
     AgentRunCreate,
@@ -20,6 +21,8 @@ from app.schemas.api import (
     AgentWorkerRead,
     AgentWorkerUpdate,
     ContentItemCreate,
+    ContentItemDuplicateCheckRead,
+    ContentItemDuplicateCheckRequest,
     ContentItemRead,
     ContentItemReviewRequest,
     ContentItemUpdate,
@@ -44,6 +47,7 @@ from app.services.platform.workspace_service import (
     build_mission_control_payload,
     build_channel_oauth_authorization_url,
     build_runtime_health,
+    check_content_item_duplicates,
     create_workspace_agent_worker,
     create_agent_run,
     create_content_item,
@@ -72,7 +76,7 @@ from app.services.platform.workspace_service import (
     workspace_runtime_usage,
 )
 
-router = APIRouter(prefix="/workspace", tags=["workspace"])
+router = APIRouter(prefix="/workspace", tags=["workspace"], route_class=AdminMutationRoute)
 
 _MISSION_CONTROL_CACHE_TTL_SECONDS = 3.0
 _mission_control_cache_lock = threading.Lock()
@@ -80,6 +84,10 @@ _mission_control_cache: dict[str, Any] = {
     "expires_at": 0.0,
     "payload": None,
 }
+
+
+def _enum_value(value: Any) -> str:
+    return str(getattr(value, "value", value))
 
 
 def _redirect_with_query(base_url: str, **params: str) -> RedirectResponse:
@@ -145,6 +153,25 @@ def read_content_items(
     )
 
 
+@router.post("/content-items/duplicate-check", response_model=ContentItemDuplicateCheckRead)
+def duplicate_check_workspace_content_item(
+    payload: ContentItemDuplicateCheckRequest,
+    db: Session = Depends(get_db),
+) -> ContentItemDuplicateCheckRead:
+    try:
+        result = check_content_item_duplicates(
+            db,
+            provider=_enum_value(payload.provider),
+            channel_id=payload.channel_id,
+            content_type=_enum_value(payload.content_type),
+            topic=payload.topic,
+            title=payload.title,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return ContentItemDuplicateCheckRead(**result)
+
+
 @router.post("/content-items", response_model=ContentItemRead, status_code=status.HTTP_201_CREATED)
 def create_workspace_content_item(payload: ContentItemCreate, db: Session = Depends(get_db)) -> ContentItemRead:
     try:
@@ -152,7 +179,7 @@ def create_workspace_content_item(payload: ContentItemCreate, db: Session = Depe
             db,
             channel_id=payload.channel_id,
             idempotency_key=payload.idempotency_key,
-            content_type=str(payload.content_type),
+            content_type=_enum_value(payload.content_type),
             title=payload.title,
             description=payload.description,
             body_text=payload.body_text,
@@ -173,7 +200,7 @@ def update_workspace_content_item(item_id: int, payload: ContentItemUpdate, db: 
     return update_content_item(
         db,
         item,
-        lifecycle_status=str(payload.lifecycle_status) if payload.lifecycle_status is not None else None,
+        lifecycle_status=_enum_value(payload.lifecycle_status) if payload.lifecycle_status is not None else None,
         title=payload.title,
         description=payload.description,
         body_text=payload.body_text,

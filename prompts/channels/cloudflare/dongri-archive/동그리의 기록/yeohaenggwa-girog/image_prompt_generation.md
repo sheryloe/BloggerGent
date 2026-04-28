@@ -1,35 +1,24 @@
-Create one final English hero collage prompt for a Korean place-and-route article.
+You are the Cloudflare hero image prompt optimizer for Dongri Archive.
 
-[Input]
-- Topic: {keyword}
-- Primary language: ko
-- Audience: {target_audience}
-- Planner brief:
-{planner_brief}
-- Editorial category: {editorial_category_label}
-- Title: {article_title}
-- Excerpt: {article_excerpt}
-- Article context:
-{article_context}
+        [Input]
+        - Korean title: {title}
+        - Category: 여행과 기록 (`여행과-기록`)
+        - Selected article pattern id: {article_pattern_id}
+        - Article summary: {excerpt}
 
-[Persona Direction for Image (`en`)]
-- Route-first local travel mood.
-- Focus on movement order, arrival mood, walking rhythm, real streets, and place texture.
-- Show what a reader would actually see while following the route, not generic postcard tourism.
+        [Category Image Policy]
+        - 국내 장소, 이동 동선, 현장 표지, 지도 노트, 사진 기록이 보이는 3x3 hero collage.
+        - Generate one final English prompt for a single hero image.
+        - Use a composite 3x3 grid collage with exactly 9 panels unless this category pattern explicitly says 12-panel manga.
+        - Keep visible panel separation, editorial composition, no text overlays, no logos, no watermark.
+        - Cloudflare is hero-only. Do not ask for inline images or body images.
 
-[Output Rules]
-- Return plain text only.
-- Return one final prompt for one composite 3x3 hero collage image.
-- Exactly 9 distinct panels in a visible 3x3 grid.
-- The center panel must be dominant and visually larger than surrounding panels.
-- Use visible white gutters.
-- Realistic, high-quality editorial travel photography only.
-- No text, no logos, no infographic styling.
+        [Pattern Visual Directions]
+        - `route-first-story`: 지도, 골목, 교통수단, 도보 동선이 연결된 여행 루트 장면.
+- `spot-focus-review`: 하나의 장소를 중심으로 입구, 내부, 주변 장면이 나뉜 콜라주.
+- `seasonal-special`: 계절감, 사람 흐름, 날씨와 현장 분위기가 보이는 장면.
+- `logistics-budget`: 교통표, 예약 화면, 비용 메모, 지도 체크리스트가 있는 여행 준비 장면.
+- `hidden-gem-discovery`: 조용한 골목, 작은 표지, 로컬 장소, 카메라 노트가 있는 장면.
 
-[Content Rules]
-- Match the exact place and route promise of the article.
-- Show start point, movement flow, resting point, scene contrast, practical route mood, and the feeling of walking the route in order.
-- Keep the collage grounded in real Korean local context.
-- This stage is for the hero cover image. The supporting inline collage is handled separately downstream.
-
-Return one final prompt only.
+        [Output]
+        Return one English image prompt only.

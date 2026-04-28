@@ -1,75 +1,80 @@
 [Input]
-- Topic: {keyword}
-- Current date: {current_date}
-- Target audience: {target_audience}
-- Blog focus: {content_brief}
-- Planner brief:
-{planner_brief}
-- Editorial category key: {editorial_category_key}
-- Editorial category label: {editorial_category_label}
-- Editorial category guidance: {editorial_category_guidance}
+        - Topic: {keyword}
+        - Current date: {current_date}
+        - Target audience: {target_audience}
+        - Blog focus: {content_brief}
+        - Planner brief:
+        {planner_brief}
+        - Editorial category key: {editorial_category_key}
+        - Editorial category label: {editorial_category_label}
+        - Editorial category guidance: {editorial_category_guidance}
+        - Selected article pattern id: {article_pattern_id}
 
-[Mission]
-- Write one publish-ready Korean blog article package for Dongri Archive.
-- Make the article useful to a real reader, not a report, audit memo, score sheet, or prompt explanation.
-- Use the planner brief, but do not expose planner wording or internal archive operations.
+        [Mission]
+        - Write one publish-ready Korean article package for Dongri Archive Cloudflare channel.
+        - Category: 일상과 메모 (`일상과-메모`).
+        - Minimum body length: 3000+ Korean characters excluding markup.
+        - Use the planner brief, but never expose planner wording, internal archive operations, score reports, or prompt notes.
+        - Keep the article useful to a real reader, not a system report.
 
-[Category Fit]
-- Quick brief: {content_brief}
-- Core focus: keep the topic inside this category and anchor it to one concrete subject.
-- Key entities: include the specific places, tools, companies, events, records, or people needed for reader trust.
-- Treat this file as an internal archive instruction source only. Do not write an internal archive introduction.
-- This category is only for actual places, products, events, cases, entities, or decisions that a reader can understand concretely.
+        [allowed_article_patterns]
+        1. `daily-01-reflective-monologue` - Reflective Monologue: 사유형 독백. 장면에서 질문으로 이어진다.
+2. `daily-02-insight-memo` - Insight Memo: 일상에서 발견한 작은 통찰을 적용 가능한 메모로 정리한다.
+3. `daily-03-habit-tracker` - Habit Tracker: 루틴, 습관, 반복 기록을 재현 가능한 순서로 정리한다.
+4. `daily-04-emotional-reflection` - Emotional Reflection: 감정 회고를 구체적 장면과 문장으로 정리한다.
 
-[Category delta]
-- Keep the article centered on one real daily routine, memo topic, app use case, or life-system adjustment.
-- Make the value practical and immediately usable instead of reflective only.
-- Favor scene-based explanation and small friction fixes.
-- Use a daily-observation frame: quiet scene, observed tension, literary observation, and one practical meaning.
+        [pattern_selection_rule]
+        - Use only one pattern from `allowed_article_patterns`.
+        - If `article_pattern_id` is provided and valid, follow it.
+        - If it is missing or invalid, choose the best pattern from the topic and expose the selected id only in the JSON field.
+        - Return `article_pattern_version = 4`.
 
-[Blog Style]
-- Use natural Korean blog prose with clear section flow.
-- Keep the tone experiential and practical; avoid generic roundup language.
-- Do not expose any internal helper phrases, prompt notes, planner labels, model names, or quality-control labels unless the topic itself requires them.
-- Do not create standalone source, verification, audit, or score-report sections.
+        [category_focus]
+        - 일상 장면을 기록하되 감상 나열로 끝내지 않고 생각과 실천으로 이어지는 메모형 글.
+        - Tone: 조용한 관찰, 과장 없는 문장, 구체적인 생활 장면.
 
-[Body Rules]
-- Start with a reader-facing lead that explains why this topic matters now.
-- Use <h2> and <h3> section headings that sound like real blog headings.
-- The final body section title must be exactly <h2>마무리 기록</h2>.
-- Do not output visible meta_description or excerpt lines inside html_article.
-- Do not insert image tags inside html_article.
-- Keep FAQ only as a short final appendix when it genuinely helps.
+        [body_structure]
+        - HTML body는 h2/h3/p 중심. FAQ 기본 금지. 마지막은 <h2>마무리 기록</h2>.
+        - `daily-01-reflective-monologue`: ## 장면 -> ## 생각 -> ## 남은 질문 -> ## 마무리 기록
+- `daily-02-insight-memo`: ## 장면 -> ## 문제를 다시 보기 -> ## 적용할 수 있는 통찰 -> ## 작은 체크리스트 -> ## 마무리 기록
+- `daily-03-habit-tracker`: ## 장면 -> ## 루틴의 목적 -> ## 실행 순서 -> ## 작은 체크리스트 -> ## 마무리 기록
+- `daily-04-emotional-reflection`: ## 장면 -> ## 감정의 흐름 -> ## 내가 붙잡은 문장 -> ## 실천 -> ## 마무리 기록
 
-[Content Requirements]
-- Quick brief, Core focus, and Key entities must be reflected in the article naturally.
-- Include concrete dates, places, tools, companies, or route details when relevant.
-- Explain tradeoffs, timing, risk, or reader action instead of listing abstract facts.
-- Keep the article inside the category; do not write a category introduction or operations memo.
-- Preserve reader trust without adding a separate source-audit block.
+        [faq_policy]
+        - Category default: none.
+        - Pattern-level FAQ policy must be respected.
+        - Do not add FAQ just to fill space.
 
-[Output Contract]
-Return one JSON object only with these keys:
-- title
-- meta_description
-- labels
-- slug
-- excerpt
-- html_article
-- faq_section
-- image_collage_prompt
-- inline_collage_prompt
-- article_pattern_id
-- article_pattern_version
+        [image_prompt_policy]
+        - 노트, 책상, 산책, 루틴, 창가, 감정 회고가 드러나는 조용한 3x3 hero collage.
+        - `image_collage_prompt` must be English.
+        - Cloudflare is hero-only: create one representative hero image prompt only.
+        - Do not request body images, inline images, multiple generated assets, logos, readable text, or watermarks.
 
-[Output Rules]
-- All reader-facing text in title, meta_description, excerpt, html_article, and FAQ answers must be Korean.
-- labels: 5 to 7 items, first label should match the editorial category label when natural.
-- slug: lowercase ASCII with hyphens only.
-- excerpt: exactly 2 Korean sentences.
-- Return JSON only.
+        [forbidden_outputs]
+        - No body-level H1.
+        - Do not insert `<img>`, markdown images, scripts, iframes, or raw external widgets inside `html_article`.
+        - Do not include `meta_description` or `excerpt` visibly inside `html_article`.
+        - Do not mention Antigravity, Codex, Gemini, BloggerGent, pipeline, score, audit, or internal planner unless the topic itself is explicitly about those tools.
+        - Do not move outside the category topic just because the keyword is broad.
 
-[Image Prompt Rules]
-- image_collage_prompt must be English, realistic editorial collage direction, no text, no logo.
-- inline_collage_prompt must be English, realistic supporting collage direction, no text, no logo.
-- Keep image prompts grounded in the actual topic, not abstract symbolism.
+        [Output JSON]
+        Return valid JSON only with these fields:
+        - title
+        - meta_description
+        - excerpt
+        - labels
+        - html_article
+        - faq_section
+        - image_collage_prompt
+        - inline_collage_prompt: return an empty string
+        - article_pattern_id
+        - article_pattern_version
+
+        [adsense_body_policy]
+        - Do not output raw AdSense code inside `html_article`.
+        - Forbidden in `html_article`: `<script`, `<ins class="adsbygoogle"`, `adsbygoogle`, `data-ad-client`, `data-ad-slot`, `ca-pub-`, `googlesyndication`, `doubleclick`, `<!--ADSENSE`, `[AD_SLOT`, and visible Korean text such as `?? ??`.
+        - Do not invent AdSense client ids, slot ids, loader scripts, iframe widgets, ad labels, or visible ad placeholders.
+        - Body ad placement is server-owned metadata only: `render_metadata.body_ads` is computed after generation and expanded by the public renderer.
+        - Keep `html_article` as pure article content with no advertisement code or advertisement marker text.
+

@@ -599,6 +599,63 @@ def test_create_content_item_reuses_manual_idempotency_key(db: Session) -> None:
     assert second.title == "First title"
 
 
+def test_workspace_duplicate_check_flags_same_channel_topic(db: Session) -> None:
+    ensure_managed_channels(db)
+    channel = get_managed_channel_by_channel_id(db, "instagram:main")
+    assert channel is not None
+
+    create_content_item(
+        db,
+        channel=channel,
+        content_type="instagram_image",
+        title="Seoul spring cafe card news",
+        description="Instagram carousel about Seoul spring cafes",
+        brief_payload={
+            "topic": "Seoul spring cafe card news",
+            "cards": [{"headline": "Best Seoul cafes", "body": "Spring route"}],
+        },
+    )
+
+    result = workspace_service.check_content_item_duplicates(
+        db,
+        provider="instagram",
+        channel_id="instagram:main",
+        content_type="instagram_image",
+        topic="Seoul spring cafe card news",
+        title="Seoul spring cafe card news",
+    )
+
+    assert result["is_duplicate"] is True
+    assert result["risk_level"] == "high"
+    assert result["matched_items"][0]["title"] == "Seoul spring cafe card news"
+
+
+def test_workspace_duplicate_check_ignores_other_content_type(db: Session) -> None:
+    ensure_managed_channels(db)
+    channel = get_managed_channel_by_channel_id(db, "youtube:main")
+    assert channel is not None
+
+    create_content_item(
+        db,
+        channel=channel,
+        content_type="youtube_video",
+        title="Mystery signal explained",
+        brief_payload={"topic": "Mystery signal explained"},
+    )
+
+    result = workspace_service.check_content_item_duplicates(
+        db,
+        provider="youtube",
+        channel_id="youtube:main",
+        content_type="instagram_image",
+        topic="Mystery signal explained",
+        title="Mystery signal explained",
+    )
+
+    assert result["is_duplicate"] is False
+    assert result["matched_items"] == []
+
+
 def test_workspace_content_item_asset_flow_transitions_to_ready_then_queued(
     db: Session,
     tmp_path: Path,

@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
+from app.api.deps.admin_auth import AdminMutationRoute
 from app.models.entities import Article
 from app.schemas.api import (
     ArticleDetailRead,
@@ -26,7 +27,7 @@ from app.services.platform.publishing_service import (
 from app.services.providers.base import ProviderRuntimeError
 from app.services.content.topic_guard_service import TopicGuardConflictError
 
-router = APIRouter()
+router = APIRouter(route_class=AdminMutationRoute)
 
 
 def _record_search_description_sync(

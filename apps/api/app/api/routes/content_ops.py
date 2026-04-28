@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.api.deps.admin_auth import AdminMutationRoute
 from app.schemas.api import (
     ContentOverviewRecalculateRead,
     ContentOverviewResponse,
@@ -27,7 +28,7 @@ from app.services.content.content_ops_service import (
     sync_live_content_reviews,
 )
 
-router = APIRouter()
+router = APIRouter(route_class=AdminMutationRoute)
 
 
 def _raise_http(exc: ContentOpsError) -> None:

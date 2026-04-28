@@ -345,7 +345,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
   async function loadCalendar(preferredDate?: string | null) {
     if (!selectedChannelId) return;
     try {
-      setStatusMessage("플래너를 불러오는 중입니다.");
+      setStatusMessage("생성 운영 데이터를 불러오는 중입니다.");
       const next = await getPlannerCalendar(selectedChannelId, month);
       setCalendar(next);
       const nextDate = preferredDate && next.days.some((day) => day.planDate === preferredDate)
@@ -356,7 +356,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
       }
       setStatusMessage("");
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : "플래너를 불러오지 못했습니다.");
+      setStatusMessage(error instanceof Error ? error.message : "생성 운영 데이터를 불러오지 못했습니다.");
     }
   }
 
@@ -445,7 +445,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
     for (let index = 0; index < targetDays.length; index += 1) {
       const day = targetDays[index];
       try {
-        setStatusMessage(`소형 모델로 월간 브리프 자동 채우는 중... ${index + 1}/${targetDays.length} (${formatDayLabel(day.planDate)})`);
+        setStatusMessage(`Antigravity 생성 브리프를 채우는 중... ${index + 1}/${targetDays.length} (${formatDayLabel(day.planDate)})`);
         const analysis = await runPlannerDayBriefAnalysis(day.id);
         const applied = await applyPlannerDayBrief(day.id, {
           runId: analysis.run.id,
@@ -468,7 +468,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
   async function handleRebuildMonthPlan() {
     if (!selectedChannelId) return;
     try {
-      setStatusMessage("월간 계획과 브리프를 다시 만드는 중입니다.");
+      setStatusMessage("생성 슬롯과 브리프를 다시 만드는 중입니다.");
       const next = await buildPlannerMonthPlan({ channelId: selectedChannelId, month, overwrite: true });
       setCalendar(next);
       const nextDate = next.days.find((day) => day.planDate === todayDateKey)?.planDate ?? next.days[0]?.planDate ?? null;
@@ -479,15 +479,15 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
       await loadCalendar(nextDate);
       if (fillResult.failedDays > 0) {
         setStatusMessage(
-          `월간 계획 생성 완료. 브리프 반영 ${fillResult.appliedSlots}개, 유지 ${fillResult.skippedSlots}개, 실패 일자 ${fillResult.failedDays}건`,
+          `생성 슬롯 구성 완료. 브리프 반영 ${fillResult.appliedSlots}개, 유지 ${fillResult.skippedSlots}개, 실패 일자 ${fillResult.failedDays}건`,
         );
         return;
       }
       setStatusMessage(
-        `월간 계획과 브리프 자동 채우기 완료. 반영 ${fillResult.appliedSlots}개, 유지 ${fillResult.skippedSlots}개`,
+        `생성 슬롯과 브리프 자동 채우기 완료. 반영 ${fillResult.appliedSlots}개, 유지 ${fillResult.skippedSlots}개`,
       );
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : "월간 계획과 브리프를 다시 만들지 못했습니다.");
+      setStatusMessage(error instanceof Error ? error.message : "생성 슬롯과 브리프를 다시 만들지 못했습니다.");
     }
   }
 
@@ -654,7 +654,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
   if (!plannerChannels.length) {
     return (
       <div className="rounded-[28px] border border-dashed border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
-        플래너를 지원하는 연결 채널이 없습니다. 먼저 연동 설정에서 채널을 연결하세요.
+        생성 운영을 지원하는 연결 채널이 없습니다. 먼저 프롬프트/설정에서 채널을 연결하세요.
       </div>
     );
   }
@@ -701,11 +701,11 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
             <MetricCard label="발행 완료" value={`${monthSummary.published}건`} />
           </div>
           <div className="flex flex-wrap gap-2 xl:justify-end">
-            <Link href="/admin" className="rounded-full bg-slate-100 px-3.5 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-200">
-              관리자 설정
+            <Link href="/settings" className="rounded-full bg-slate-100 px-3.5 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-200">
+              프롬프트/설정
             </Link>
             <button type="button" onClick={handleRebuildMonthPlan} className="rounded-full bg-slate-950 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-slate-800">
-              월간 계획 다시 만들기
+              생성 슬롯 다시 만들기
             </button>
           </div>
         </div>
@@ -713,7 +713,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
           <span className="font-semibold text-slate-900">현재 기준</span>
           {selectedChannel ? <FlagPill tone="slate">{selectedChannel.name}</FlagPill> : null}
           <FlagPill tone="slate">{providerTypeLabel(selectedType)}</FlagPill>
-          <span>{formatMonthLabel(month)} 운영 계획</span>
+          <span>{formatMonthLabel(month)} 생성 운영</span>
         </div>
         {statusMessage ? <p className="mt-4 text-sm text-indigo-600">{statusMessage}</p> : null}
       </section>
@@ -722,9 +722,9 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
         <div className="rounded-[22px] bg-white p-3.5 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-[11px] font-semibold tracking-[0.16em] text-slate-400">월간 캘린더</p>
+              <p className="text-[11px] font-semibold tracking-[0.16em] text-slate-400">생성 캘린더</p>
               <h2 className="mt-1 text-xl font-semibold text-slate-950">{formatMonthLabel(month)}</h2>
-              <p className="mt-1 text-[13px] text-slate-500">{selectedChannel ? `${selectedChannel.name} 기준 월간 계획` : "선택한 채널 기준 월간 계획"}</p>
+              <p className="mt-1 text-[13px] text-slate-500">{selectedChannel ? `${selectedChannel.name} 기준 생성 슬롯` : "선택한 채널 기준 생성 슬롯"}</p>
             </div>
             {selectedChannel ? <FlagPill tone="slate">{selectedChannel.name}</FlagPill> : null}
           </div>
@@ -777,13 +777,13 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
           <div className="rounded-[22px] bg-white p-2.5 shadow-sm">
             <div className="flex flex-wrap items-center gap-1 rounded-full bg-slate-100 p-1 text-[12px]">
               <button type="button" onClick={() => setQuery({ panel: "day" })} className={`rounded-full px-3 py-1.5 font-semibold ${selectedTab === "day" ? "bg-white text-slate-950 shadow-sm" : "text-slate-600"}`}>
-                일간 계획
+                일별 슬롯
               </button>
               <button type="button" onClick={() => setQuery({ panel: "rules" })} className={`rounded-full px-3 py-1.5 font-semibold ${selectedTab === "rules" ? "bg-white text-slate-950 shadow-sm" : "text-slate-600"}`}>
                 카테고리 규칙
               </button>
               <button type="button" onClick={() => setQuery({ panel: "month" })} className={`rounded-full px-3 py-1.5 font-semibold ${selectedTab === "month" ? "bg-white text-slate-950 shadow-sm" : "text-slate-600"}`}>
-                월간 집계
+                배분 현황
               </button>
             </div>
           </div>
@@ -803,8 +803,8 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
               <div className="rounded-[20px] border border-slate-200 bg-slate-50 p-3.5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold text-slate-950">일별 CTR 분석</p>
-                    <p className="mt-1 text-[13px] text-slate-500">각 채널의 1단계 주제 발굴 프롬프트를 기준으로, 관리용 브리프는 채널 언어와 무관하게 모두 한글로 제안하고 빈 칸만 반영합니다.</p>
+                    <p className="text-sm font-semibold text-slate-950">주제 중복 방지 분석</p>
+                    <p className="mt-1 text-[13px] text-slate-500">각 채널의 프롬프트 규칙과 기존 게시글 신호를 기준으로 Antigravity가 사용할 브리프를 제안하고 빈 칸만 반영합니다.</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button
@@ -1026,7 +1026,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
                   <p className="text-[11px] font-semibold tracking-[0.16em] text-slate-400">카테고리 배정 규칙</p>
                   <h2 className="mt-1 text-lg font-semibold text-slate-950">주간 횟수 / 요일별 배정</h2>
                   <p className="mt-1 text-[12px] text-slate-500">
-                    저장하면 현재 월의 미실행 슬롯 카테고리가 즉시 다시 배정됩니다. Cloudflare처럼 카테고리가 많은 채널은 검색으로 빠르게 찾을 수 있습니다.
+                    저장하면 미실행 생성 슬롯의 카테고리가 즉시 다시 배정됩니다. Cloudflare처럼 카테고리가 많은 채널은 검색으로 빠르게 찾을 수 있습니다.
                   </p>
                 </div>
                 <button
@@ -1101,7 +1101,7 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
                               </select>
                             </Field>
                             <p className="text-[12px] leading-5 text-slate-500">
-                              이 카테고리를 해당 채널에서 한 주에 몇 번 넣을지 지정합니다. 나머지 슬롯은 자동 배정 카테고리로 채워집니다.
+                              이 카테고리를 해당 채널에서 한 주에 몇 번 생성할지 지정합니다. 나머지 슬롯은 자동 배정 카테고리로 채워집니다.
                             </p>
                           </div>
                         ) : null}
@@ -1147,8 +1147,8 @@ export function PlannerManager({ channels }: PlannerManagerProps) {
           ) : (
             <div className="space-y-4 rounded-[22px] bg-white p-3.5 shadow-sm">
               <div>
-                <p className="text-[11px] font-semibold tracking-[0.16em] text-slate-400">월간 집계</p>
-                <h2 className="mt-1 text-xl font-semibold text-slate-950">카테고리 배분 현황</h2>
+                <p className="text-[11px] font-semibold tracking-[0.16em] text-slate-400">생성 배분</p>
+                <h2 className="mt-1 text-xl font-semibold text-slate-950">카테고리별 슬롯 현황</h2>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 {monthCategoryStats.map((category) => (

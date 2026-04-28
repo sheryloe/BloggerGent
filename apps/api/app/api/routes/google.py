@@ -7,6 +7,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.api.deps.admin_auth import AdminMutationRoute
 from app.models.entities import AnalyticsArticleFact, Blog, SyncedBloggerPost
 from app.schemas.api import (
     BloggerRefactorRead,
@@ -49,7 +50,7 @@ from app.services.ops.dedupe_utils import status_priority as dedupe_status_prior
 from app.services.integrations.settings_service import get_settings_map
 from app.tasks.admin import run_blogger_low_score_refactor
 
-router = APIRouter()
+router = APIRouter(route_class=AdminMutationRoute)
 
 
 def _to_utc(value: datetime | None) -> datetime | None:

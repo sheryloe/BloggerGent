@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
+from app.api.deps.admin_auth import AdminMutationRoute
 from app.models.entities import Topic
 from app.schemas.api import DiscoveryRunRequest, DiscoveryRunResponse, TopicRead
 from app.services.platform.blog_service import get_blog, list_visible_blog_ids
@@ -12,7 +13,7 @@ from app.services.providers.base import ProviderRuntimeError
 from app.services.content.topic_guard_service import TopicGuardConflictError
 from app.tasks.pipeline import discover_topics_and_enqueue
 
-router = APIRouter()
+router = APIRouter(route_class=AdminMutationRoute)
 
 
 @router.get("", response_model=list[TopicRead])

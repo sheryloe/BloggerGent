@@ -366,7 +366,9 @@ def _build_generation_prompt(
     title: str,
     excerpt: str,
     seo_score: float | None,
+    geo_score: float | None,
     ctr: float | None,
+    lighthouse_score: float | None,
     avg_score: int,
     current_content: str,
     kept_inline_url: str,
@@ -392,7 +394,7 @@ def _build_generation_prompt(
         f"- fixed_slug: {fixed_slug}\n"
         f"- current_title: {title}\n"
         f"- current_excerpt: {excerpt}\n"
-        f"- current_scores: seo={seo_score} ctr={ctr} avg={avg_score}\n"
+        f"- current_scores: seo={seo_score} geo={geo_score} ctr={ctr} lh={lighthouse_score} avg={avg_score}\n"
         f"- rewrite_mode: {mode}  (light if avg>=80, heavy if avg<80)\n"
         f"{daily_memo_fit}\n"
         f"[Image Rules]\n"
@@ -468,7 +470,9 @@ class CandidatePost:
     url: str
     category_slug: str
     seo_score: float | None
+    geo_score: float | None
     ctr: float | None
+    lighthouse_score: float | None
     avg_score: int
 
 
@@ -505,11 +509,15 @@ def _select_candidates(db, *, category_slug: str, processed_ids: set[str], batch
     rows = db.execute(
         text(
             """
-            SELECT remote_post_id, slug, title, url, category_slug, seo_score, ctr,
-                   ROUND((COALESCE(seo_score, 0) + COALESCE(ctr, 0)) / 2.0) AS avg_score
+            SELECT remote_post_id, slug, title, url, category_slug, seo_score, geo_score, ctr, lighthouse_score,
+                   ROUND((COALESCE(seo_score, 0) + COALESCE(geo_score, 0) + COALESCE(ctr, 0) + COALESCE(lighthouse_score, 0)) / 4.0) AS avg_score
             FROM synced_cloudflare_posts
             WHERE status IN ('published','live')
               AND category_slug = :category_slug
+              AND (
+                    ((COALESCE(seo_score, 0) + COALESCE(geo_score, 0) + COALESCE(ctr, 0) + COALESCE(lighthouse_score, 0)) / 4.0) < 80
+                    OR LEAST(COALESCE(seo_score, 0), COALESCE(geo_score, 0), COALESCE(ctr, 0), COALESCE(lighthouse_score, 0)) < 70
+                  )
             ORDER BY avg_score ASC, updated_at_remote ASC NULLS FIRST, published_at ASC NULLS FIRST
             """,
         ),
@@ -528,7 +536,9 @@ def _select_candidates(db, *, category_slug: str, processed_ids: set[str], batch
                 url=_normalize_space(row.get("url")),
                 category_slug=_normalize_space(row.get("category_slug")),
                 seo_score=row.get("seo_score"),
+                geo_score=row.get("geo_score"),
                 ctr=row.get("ctr"),
+                lighthouse_score=row.get("lighthouse_score"),
                 avg_score=int(row.get("avg_score") or 0),
             )
         )
@@ -636,7 +646,9 @@ def main() -> int:
                 "url": post.url,
                 "avg_score": post.avg_score,
                 "seo_score": post.seo_score,
+                "geo_score": post.geo_score,
                 "ctr": post.ctr,
+                "lighthouse_score": post.lighthouse_score,
             }
             try:
                 detail = _integration_request(base_url, token, method="GET", path=f"/api/integrations/posts/{post.remote_post_id}")
@@ -674,7 +686,9 @@ def main() -> int:
                     title=_normalize_space(detail.get("title") or post.title),
                     excerpt=_normalize_space(detail.get("excerpt") or ""),
                     seo_score=post.seo_score,
+                    geo_score=post.geo_score,
                     ctr=post.ctr,
+                    lighthouse_score=post.lighthouse_score,
                     avg_score=post.avg_score,
                     current_content=content_stripped,
                     kept_inline_url=kept_inline,

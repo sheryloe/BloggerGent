@@ -178,7 +178,7 @@ def test_generate_travel_four_beat_article_assembles_planner_and_passes() -> Non
         "meta_description_direction": "Immediate planning value",
         "labels": ["Travel", "Seoul", "Route", "Guide", "Local"],
         "faq_intent": "What readers should check before going.",
-        "image_seed": "8-panel editorial travel collage with thin white gutters.",
+        "image_seed": "single flattened 5x4 travel collage with 20 visible panels and thin white gutters.",
         "route_place_key_cues": ["station", "cafe", "street", "night view"],
         "beats": [
             {"label": "기", "goal": "Open with the route promise.", "must_include": ["hook"], "avoid": ["padding"]},
@@ -191,32 +191,32 @@ def test_generate_travel_four_beat_article_assembles_planner_and_passes() -> Non
         _build_output(
             title_tag="Beat1",
             body_char="A",
-            body_len=250,
-            image_prompt="Beat1 image prompt with eight panel travel collage guidance and no text overlays.",
+            body_len=760,
+            image_prompt="Beat1 image prompt with a single flattened 5x4 travel collage and no text overlays.",
         ),
         _build_output(
             title_tag="Beat2",
             body_char="B",
-            body_len=260,
+            body_len=780,
             image_prompt="Beat2 image prompt with route cues, realistic panels, and thin white gutters.",
         ),
         _build_output(
             title_tag="Beat3",
             body_char="C",
-            body_len=270,
+            body_len=760,
             image_prompt="Beat3 image prompt with local scene contrast, realistic movement, and panel separation.",
         ),
         _build_output(
             title_tag="Beat4",
             body_char="D",
-            body_len=280,
+            body_len=760,
             faq_items=[
                 {
                     "question": "What should I confirm before leaving?",
                     "answer": "Confirm timing, transit, and the stop sequence before leaving.",
                 }
             ],
-            image_prompt="Beat4 image prompt should win final image prompt with eight panel route collage framing.",
+            image_prompt="Beat4 image prompt should win final image prompt with single-image 5x4 route collage framing.",
             inline_prompt=None,
         ),
     ]
@@ -250,6 +250,8 @@ def test_generate_travel_four_beat_article_assembles_planner_and_passes() -> Non
     assert metadata["travel_four_beat_article_assembly"] is True
     assert metadata["planner"]["title_direction"] == planner["title_direction"]
     assert len(metadata["passes"]) == 4
+    assert metadata["validation"]["target_total_ok"] is True
+    assert metadata["validation"]["recommended_total_ok"] is False
 
 
 def test_generate_travel_four_beat_article_retries_korean_beats_to_3200_3600() -> None:
@@ -258,7 +260,7 @@ def test_generate_travel_four_beat_article_retries_korean_beats_to_3200_3600() -
         "meta_description_direction": "실전 동선",
         "labels": ["Travel", "Seoul", "Night", "Route", "Guide"],
         "faq_intent": "출발 전에 무엇을 확인해야 하는가",
-        "image_seed": "square 8-panel editorial travel collage, 1024x1024, thin white gutters",
+        "image_seed": "single flattened 5x4 editorial travel collage, 1024x1024, twenty visible panels, thin white gutters",
         "route_place_key_cues": ["station", "cafe", "night view"],
         "beats": [
             {"label": "기", "goal": "도입", "must_include": ["hook"], "avoid": ["padding"]},
@@ -311,6 +313,40 @@ def test_generate_travel_four_beat_article_retries_korean_beats_to_3200_3600() -
     assert 960 <= metadata["validation"]["pass_lengths"]["jeon"] <= 1080
     assert 640 <= metadata["validation"]["pass_lengths"]["gyeol"] <= 720
     assert output.inline_collage_prompt is None
+
+
+def test_generate_travel_four_beat_article_flags_short_non_korean_output() -> None:
+    planner = {
+        "title_direction": "Short route article",
+        "meta_description_direction": "Short value",
+        "labels": ["Travel", "Busan", "Route", "Guide", "Local"],
+        "faq_intent": "What to check first.",
+        "image_seed": "single flattened 5x4 travel collage with 20 visible panels.",
+        "route_place_key_cues": ["station", "market", "viewpoint"],
+        "beats": [
+            {"key": "gi", "label": "기", "goal": "Open", "must_include": ["hook"], "avoid": ["padding"]},
+            {"key": "seung", "label": "승", "goal": "Build", "must_include": ["route"], "avoid": ["repetition"]},
+            {"key": "jeon", "label": "전", "goal": "Turn", "must_include": ["contrast"], "avoid": ["generic"]},
+            {"key": "gyeol", "label": "결", "goal": "Close", "must_include": ["summary"], "avoid": ["new topics"]},
+        ],
+    }
+
+    def _generate_planner(_prompt: str):
+        return planner, {"mock_planner": True}
+
+    def _generate_pass(_prompt: str):
+        return _build_output(title_tag="Short", body_char="A", body_len=420), {"mock": True}
+
+    _output, metadata = generate_travel_four_beat_article(
+        base_prompt="English travel prompt",
+        language="en",
+        generate_planner=_generate_planner,
+        generate_pass=_generate_pass,
+    )
+
+    assert metadata["validation"]["target_total_ok"] is False
+    assert metadata["validation"]["total_plain_text_length"] < 3000
+    assert metadata["validation"]["failing_passes"] != []
 
 
 def test_generate_mystery_four_part_article_assembles_planner_and_passes() -> None:

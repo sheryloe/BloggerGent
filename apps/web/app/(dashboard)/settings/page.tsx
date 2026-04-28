@@ -1,5 +1,4 @@
 import { SettingsConsole } from "@/components/dashboard/settings-console";
-import { SettingsTelegramHelpCard } from "@/components/dashboard/settings-telegram-help-card";
 import { fetchBloggerConfig, fetchSettings } from "@/lib/api";
 
 export default async function SettingsPage() {
@@ -7,8 +6,7 @@ export default async function SettingsPage() {
 
   return (
     <div className="space-y-4">
-      <SettingsTelegramHelpCard />
-      <SettingsConsole settings={settings} config={config} mode="integrations" />
+      <SettingsConsole settings={settings} config={config} mode="all" />
     </div>
   );
 }

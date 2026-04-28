@@ -25,8 +25,12 @@ from app.models.entities import (
 from app.services.content.multilingual_bundle_service import default_target_audience_for_language
 from app.services.content.travel_blog_policy import (
     TRAVEL_BLOG_IDS,
+    get_travel_blog_policy,
+    normalize_travel_public_hero_url,
     normalize_travel_category_key,
     normalize_travel_text_generation_route,
+    parse_travel_canonical_object_key,
+    travel_public_url_to_object_key,
 )
 from app.services.ops.job_service import create_job
 
@@ -88,6 +92,7 @@ class TravelSyncCandidate:
     labels: tuple[str, ...]
     category_key: str
     hero_url: str
+    hero_slug: str
     status: str
     created_at: datetime
     source_article_id: int | None
@@ -143,7 +148,15 @@ def _normalize_hero_url(value: str | None) -> str:
     if not raw:
         return ""
     base = raw.split("#", maxsplit=1)[0].split("?", maxsplit=1)[0].strip()
-    return base.rstrip("/")
+    return normalize_travel_public_hero_url(base)
+
+
+def _hero_slug_from_public_url(value: str | None) -> str:
+    object_key = travel_public_url_to_object_key(value)
+    parsed = parse_travel_canonical_object_key(object_key)
+    if parsed is None:
+        return ""
+    return slugify(str(parsed.get("post_slug") or "").strip(), separator="-")
 
 
 def _tokenize(*parts: str) -> tuple[frozenset[str], frozenset[str]]:
@@ -286,6 +299,7 @@ def _load_candidates(db: Session, *, blog_ids: tuple[int, ...]) -> list[TravelSy
                 labels=tuple(str(label).strip() for label in (article.labels or []) if str(label).strip()),
                 category_key=normalize_travel_category_key(article.editorial_category_key),
                 hero_url=_normalize_hero_url(article.image.public_url if article.image else ""),
+                hero_slug=_hero_slug_from_public_url(article.image.public_url if article.image else ""),
                 status=_normalize_post_status(article),
                 created_at=article.created_at if isinstance(article.created_at, datetime) else datetime.now(UTC),
                 source_article_id=int(article.travel_sync_source_article_id or 0) or None,
@@ -302,7 +316,7 @@ def build_travel_sync_groups(
     db: Session,
     *,
     blog_ids: tuple[int, ...] = (34, 36, 37),
-    source_languages: tuple[str, ...] = TRAVEL_SUPPORTED_LANGUAGES,
+    source_languages: tuple[str, ...] = ("en",),
     target_languages: tuple[str, ...] = TRAVEL_SUPPORTED_LANGUAGES,
 ) -> tuple[list[TravelSyncGroup], list[TravelSyncBacklogItem], dict[str, Any]]:
     scoped_blog_ids = tuple(sorted({int(blog_id) for blog_id in blog_ids if int(blog_id) in TRAVEL_BLOG_IDS}))
@@ -331,12 +345,41 @@ def build_travel_sync_groups(
         if not candidate.hero_url:
             continue
         hero_url_map.setdefault(candidate.hero_url, []).append(candidate.article_id)
-    for article_ids in hero_url_map.values():
+    for hero_url, article_ids in hero_url_map.items():
         if len(article_ids) < 2:
             continue
-        first = article_ids[0]
-        for item in article_ids[1:]:
-            _union(parent, rank, first, item)
+        hero_slug = _hero_slug_from_public_url(hero_url)
+        if not hero_slug:
+            continue
+        anchor_ids = [
+            article_id
+            for article_id in article_ids
+            if slugify(str(by_id[article_id].slug or "").strip(), separator="-") == hero_slug
+        ]
+        if not anchor_ids:
+            continue
+        anchor_group_keys = {
+            str(by_id[anchor_id].existing_group_key or "").strip()
+            for anchor_id in anchor_ids
+            if str(by_id[anchor_id].existing_group_key or "").strip()
+        }
+        for article_id in article_ids:
+            candidate = by_id[article_id]
+            candidate_slug = slugify(str(candidate.slug or "").strip(), separator="-")
+            candidate_group_key = str(candidate.existing_group_key or "").strip()
+            matched_anchor_id = next(
+                (
+                    anchor_id
+                    for anchor_id in anchor_ids
+                    if int(candidate.source_article_id or 0) == int(anchor_id)
+                    or (candidate_group_key and candidate_group_key in anchor_group_keys)
+                    or candidate_slug == hero_slug
+                ),
+                None,
+            )
+            if matched_anchor_id is None:
+                continue
+            _union(parent, rank, int(matched_anchor_id), int(article_id))
 
     for left_index in range(len(candidates)):
         left = candidates[left_index]
@@ -361,7 +404,7 @@ def build_travel_sync_groups(
             bucket = [item for item in ordered_members if item.language == language]
             if bucket:
                 best_by_language[language] = _pick_best_member(bucket)
-        representative = _pick_best_member(list(best_by_language.values()) or ordered_members)
+        representative = best_by_language.get("en") or _pick_best_member(list(best_by_language.values()) or ordered_members)
         group_key = _derive_group_key(ordered_members)
         missing_languages = tuple(language for language in normalized_target_languages if language not in best_by_language)
         group = TravelSyncGroup(
@@ -380,6 +423,8 @@ def build_travel_sync_groups(
         if not source_candidates:
             continue
         source = _pick_best_member(source_candidates)
+        source_policy = get_travel_blog_policy(blog_id=source.blog_id)
+        source_hero_url = normalize_travel_public_hero_url(source.hero_url, policy=source_policy)
         for target_language in missing_languages:
             target_blog_id = TRAVEL_BLOG_ID_BY_LANGUAGE.get(target_language)
             if not target_blog_id:
@@ -392,7 +437,7 @@ def build_travel_sync_groups(
                     source_language=source.language,
                     source_slug=source.slug,
                     source_title=source.title,
-                    source_hero_url=source.hero_url,
+                    source_hero_url=source_hero_url,
                     category_key=normalize_travel_category_key(source.category_key),
                     target_language=target_language,
                     target_blog_id=target_blog_id,

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.api.deps.admin_auth import AdminMutationRoute
 from app.models.entities import BlogAgentConfig, JobStatus, PublishMode, WorkflowStageType
 from app.schemas.api import (
     BlogAgentConfigRead,
@@ -60,7 +61,7 @@ from app.services.integrations.google_reporting_service import list_analytics_pr
 from app.services.providers.base import ProviderRuntimeError
 from app.tasks.pipeline import discover_topics_and_enqueue
 
-router = APIRouter()
+router = APIRouter(route_class=AdminMutationRoute)
 logger = logging.getLogger(__name__)
 
 
@@ -508,6 +509,7 @@ def trigger_blog_discovery(
     blog_id: int,
     publish_mode: PublishMode | None = Query(default=None),
     stop_after: JobStatus | None = Query(default=None),
+    defer_images: bool = Query(default=True),
     db: Session = Depends(get_db),
 ) -> dict:
     blog = get_blog(db, blog_id)
@@ -519,6 +521,7 @@ def trigger_blog_discovery(
             blog_id=blog_id,
             publish_mode=publish_mode.value if publish_mode else None,
             stop_after=stop_after,
+            defer_images=defer_images,
         )
     except ProviderRuntimeError as exc:
         status_code = exc.status_code if exc.status_code in {400, 401, 403, 404, 409, 422, 429} else 502

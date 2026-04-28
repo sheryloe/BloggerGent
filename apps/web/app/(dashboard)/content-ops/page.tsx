@@ -146,8 +146,6 @@ export default async function ContentOpsPage({
     <div className="space-y-6">
       <div className="flex flex-wrap gap-2">
         <TypeChip href={buildTypeHref(searchParams, "blog", tab)} active={type === "blog"} label="블로그" />
-        <TypeChip href={buildTypeHref(searchParams, "youtube", tab)} active={type === "youtube"} label="유튜브" />
-        <TypeChip href={buildTypeHref(searchParams, "instagram", tab)} active={type === "instagram"} label="인스타그램" />
       </div>
 
       {type === "blog" ? (

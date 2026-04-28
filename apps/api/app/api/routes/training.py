@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.api.deps.admin_auth import AdminMutationRoute
 from app.schemas.api import (
     TrainingControlPayload,
     TrainingScheduleUpdate,
@@ -19,7 +20,7 @@ from app.services.content.training_service import (
 )
 from app.tasks.training import run_training_session
 
-router = APIRouter()
+router = APIRouter(route_class=AdminMutationRoute)
 
 
 def _raise_http(exc: TrainingServiceError) -> None:

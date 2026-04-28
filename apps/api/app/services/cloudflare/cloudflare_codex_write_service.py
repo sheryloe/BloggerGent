@@ -112,11 +112,11 @@ DAILY_MEMO_AXIS_TOKENS: dict[str, tuple[str, ...]] = {
     "commute_5min": ("출퇴근", "통근", "5분", "짬", "이동", "버스", "지하철", "걷기"),
     "daily_observation": ("심심한 일상", "일상 관찰", "사소한", "장면", "관찰", "저녁", "아침", "기록"),
 }
-MYSTERIA_CATEGORY_SLUG = "?????-???"
+MYSTERIA_CATEGORY_SLUG = "미스테리아-스토리"
 
 
 def _is_mysteria_category_slug(category_slug: str | None) -> bool:
-    return _normalize_space(category_slug) == MYSTERIA_CATEGORY_SLUG
+    return _normalize_space(category_slug) in {MYSTERIA_CATEGORY_SLUG, "미스테리아 스토리", "miseuteria-seutori"}
 
 
 CLOSING_RECORD_INLINE_STYLE = (
@@ -1633,6 +1633,7 @@ def _collect_live_image_inventory(
 
 
 def _reserve_payload_images(payload: dict[str, Any], *, used_urls: set[str], used_asset_keys: set[str]) -> None:
+    is_mysteria = _is_mysteria_category_slug(_normalize_space(payload.get("category_slug")))
     for field_name in (("cover_image",) if is_mysteria else ("cover_image", "inline_image")):
         image = payload.get(field_name) if isinstance(payload.get(field_name), dict) else {}
         url = _normalize_space(image.get("url"))
@@ -1657,6 +1658,7 @@ def _resolve_payload_images(
 ) -> None:
     title = _normalize_space(payload.get("title"))
     category_slug = _normalize_space(payload.get("category_slug"))
+    is_mysteria = _is_mysteria_category_slug(category_slug)
     cover_image = _normalize_image_field(payload.get("cover_image"), fallback_alt=title, public_base_url=public_base_url)
     inline_image = _normalize_image_field(payload.get("inline_image"), fallback_alt=title, public_base_url=public_base_url)
     payload["cover_image"] = cover_image

@@ -4,6 +4,7 @@ import html
 import re
 
 from app.models.entities import Article
+from app.services.blogger.blogger_live_audit_service import extract_best_article_fragment
 from app.services.content.faq_hygiene import filter_generic_faq_items
 from app.services.content.related_posts import render_related_cards_html
 
@@ -19,6 +20,65 @@ LANGUAGE_SWITCH_END_MARKER = "<!--BLOGGENT_LANGUAGE_SWITCH_END-->"
 HANGUL_CHAR_RE = re.compile(r"[가-힣ㄱ-ㅎㅏ-ㅣ]+")
 MULTISPACE_RE = re.compile(r"\s{2,}")
 EMPTY_PAREN_RE = re.compile(r"\(\s*\)")
+ARTICLE_BODY_ROLE_RE = re.compile(
+    r"<section\b[^>]*data-bloggent-role=['\"]article-body['\"][^>]*>(?P<body>.*?)</section>",
+    re.IGNORECASE | re.DOTALL,
+)
+TRAVEL_INLINE_MARKER_RE = re.compile(r"<!--\s*TRAVEL_INLINE_3X2\s*-->", re.IGNORECASE)
+ARTICLE_TAG_ONLY_RE = re.compile(r"</?article\b[^>]*>", re.IGNORECASE)
+FIGURE_BLOCK_RE = re.compile(r"<figure\b[^>]*>.*?</figure>", re.IGNORECASE | re.DOTALL)
+IMG_TAG_RE = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
+SEO_META_BLOCK_RE = re.compile(
+    r"<div\b[^>]*id=['\"]bloggent-seo-meta['\"][^>]*>.*?</div>",
+    re.IGNORECASE | re.DOTALL,
+)
+HEADER_BLOCK_RE = re.compile(r"<header\b[^>]*>.*?</header>", re.IGNORECASE | re.DOTALL)
+LEGACY_ARTICLE_WRAPPER_SECTION_RE = re.compile(
+    r"<article\b[^>]*(?:data-bloggent-meta-description|class=['\"]dossier-body['\"])[^>]*>.*?(?P<section><section\b[^>]*>.*?</section>).*?</article>",
+    re.IGNORECASE | re.DOTALL,
+)
+LEGACY_SHELL_SECTION_RE = re.compile(
+    r"<div\b[^>]*id=['\"]bloggent-seo-meta['\"][^>]*>.*?</div>\s*(?:<figure\b[^>]*>.*?</figure>\s*)?(?P<section><section\b[^>]*>.*?</section>)",
+    re.IGNORECASE | re.DOTALL,
+)
+OUTER_SECTION_BODY_RE = re.compile(r"^<section\b[^>]*>(?P<body>.*)</section>$", re.IGNORECASE | re.DOTALL)
+SECTION_TAG_RE = re.compile(r"<(/?)section\b[^>]*>", re.IGNORECASE)
+
+JSON_LD_TEMPLATE = """
+<script type="application/ld+json">
+{{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "{title}",
+  "description": "{description}",
+  "image": "{image_url}",
+  "author": {{
+    "@type": "Organization",
+    "name": "BloggerGent Mystery Archives"
+  }},
+  "publisher": {{
+    "@type": "Organization",
+    "name": "{blog_name}",
+    "logo": {{
+      "@type": "ImageObject",
+      "url": "https://api.dongriarchive.com/assets/mystery-logo.webp"
+    }}
+  }},
+  "datePublished": "{date_published}"
+}}
+</script>
+"""
+
+CRITICAL_MYSTERY_CSS = """
+<style>
+  .dossier-body { font-display: swap; line-height: 1.8; color: #cbd5e1; }
+  .dossier-body h2 { color: #f8fafc; font-family: 'Newsreader', serif; border-bottom: 1px solid #1e293b; padding-bottom: 8px; margin-top: 40px; }
+  .dossier-body img { border: 1px solid rgba(255,255,255,0.05); box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3); }
+  .evidence-table { width: 100%; border-collapse: collapse; background: #1e293b; border-radius: 8px; overflow: hidden; margin: 24px 0; }
+  .evidence-table th { background: #334155; color: #60a5fa; text-align: left; padding: 12px; font-size: 14px; text-transform: uppercase; }
+  .evidence-table td { padding: 12px; border-top: 1px solid #334155; font-size: 15px; }
+</style>
+"""
 
 
 def _inject_inline_style(html: str, tag: str, style: str) -> str:
@@ -38,26 +98,25 @@ def _inject_inline_style(html: str, tag: str, style: str) -> str:
 def _theme_config(category: str) -> dict[str, str]:
     if category == "mystery":
         return {
-            "accent": "#93c5fd",
-            "article_background": "#0b1220",
-            "article_border": "#243247",
-            "article_shadow": "0 24px 72px rgba(2,6,23,0.55)",
-            "heading": "#f3f7ff",
-            "body": "#d5deec",
-            "muted": "#9fb0c9",
-            "faq_background": "#111c2f",
-            "faq_border": "#2a3a52",
-            "table_background": "#111a2a",
-            "table_header_background": "#18243a",
+            "accent": "#60a5fa",
+            "article_background": "#0f172a",
+            "article_border": "#1e293b",
+            "article_shadow": "none",
+            "heading": "#f8fafc",
+            "body": "#cbd5e1",
+            "muted": "#94a3b8",
+            "faq_border": "#334155",
+            "table_background": "#1e293b",
+            "table_header_background": "#334155",
         }
     return {
-        "accent": "#0f766e",
+        "accent": "#0d9488",
         "article_background": "#ffffff",
-        "article_border": "#e2e8f0",
-        "article_shadow": "0 20px 60px rgba(15,23,42,0.08)",
+        "article_border": "#f1f5f9",
+        "article_shadow": "none",
         "heading": "#0f172a",
-        "body": "#1e293b",
-        "muted": "#475569",
+        "body": "#334155",
+        "muted": "#64748b",
         "faq_background": "#f8fafc",
         "faq_border": "#e2e8f0",
         "table_background": "#ffffff",
@@ -151,27 +210,27 @@ def _style_article_body(
     styled = _inject_inline_style(
         styled,
         "h2",
-        f"font-size:30px;line-height:1.28;margin:42px 0 16px;color:{heading};font-weight:800;letter-spacing:-0.02em;",
+        f"font-size:24px;line-height:1.3;margin:32px 0 12px;color:{heading};font-weight:700;",
     )
     styled = _inject_inline_style(
         styled,
         "h3",
-        f"font-size:22px;line-height:1.45;margin:26px 0 12px;color:{heading};font-weight:700;",
+        f"font-size:20px;line-height:1.4;margin:24px 0 10px;color:{heading};font-weight:700;",
     )
     styled = _inject_inline_style(
         styled,
         "p",
-        f"margin:0 0 18px;color:{body};font-size:17px;line-height:1.9;",
+        f"margin:0 0 16px;color:{body};font-size:16px;line-height:1.7;",
     )
     styled = _inject_inline_style(
         styled,
         "ul",
-        f"margin:0 0 24px;padding-left:22px;color:{body};",
+        f"margin:0 0 20px;padding-left:20px;color:{body};",
     )
     styled = _inject_inline_style(
         styled,
         "li",
-        f"margin:0 0 10px;color:{body};font-size:16px;line-height:1.8;",
+        f"margin:0 0 8px;color:{body};font-size:16px;line-height:1.6;",
     )
     styled = _inject_inline_style(
         styled,
@@ -181,32 +240,32 @@ def _style_article_body(
     styled = _inject_inline_style(
         styled,
         "a",
-        f"color:{accent};font-weight:600;text-decoration:none;",
+        f"color:{accent};text-decoration:underline;",
     )
     styled = _inject_inline_style(
         styled,
         "table",
-        f"width:100%;border-collapse:collapse;margin:0 0 24px;background:{table_background};border:1px solid {border};",
+        f"width:100%;border-collapse:collapse;margin:20px 0;background:{table_background};border:1px solid {border};",
     )
     styled = _inject_inline_style(
         styled,
         "th",
-        f"border:1px solid {border};padding:12px 14px;background:{table_header_background};color:{heading};text-align:left;font-size:15px;",
+        f"border:1px solid {border};padding:10px;background:{table_header_background};color:{heading};text-align:left;font-size:14px;",
     )
     styled = _inject_inline_style(
         styled,
         "td",
-        f"border:1px solid {border};padding:12px 14px;color:{body};font-size:15px;vertical-align:top;",
+        f"border:1px solid {border};padding:10px;color:{body};font-size:14px;vertical-align:top;",
     )
     styled = _inject_inline_style(
         styled,
         "details",
-        f"margin:0 0 12px;border:1px solid {border};border-radius:18px;background:{details_background};padding:0;",
+        f"margin:0 0 10px;border:1px solid {border};border-radius:12px;background:{details_background};padding:0;",
     )
     styled = _inject_inline_style(
         styled,
         "summary",
-        f"cursor:pointer;list-style:none;padding:16px 18px;color:{heading};font-size:18px;font-weight:700;",
+        f"cursor:pointer;padding:12px 14px;color:{heading};font-size:17px;font-weight:700;",
     )
     return styled
 
@@ -237,6 +296,106 @@ def _strip_existing_related_posts_section(html_fragment: str) -> str:
     )
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
+
+
+def _extract_canonical_body_fragment(html_fragment: str) -> str:
+    current = str(html_fragment or "").strip()
+    if not current:
+        return current
+
+    for _ in range(4):
+        changed = False
+        article_count = len(re.findall(r"<article\b", current, flags=re.IGNORECASE))
+        if article_count > 1:
+            narrowed = extract_best_article_fragment(current)
+            if narrowed and len(narrowed) < len(current):
+                current = narrowed.strip()
+                changed = True
+        role_match = ARTICLE_BODY_ROLE_RE.search(current)
+        if role_match:
+            current = str(role_match.group("body") or "").strip()
+            changed = True
+        elif any(
+            token in current
+            for token in (
+                "data-bloggent-meta-source=\"body\"",
+                "data-bloggent-meta-description",
+                "class=\"dossier-body\"",
+                "id=\"bloggent-seo-meta\"",
+            )
+        ):
+            extracted_section_body = _extract_first_section_body(current, anchor_token='id="bloggent-seo-meta"')
+            if not extracted_section_body:
+                extracted_section_body = _extract_first_section_body(current)
+            if extracted_section_body:
+                current = extracted_section_body
+                changed = True
+            else:
+                shell_match = LEGACY_ARTICLE_WRAPPER_SECTION_RE.search(current) or LEGACY_SHELL_SECTION_RE.search(current)
+                if shell_match:
+                    current = str(shell_match.group("section") or "").strip()
+                    outer_section_match = OUTER_SECTION_BODY_RE.match(current)
+                    if outer_section_match:
+                        current = str(outer_section_match.group("body") or "").strip()
+                    changed = True
+        if not changed:
+            break
+    return current
+
+
+def _extract_first_section_body(source: str, *, anchor_token: str | None = None) -> str:
+    current = str(source or "")
+    anchor_index = 0
+    if anchor_token:
+        located = current.find(anchor_token)
+        if located >= 0:
+            anchor_index = located
+    section_match = re.search(r"<section\b[^>]*>", current[anchor_index:], flags=re.IGNORECASE)
+    if not section_match:
+        return ""
+
+    section_start = anchor_index + section_match.start()
+    depth = 0
+    for tag_match in SECTION_TAG_RE.finditer(current[section_start:]):
+        closing = tag_match.group(1) == "/"
+        if not closing:
+            depth += 1
+            continue
+        depth -= 1
+        if depth == 0:
+            absolute_end = section_start + tag_match.end()
+            wrapped = current[section_start:absolute_end]
+            body_match = OUTER_SECTION_BODY_RE.match(wrapped.strip())
+            return str(body_match.group("body") or "").strip() if body_match else ""
+    return ""
+
+
+def _strip_travel_body_shell(article_html: str) -> str:
+    current = str(article_html or "").strip()
+    if not current:
+        return current
+
+    preserved_restore_figures: list[tuple[str, str]] = []
+
+    def preserve_restore_figure(match: re.Match[str]) -> str:
+        figure_html = match.group(0)
+        lower = figure_html.lower()
+        if "data-bloggent-restore-slot=\"inline\"" not in lower and "data-bloggent-restore-slot='inline'" not in lower:
+            return ""
+        token = f"__BLOGGENT_RESTORE_INLINE_{len(preserved_restore_figures)}__"
+        preserved_restore_figures.append((token, figure_html))
+        return token
+
+    current = TRAVEL_INLINE_MARKER_RE.sub("", current)
+    current = FIGURE_BLOCK_RE.sub(preserve_restore_figure, current)
+    current = IMG_TAG_RE.sub("", current)
+    current = SEO_META_BLOCK_RE.sub("", current)
+    current = HEADER_BLOCK_RE.sub("", current)
+    current = ARTICLE_TAG_ONLY_RE.sub("", current)
+    for token, figure_html in preserved_restore_figures:
+        current = current.replace(token, figure_html)
+    current = re.sub(r"\n{3,}", "\n\n", current)
+    return current.strip()
 
 
 def _resolve_inline_collage_media(article: Article, *, slot_name: str) -> dict | None:
@@ -292,7 +451,10 @@ def _resolve_primary_image_url(article: Article, fallback_url: str) -> str:
     metadata = image.image_metadata if image else None
     delivery = metadata.get("delivery") if isinstance(metadata, dict) else None
 
-    candidates: list[str] = []
+    candidates: list[str] = [
+        str(fallback_url or "").strip(),
+        str(image.public_url or "").strip() if image else "",
+    ]
     if isinstance(delivery, dict):
         cloudflare_meta = delivery.get("cloudflare")
         if isinstance(cloudflare_meta, dict):
@@ -304,13 +466,6 @@ def _resolve_primary_image_url(article: Article, fallback_url: str) -> str:
 
         candidates.append(str(delivery.get("local_public_url") or "").strip())
         candidates.append(str(delivery.get("public_url") or "").strip())
-
-    candidates.extend(
-        [
-            str(fallback_url or "").strip(),
-            str(image.public_url or "").strip() if image else "",
-        ]
-    )
 
     for candidate in candidates:
         if candidate:
@@ -387,12 +542,18 @@ def assemble_article_html(
         category=category,
         empty_message=_localized_related_empty_message(ui_locale),
     )
-    article_html = re.sub(r"<p>\s*<!--RELATED_POSTS-->\s*</p>", "", article.html_article, flags=re.IGNORECASE)
+    hero_url = _resolve_primary_image_url(article, hero_image_url)
+    article_html = _extract_canonical_body_fragment(article.html_article)
+    article_html = re.sub(r"<p>\s*<!--RELATED_POSTS-->\s*</p>", "", article_html, flags=re.IGNORECASE)
     article_html = article_html.replace("<!--RELATED_POSTS-->", "")
     article_html = _strip_existing_related_posts_section(article_html)
-    if category == "mystery":
+    if category == "travel":
+        article_html = _strip_travel_body_shell(article_html)
+    elif category == "mystery":
         article_html = _strip_mystery_inline_artifacts(article_html)
     faq_section = article.faq_section or []
+    if category == "mystery":
+        faq_section = []  # User requested to remove FAQ for mystery
     if english_mystery:
         article_html = _strip_hangul_text(article_html)
         faq_section = _normalize_english_mystery_faq_section(list(faq_section))
@@ -404,19 +565,9 @@ def assemble_article_html(
         border=theme["faq_border"],
         table_background=theme["table_background"],
         table_header_background=theme["table_header_background"],
-        details_background=theme["faq_background"],
+        details_background=theme.get("faq_background", "#1e293b"),
     )
-    if category == "travel":
-        travel_inline_media = _resolve_inline_collage_media(article, slot_name="travel-inline-3x2")
-        if travel_inline_media:
-            article_html = _insert_inline_figure(
-                article_html,
-                travel_inline_media,
-                title=article.title,
-                marker_name="TRAVEL_INLINE_3X2",
-                alt_suffix="supporting travel collage",
-            )
-    elif category == "mystery":
+    if category == "mystery":
         mystery_inline_media = _resolve_inline_collage_media(article, slot_name="mystery-inline-3x2")
         if mystery_inline_media:
             article_html = _insert_inline_figure(
@@ -432,9 +583,28 @@ def assemble_article_html(
         section_title=faq_title,
         heading=theme["heading"],
         body=theme["body"],
-        card_background=theme["faq_background"],
+        card_background=theme.get("faq_background", "#1e293b"),
         card_border=theme["faq_border"],
     )
+
+    # [최적화] 이미지 로딩 전략 및 규격화
+    img_count = 0
+    def img_replacer(match):
+        nonlocal img_count
+        tag = match.group(0)
+        img_count += 1
+        # width/height가 없으면 기본값 주입하여 CLS 방지
+        if 'width=' not in tag.lower():
+            tag = re.sub(r'<img\b', '<img width="800" height="450"', tag, flags=re.IGNORECASE)
+        
+        # 첫 번째 이미지는 즉시 로드(LCP), 나머지는 지연 로드
+        if img_count == 1:
+            tag = re.sub(r'<img\b', '<img fetchpriority="high"', tag, flags=re.IGNORECASE)
+        else:
+            tag = re.sub(r'<img\b', '<img loading="lazy" decoding="async"', tag, flags=re.IGNORECASE)
+        return tag
+
+    article_html = re.sub(r'<img\b[^>]*>', img_replacer, article_html, flags=re.IGNORECASE)
     lead_summary = _lead_summary(article)
     article_title = article.title
     if english_mystery:
@@ -444,7 +614,6 @@ def assemble_article_html(
     hidden_lead_summary = html.escape(lead_summary)
     escaped_title = html.escape(article_title, quote=True)
     language_switch_block = str(language_switch_html or "").strip()
-    hero_url = _resolve_primary_image_url(article, hero_image_url)
     hero_figure_html = ""
     if hero_url:
         escaped_hero_url = html.escape(hero_url, quote=True)
@@ -453,33 +622,58 @@ def assemble_article_html(
         hero_width_attr = f' width="{int(hero_width)}"' if isinstance(hero_width, int) and hero_width > 0 else ""
         hero_height_attr = f' height="{int(hero_height)}"' if isinstance(hero_height, int) and hero_height > 0 else ""
         hero_figure_html = (
-            '<figure style="margin:0 0 32px;">'
+            '<figure data-bloggent-role="hero-figure" style="margin:0 0 32px;">'
             f'<img src="{escaped_hero_url}"{hero_width_attr}{hero_height_attr} alt="{escaped_title}" '
-            'loading="eager" decoding="async" style="width:100%;border-radius:28px;display:block;object-fit:cover;" />'
+            'fetchpriority="high" loading="eager" decoding="async" style="width:100%;border-radius:28px;display:block;object-fit:cover;" />'
             "</figure>"
         )
-    article_padding = (
-        "padding:24px 24px 44px;"
-        f"border:1px solid {theme['article_border']};"
-        f"border-radius:24px;background:{theme['article_background']};"
-        f"box-shadow:{theme['article_shadow']};"
+    # [최적화] 구조화 데이터 생성
+    created_at = getattr(article, "created_at", None)
+    json_ld = JSON_LD_TEMPLATE.format(
+        title=escaped_title,
+        description=escaped_lead_summary,
+        image_url=hero_url or "",
+        blog_name=html.escape(article.blog.name if article.blog else "The Midnight Archives"),
+        date_published=created_at.isoformat() if created_at else "",
     )
-    header_border = f"border-bottom:1px solid {theme['article_border']};padding-bottom:20px;"
-    content_spacing = "margin-top:28px;"
-    return f"""
-<article data-bloggent-meta-description="{escaped_lead_summary}" style="{article_padding}font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:{theme['heading']};text-align:left;">
-  <header style="margin-bottom:28px;display:flex;flex-direction:column;align-items:flex-start;{header_border}">
-    <p style="order:3;font-size:18px;line-height:1.8;color:{theme['muted']};margin:0;">{lead_summary}</p>
-    <p style="order:1;font-size:12px;letter-spacing:0.18em;text-transform:uppercase;color:{theme['accent']};font-weight:700;margin:0 0 10px;">{eyebrow}</p>
-    <h1 style="order:2;font-size:40px;line-height:1.12;margin:0 0 14px;color:{theme['heading']};">{article_title}</h1>
+
+    locale = ui_locale
+    related_title = _localized_related_title(locale, category=category)
+    empty_msg = _localized_related_empty_message(locale)
+    
+    # We use the imported service to render cards
+    related_html = render_related_cards_html(
+        related_posts or [],
+        section_title=related_title,
+        category=category,
+        empty_message=empty_msg
+    )
+
+    article_padding = "padding:10px;background:transparent;"
+    header_border = f"border-bottom:1px solid {theme['article_border']};padding-bottom:12px;"
+    content_spacing = "margin-top:16px;"
+
+    optimized_html = f"""
+{CRITICAL_MYSTERY_CSS if category == 'mystery' else ''}
+<article class="dossier-body" data-bloggent-article="canonical" data-bloggent-meta-description="{escaped_lead_summary}" style="{article_padding}font-family:sans-serif;color:{theme['heading']};text-align:left;">
+  <header style="margin-bottom:20px;{header_border}">
+    <p style="font-size:12px;text-transform:uppercase;color:{theme['accent']};font-weight:700;margin:0 0 4px;">{eyebrow}</p>
+    <h1 data-bloggent-role="article-title" style="font-size:28px;line-height:1.2;margin:0 0 8px;color:{theme['heading']};font-weight:700;">{article_title}</h1>
+    <p style="font-size:16px;line-height:1.5;color:{theme['muted']};margin:0;">{lead_summary}</p>
   </header>
   <div id="bloggent-seo-meta" data-bloggent-meta-source="body" style="display:none!important;visibility:hidden!important;max-height:0;overflow:hidden;">{hidden_lead_summary}</div>
   {hero_figure_html}
-  <section style="{content_spacing}font-size:17px;line-height:1.9;color:{theme['body']};text-align:left;">{article_html}</section>
+  <section data-bloggent-role="article-body" style="{content_spacing}font-size:17px;line-height:1.9;color:{theme['body']};text-align:left;">
+    {article_html}
+  </section>
   {faq_html}
   {LANGUAGE_SWITCH_START_MARKER}
   {language_switch_block}
   {LANGUAGE_SWITCH_END_MARKER}
-  {related_html}
+  <div class="article-footer" style="margin-top:40px;border-top:1px solid {theme['article_border']};padding-top:24px;">
+    {related_html}
+  </div>
 </article>
+{json_ld}
 """.strip()
+    return optimized_html

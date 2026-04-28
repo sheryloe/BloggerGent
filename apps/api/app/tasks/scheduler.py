@@ -19,6 +19,7 @@ from app.services.platform.publishing_service import process_publish_queue_batch
 from app.services.platform.platform_publish_service import process_platform_publish_queue
 from app.services.integrations.settings_service import get_settings_map, upsert_settings
 from app.services.integrations.telegram_service import poll_telegram_ops_commands, send_telegram_error_notification
+from app.services.content.travel_blog_policy import TRAVEL_EDITORIAL_GUIDANCE, TRAVEL_EDITORIAL_LABELS
 from app.services.content.training_service import (
     DEFAULT_SAVE_EVERY_MINUTES,
     DEFAULT_SESSION_HOURS,
@@ -65,20 +66,20 @@ EDITORIAL_CATEGORY_RULES = {
         "categories": (
             {
                 "key": "travel",
-                "label": "Travel",
-                "guidance": "Focus on routes, movement logic, transit choices, and local travel planning.",
+                "label": TRAVEL_EDITORIAL_LABELS["travel"],
+                "guidance": TRAVEL_EDITORIAL_GUIDANCE["travel"],
                 "weight": 45,
             },
             {
                 "key": "culture",
-                "label": "Culture",
-                "guidance": "Focus on festivals, exhibitions, events, heritage, and cultural spaces.",
+                "label": TRAVEL_EDITORIAL_LABELS["culture"],
+                "guidance": TRAVEL_EDITORIAL_GUIDANCE["culture"],
                 "weight": 30,
             },
             {
                 "key": "food",
-                "label": "Food",
-                "guidance": "Focus on trending Korean food, local restaurants, market food, and practical dining decisions.",
+                "label": TRAVEL_EDITORIAL_LABELS["food"],
+                "guidance": TRAVEL_EDITORIAL_GUIDANCE["food"],
                 "weight": 25,
             },
         ),

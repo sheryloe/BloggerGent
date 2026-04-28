@@ -4,8 +4,10 @@ from app.services.content.travel_blog_policy import (
     TRAVEL_TEXT_ROUTE_API,
     TRAVEL_TEXT_ROUTE_CODEX,
     TRAVEL_TEXT_ROUTE_GEMINI,
+    build_travel_asset_object_key,
     build_travel_policy_config,
     get_travel_blog_policy,
+    normalize_travel_asset_category_key,
     normalize_travel_text_generation_route,
     travel_text_generation_route_chain,
     travel_text_generation_route_setting_key,
@@ -52,3 +54,20 @@ def test_build_travel_policy_config_uses_gemini_route_models() -> None:
     assert image_prompt_config["text_generation_route"] == "gemini_cli"
     assert image_prompt_config["provider_hint"] == "gemini_cli"
     assert image_prompt_config["provider_model"] == "gemini-2.5-flash"
+
+
+def test_travel_asset_category_maps_food_to_travel_path() -> None:
+    policy = get_travel_blog_policy(blog_id=34)
+    assert policy is not None
+
+    assert normalize_travel_asset_category_key("food") == "travel"
+    assert normalize_travel_asset_category_key("uncategorized") == "travel"
+    assert normalize_travel_asset_category_key("culture") == "culture"
+
+    object_key = build_travel_asset_object_key(
+        policy=policy,
+        category_key="food",
+        post_slug="sample-post",
+        asset_role="hero",
+    )
+    assert object_key == "assets/travel-blogger/travel/sample-post.webp"

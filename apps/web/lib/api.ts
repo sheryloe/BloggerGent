@@ -43,7 +43,11 @@ import {
   AgentRunRead,
   AgentRuntimeHealthRead,
   AgentWorkerRead,
+  ContentItemCreatePayload,
+  ContentItemDuplicateCheckPayload,
+  ContentItemDuplicateCheckRead,
   ContentItemRead,
+  ContentItemUpdatePayload,
   ManagedChannelRead,
   MissionControlRead,
   ModelPolicyRead,
@@ -1019,6 +1023,24 @@ function mapContentItem(item: any): ContentItemRead {
   };
 }
 
+function mapDuplicateCheck(payload: any): ContentItemDuplicateCheckRead {
+  return {
+    isDuplicate: Boolean(payload?.is_duplicate),
+    riskLevel: payload?.risk_level ?? "low",
+    matchedItems: (payload?.matched_items ?? []).map((item: any) => ({
+      id: item.id,
+      title: item.title ?? "",
+      channelId: item.channel_id ?? "",
+      provider: item.provider ?? "",
+      contentType: item.content_type ?? "",
+      lifecycleStatus: item.lifecycle_status ?? "draft",
+      similarityScore: Number(item.similarity_score ?? 0),
+      matchedField: item.matched_field ?? "",
+      updatedAt: item.updated_at,
+    })),
+  };
+}
+
 function mapAgentWorker(item: any): AgentWorkerRead {
   return {
     id: item.id,
@@ -1197,6 +1219,72 @@ export async function getWorkspaceContentItems(params?: {
   query.set("limit", String(params?.limit ?? 50));
   const payload = await apiFetch<any[]>(`/workspace/content-items?${query.toString()}`, { revalidate: false });
   return (payload ?? []).map(mapContentItem);
+}
+
+export async function createWorkspaceContentItem(payload: ContentItemCreatePayload) {
+  const response = await apiFetch<any>("/workspace/content-items", {
+    method: "POST",
+    body: JSON.stringify({
+      channel_id: payload.channelId,
+      idempotency_key: payload.idempotencyKey ?? null,
+      content_type: payload.contentType,
+      title: payload.title,
+      description: payload.description ?? "",
+      body_text: payload.bodyText ?? "",
+      asset_manifest: payload.assetManifest ?? {},
+      brief_payload: payload.briefPayload ?? {},
+      scheduled_for: payload.scheduledFor ?? null,
+      created_by_agent: payload.createdByAgent ?? null,
+    }),
+  });
+  return mapContentItem(response);
+}
+
+export async function updateWorkspaceContentItem(itemId: number, payload: ContentItemUpdatePayload) {
+  const body: Record<string, unknown> = {};
+  if (payload.lifecycleStatus !== undefined) body.lifecycle_status = payload.lifecycleStatus;
+  if (payload.title !== undefined) body.title = payload.title;
+  if (payload.description !== undefined) body.description = payload.description;
+  if (payload.bodyText !== undefined) body.body_text = payload.bodyText;
+  if (payload.approvalStatus !== undefined) body.approval_status = payload.approvalStatus;
+  if (payload.assetManifest !== undefined) body.asset_manifest = payload.assetManifest;
+  if (payload.briefPayload !== undefined) body.brief_payload = payload.briefPayload;
+  if (payload.reviewNotes !== undefined) body.review_notes = payload.reviewNotes;
+  if (payload.scheduledFor !== undefined) body.scheduled_for = payload.scheduledFor;
+  if (payload.lastFeedback !== undefined) body.last_feedback = payload.lastFeedback;
+  if (payload.blockedReason !== undefined) body.blocked_reason = payload.blockedReason;
+  if (payload.lastScore !== undefined) body.last_score = payload.lastScore;
+
+  const response = await apiFetch<any>(`/workspace/content-items/${itemId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  return mapContentItem(response);
+}
+
+export async function reviewWorkspaceContentItem(itemId: number, payload: { reviewNotes?: unknown[]; lastFeedback?: string | null }) {
+  const response = await apiFetch<any>(`/workspace/content-items/${itemId}/review`, {
+    method: "POST",
+    body: JSON.stringify({
+      review_notes: payload.reviewNotes ?? [],
+      last_feedback: payload.lastFeedback ?? null,
+    }),
+  });
+  return mapContentItem(response);
+}
+
+export async function checkWorkspaceContentItemDuplicate(payload: ContentItemDuplicateCheckPayload) {
+  const response = await apiFetch<any>("/workspace/content-items/duplicate-check", {
+    method: "POST",
+    body: JSON.stringify({
+      provider: payload.provider,
+      channel_id: payload.channelId,
+      content_type: payload.contentType,
+      topic: payload.topic,
+      title: payload.title,
+    }),
+  });
+  return mapDuplicateCheck(response);
 }
 
 export async function queueWorkspaceContentItemPublish(itemId: number) {

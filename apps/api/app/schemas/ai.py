@@ -46,7 +46,9 @@ class ArticleGenerationOutput(BaseModel):
     faq_section: list[FAQItem] = Field(default_factory=list, max_length=6)
     image_collage_prompt: str = Field(min_length=40)
     article_pattern_id: str | None = Field(default=None, min_length=2, max_length=100)
-    article_pattern_version: int | None = Field(default=None, ge=1, le=999)
+    article_pattern_version: int | str | None = Field(default=None)
+    article_pattern_key: str | None = Field(default=None, min_length=2, max_length=100)
+    article_pattern_version_key: str | None = Field(default=None, min_length=2, max_length=100)
     series_variant: str | None = Field(default=None, min_length=2, max_length=80)
     company_name: str | None = Field(default=None, min_length=2, max_length=120)
     ticker: str | None = Field(default=None, min_length=1, max_length=20)
@@ -72,6 +74,8 @@ class ArticleGenerationOutput(BaseModel):
             stripped = value.strip()
             if not stripped:
                 return None
+            if stripped.lower().startswith("travel-pattern-"):
+                return stripped.lower()
             if stripped.isdigit():
                 return int(stripped)
             match = re.search(r"(\d+)", stripped)

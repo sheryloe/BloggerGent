@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+import httpx
 from app.core.config import settings
 
 DEFAULT_CATEGORIES = ("performance", "accessibility", "best-practices", "seo")
@@ -471,3 +472,61 @@ def run_lighthouse_audit(
         "scores": parsed,
         "raw_report": raw_report,
     }
+
+
+def run_pagespeed_insights_audit(
+    url: str,
+    *,
+    strategy: str = "mobile",
+    api_key: str | None = None,
+    categories: tuple[str, ...] = DEFAULT_CATEGORIES,
+) -> dict[str, Any]:
+    """
+    Run PageSpeed Insights audit via Google API (HTTP).
+    This is faster and doesn't require local Chrome/Lighthouse installation.
+    """
+    target = str(url or "").strip()
+    if not target:
+        raise LighthouseAuditError("URL is required.")
+
+    if strategy not in {"mobile", "desktop"}:
+        raise LighthouseAuditError("strategy must be either 'mobile' or 'desktop'.")
+
+    actual_api_key = api_key or settings.pagespeed_api_key
+    
+    # Construct API URL
+    psi_url = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
+    params = {
+        "url": target,
+        "strategy": strategy,
+        "category": list(categories),
+        "locale": "ko",
+    }
+    if actual_api_key:
+        params["key"] = actual_api_key
+
+    try:
+        with httpx.Client(timeout=180.0) as client:
+            response = client.get(psi_url, params=params)
+            
+            if response.status_code == 429:
+                raise LighthouseAuditError("PageSpeed Insights API rate limit exceeded (429).")
+            
+            response.raise_for_status()
+            raw_report = response.json().get("lighthouseResult")
+            
+            if not raw_report:
+                raise LighthouseAuditError("Invalid PageSpeed Insights API response: missing lighthouseResult.")
+
+            parsed = parse_lighthouse_report(raw_report)
+            return {
+                "url": target,
+                "form_factor": strategy,
+                "weights": dict(LIGHTHOUSE_10_PERFORMANCE_METRIC_WEIGHTS),
+                "scores": parsed,
+                "raw_report": raw_report,
+            }
+    except httpx.HTTPStatusError as exc:
+        raise LighthouseAuditError(f"PageSpeed Insights API failed: {exc.response.text}") from exc
+    except Exception as exc:
+        raise LighthouseAuditError(f"PageSpeed Insights API request failed: {exc}") from exc

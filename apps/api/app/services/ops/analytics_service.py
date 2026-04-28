@@ -451,6 +451,8 @@ def _merge_fact_group(facts: list[AnalyticsArticleFact]) -> MergedAnalyticsFactR
     merged.most_similar_url = _pick_fact_value(facts, "most_similar_url", prefer_generated=True)
     merged.article_pattern_id = _pick_fact_value(facts, "article_pattern_id", prefer_generated=True)
     merged.article_pattern_version = _pick_fact_value(facts, "article_pattern_version", prefer_generated=True)
+    merged.article_pattern_key = _pick_fact_value(facts, "article_pattern_key", prefer_generated=True)
+    merged.article_pattern_version_key = _pick_fact_value(facts, "article_pattern_version_key", prefer_generated=True)
     merged.status = _pick_preferred_status(facts) or _pick_fact_value(facts, "status", prefer_generated=True)
     merged.actual_url = _pick_preferred_actual_url(facts) or _pick_fact_value(facts, "actual_url", prefer_generated=True) or primary.actual_url
     merged.source_type = "generated" if any((fact.article_id is not None) or (str(fact.source_type or "").strip().lower() == "generated") for fact in facts) else "synced"
@@ -666,6 +668,8 @@ def _serialize_fact(
         most_similar_url=fact.most_similar_url,
         article_pattern_id=fact.article_pattern_id,
         article_pattern_version=fact.article_pattern_version,
+        article_pattern_key=fact.article_pattern_key,
+        article_pattern_version_key=fact.article_pattern_version_key,
         status=_normalize_fact_status(fact.status) or fact.status,
         actual_url=fact.actual_url,
         source_type=fact.source_type,
@@ -863,6 +867,8 @@ def _apply_article_fact_payload(fact: AnalyticsArticleFact, article: Article, mo
     fact.most_similar_url = article.quality_most_similar_url or fact.most_similar_url
     fact.article_pattern_id = article.article_pattern_id or fact.article_pattern_id
     fact.article_pattern_version = article.article_pattern_version if article.article_pattern_version is not None else fact.article_pattern_version
+    fact.article_pattern_key = getattr(article, "article_pattern_key", None) or fact.article_pattern_key
+    fact.article_pattern_version_key = getattr(article, "article_pattern_version_key", None) or fact.article_pattern_version_key
     raw_status = (
         getattr(getattr(article, "blogger_post", None), "post_status", None).value
         if getattr(article, "blogger_post", None) and getattr(article.blogger_post, "post_status", None)
@@ -1220,7 +1226,9 @@ def get_blog_monthly_articles(
     page: int = 1,
     page_size: int = 50,
 ) -> AnalyticsArticleFactListResponse:
-    conditions = [AnalyticsArticleFact.blog_id == blog_id, AnalyticsArticleFact.month == month]
+    conditions = [AnalyticsArticleFact.blog_id == blog_id]
+    if month:
+        conditions.append(AnalyticsArticleFact.month == month)
     if date:
         day_start, day_end = _parse_day_bounds(date)
         conditions.append(AnalyticsArticleFact.published_at >= day_start)

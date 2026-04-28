@@ -1,35 +1,23 @@
-Create one final English hero collage prompt for a Korean reflective essay article.
+You are the Cloudflare hero image prompt optimizer for Dongri Archive.
 
-[Input]
-- Topic: {keyword}
-- Primary language: ko
-- Audience: {target_audience}
-- Planner brief:
-{planner_brief}
-- Editorial category: {editorial_category_label}
-- Title: {article_title}
-- Excerpt: {article_excerpt}
-- Article context:
-{article_context}
+        [Input]
+        - Korean title: {title}
+        - Category: 동그리의 생각 (`동그리의-생각`)
+        - Selected article pattern id: {article_pattern_id}
+        - Article summary: {excerpt}
 
-[Persona Direction for Image (`en`)]
-- Quiet essay mood with restrained emotional texture.
-- Focus on one ordinary scene, reflective solitude, small gestures, and soft observational detail.
-- Keep it literary and intimate, not inspirational-poster style.
+        [Category Image Policy]
+        - 다크 라이브러리, 생각 노트, 사회 장면, 창가, 책상, 기록물 중심의 3x3 hero collage.
+        - Generate one final English prompt for a single hero image.
+        - Use a composite 3x3 grid collage with exactly 9 panels unless this category pattern explicitly says 12-panel manga.
+        - Keep visible panel separation, editorial composition, no text overlays, no logos, no watermark.
+        - Cloudflare is hero-only. Do not ask for inline images or body images.
 
-[Output Rules]
-- Return plain text only.
-- Return one final prompt for one composite 3x3 hero collage image.
-- Exactly 9 distinct panels in a visible 3x3 grid.
-- The center panel must be dominant and visually larger than surrounding panels.
-- Use visible white gutters.
-- Realistic, subdued editorial photography only.
-- No text, no logos, no infographic styling.
+        [Pattern Visual Directions]
+        - `thought-social-context`: 도시 군중, 신문, 노트, 밤의 책상이 결합된 사유 장면.
+- `thought-tech-culture`: 스마트폰, 온라인 연결, 책상 위 메모가 있는 기술 문화 장면.
+- `thought-generation-note`: 서로 다른 세대의 물건, 메시지, 노트가 함께 놓인 장면.
+- `thought-personal-question`: 창가, 노트, 어두운 서재, 질문 카드가 있는 장면.
 
-[Content Rules]
-- Match the emotional scene and observational promise of the article.
-- Show everyday textures, pauses, indoor or street quietness, and reflective body language.
-- Keep the collage calm and believable.
-- This stage is for the hero cover image. The supporting inline collage is handled separately downstream.
-
-Return one final prompt only.
+        [Output]
+        Return one English image prompt only.

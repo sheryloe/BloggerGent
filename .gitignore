@@ -25,11 +25,15 @@ apps/web/tsconfig.tsbuildinfo
 apps/api/celerybeat-schedule
 .codex-output/
 .codex/
+.codex-artifacts/
+.codex-temp/
 .agents/
 .playwright-cli/
 .wrangler/
 .docker-data/
 backup/
+artifacts/
+test-results/
 output/
 TEST/
 scratch/
@@ -76,3 +80,20 @@ refactoring/codex_write/packages/
 # generated codex workspaces
 /codex_write/
 /apps/api/codex_write/
+
+# accidental runtime dumps and one-off local prompt/script scratch
+apps/api/D*/
+apps/api/scripts/D*/
+apps/api/*.html
+apps/api/*.txt
+apps/api/app/prompts/
+apps/api/scripts/debug_*.py
+apps/api/scripts/check_*.py
+apps/api/scripts/search_*.py
+apps/api/scripts/test_*.py
+apps/api/scripts/find_*.py
+apps/api/scripts/inspect_*.py
+/article_generation.md
+/prompts/topic_discovery.md
+/prompts/mystery_topic_discovery.md
+/prompts/planner_daily_brief_analysis.md

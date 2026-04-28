@@ -70,10 +70,10 @@ def test_assemble_article_html_mystery_forces_english_ui_and_light_theme() -> No
 
     assembled = assemble_article_html(article, hero_image_url="", related_posts=[])
 
-    assert "Frequently Asked Questions" in assembled
+    assert "Frequently Asked Questions" not in assembled
     assert "Related Mystery Stories" in assembled
-    assert "color:#f3f7ff" in assembled
-    assert "background:#0b1220" in assembled
+    assert "color: #cbd5e1" in assembled
+    assert "background:transparent" in assembled
 
 
 def test_assemble_article_html_mystery_english_strips_hangul_from_body_and_faq() -> None:

@@ -185,22 +185,11 @@ def seed_article_travel_sync_fields(db: Session, article: Article, *, commit: bo
         changed = True
 
     if int(article.blog_id or 0) == TRAVEL_SYNC_SOURCE_BLOG_ID:
-        existing_group_key = str(article.travel_sync_group_key or "").strip()
-        group_key = existing_group_key or build_travel_sync_group_key(article)
+        group_key = build_travel_sync_group_key(article)
         if article.travel_sync_group_key != group_key:
             article.travel_sync_group_key = group_key
             changed = True
-        current_source_id = int(article.travel_sync_source_article_id or 0)
-        if current_source_id > 0:
-            source_article = db.execute(select(Article).where(Article.id == current_source_id)).scalar_one_or_none()
-            if (
-                source_article is None
-                or int(source_article.id or 0) == int(article.id or 0)
-                or int(source_article.blog_id or 0) not in TRAVEL_BLOG_IDS
-            ):
-                article.travel_sync_source_article_id = None
-                changed = True
-        elif article.travel_sync_source_article_id is not None:
+        if article.travel_sync_source_article_id is not None:
             article.travel_sync_source_article_id = None
             changed = True
     elif int(article.blog_id or 0) in {36, 37} and int(article.job_id or 0) > 0:
@@ -343,14 +332,8 @@ def refresh_travel_translation_state(
 
     for article in english_articles:
         article.travel_sync_role = "source_en"
-        article.travel_sync_group_key = str(article.travel_sync_group_key or "").strip() or build_travel_sync_group_key(article)
-        current_source_id = int(article.travel_sync_source_article_id or 0)
-        if (
-            current_source_id <= 0
-            or current_source_id == int(article.id or 0)
-            or int(getattr(all_by_id.get(current_source_id), "blog_id", 0) or 0) not in TRAVEL_BLOG_IDS
-        ):
-            article.travel_sync_source_article_id = None
+        article.travel_sync_group_key = build_travel_sync_group_key(article)
+        article.travel_sync_source_article_id = None
         article.travel_sync_last_checked_at = now
         db.add(article)
 

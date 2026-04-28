@@ -4,8 +4,9 @@ from fastapi import APIRouter, HTTPException
 
 from app.schemas.api import PromptTemplateRead, PromptTemplateUpdate
 from app.services.content.prompt_service import get_prompt_template, list_prompt_templates, update_prompt_template
+from app.api.deps.admin_auth import AdminMutationRoute
 
-router = APIRouter()
+router = APIRouter(route_class=AdminMutationRoute)
 
 
 @router.get("", response_model=list[PromptTemplateRead])

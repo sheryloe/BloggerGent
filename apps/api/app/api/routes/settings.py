@@ -13,6 +13,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.api.deps.admin_auth import AdminMutationRoute
 from app.schemas.api import ModelPolicyRead, OpenAIFreeUsageRead, SettingItem, SettingUpdate
 from app.services.platform.blog_service import list_blog_profiles
 from app.services.blogger.blogger_oauth_service import (
@@ -41,8 +42,8 @@ from app.services.providers.base import ProviderRuntimeError
 from app.services.integrations.settings_service import get_blogger_config, get_settings_map, list_settings, upsert_settings
 from app.services.integrations.storage_service import is_private_asset_url
 
-router = APIRouter()
-blogger_router = APIRouter()
+router = APIRouter(route_class=AdminMutationRoute)
+blogger_router = APIRouter(route_class=AdminMutationRoute)
 logger = logging.getLogger(__name__)
 _ENV_SECRET_KEY_PATTERN = re.compile(r"(api|token|secret|password|key|auth|client|access|refresh|credential)", re.IGNORECASE)
 _ENV_VAR_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")

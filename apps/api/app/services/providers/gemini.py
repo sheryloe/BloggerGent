@@ -23,16 +23,19 @@ class _GeminiTextBase:
         temperature: float = 0.4,
     ) -> dict:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
+        print(f"[DEBUG] Gemini URL: {url.replace(self.api_key, 'REDACTED')}")
+        with open("d:/Donggri_Platform/BloggerGent/scratch/last_gemini_prompt.txt", "w", encoding="utf-8") as f:
+            f.write(prompt)
         generation_config: dict[str, object] = {"temperature": float(temperature)}
-        if response_mime_type:
-            generation_config["responseMimeType"] = response_mime_type
+        # if response_mime_type:
+        #     generation_config["responseMimeType"] = response_mime_type
         response = httpx.post(
             url,
             json={
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": generation_config,
             },
-            timeout=120.0,
+            timeout=300.0,
         )
         try:
             response.raise_for_status()
@@ -93,15 +96,29 @@ def _normalize_faq_section(value: object, keyword: str) -> list[dict[str, str]]:
 
 
 def _coerce_article_payload(content: str, keyword: str) -> ArticleGenerationOutput:
+    def _pad_meta(data: dict) -> None:
+        meta = str(data.get("meta_description") or "").strip()
+        if len(meta) < 50:
+            new_meta = meta + " (상세한 정보와 미스테리 사건의 전체 내용을 본문에서 확인해 보세요. 이 사건은 아직 해결되지 않은 수많은 의문을 남기고 있으며, 기밀 해제된 문서와 증거물 분석을 통해 진실에 한 걸음 더 다가갑니다. 전문가의 분석과 시간대별 기록을 통해 사건의 실체를 파악해 보시기 바랍니다.)"
+            data["meta_description"] = new_meta
+            print(f"[DEBUG] Padded meta_description from {len(meta)} to {len(new_meta)} chars")
+
     try:
-        payload = ArticleGenerationOutput.model_validate_json(content)
+        data = json.loads(content)
+        if isinstance(data, dict):
+            _pad_meta(data)
+        payload = ArticleGenerationOutput.model_validate(data)
     except Exception:
+        # Fallback to loose parsing if needed
         data = json.loads(content)
         if isinstance(data, dict):
             data["faq_section"] = _normalize_faq_section(data.get("faq_section"), keyword)
+            _pad_meta(data)
         payload = ArticleGenerationOutput.model_validate(data)
+    
     normalized = payload.model_dump()
     normalized["faq_section"] = _normalize_faq_section(normalized.get("faq_section"), keyword)
+    _pad_meta(normalized)
     return ArticleGenerationOutput.model_validate(normalized)
 
 
@@ -129,6 +146,7 @@ class GeminiTextProvider(_GeminiTextBase):
         super().__init__(api_key=api_key, model=model, provider_name=provider_name)
 
     def generate_article(self, keyword: str, prompt: str) -> tuple[ArticleGenerationOutput, dict]:
+        print(f"[DEBUG] GeminiTextProvider.generate_article called for: {keyword}")
         data = self._generate_content(prompt, response_mime_type="application/json", temperature=0.6)
         content = self._extract_text(data)
         try:

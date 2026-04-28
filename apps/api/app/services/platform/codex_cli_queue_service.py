@@ -60,6 +60,7 @@ def _request_payload(
     response_kind: str,
     response_schema: dict[str, Any] | None,
     workspace_dir: str,
+    codex_config_overrides: dict[str, Any] | None,
 ) -> dict[str, Any]:
     return {
         "request_id": request_id,
@@ -69,6 +70,7 @@ def _request_payload(
         "response_kind": response_kind,
         "response_schema": response_schema,
         "workspace_dir": workspace_dir,
+        "codex_config_overrides": codex_config_overrides or {},
     }
 
 
@@ -97,6 +99,14 @@ def _read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
+def _to_toml_literal(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    return json.dumps(str(value))
+
+
 def _run_codex_text_job_inline(
     *,
     request_id: str,
@@ -106,6 +116,7 @@ def _run_codex_text_job_inline(
     response_kind: str,
     response_schema: dict[str, Any] | None = None,
     workspace_dir: str,
+    codex_config_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     temp_root = Path(tempfile.gettempdir()) / "bloggent-codex-inline"
     temp_root.mkdir(parents=True, exist_ok=True)
@@ -137,11 +148,16 @@ def _run_codex_text_job_inline(
         "--ephemeral",
         "-o",
         str(output_path),
-        "-",
     ]
+    for key, value in sorted((codex_config_overrides or {}).items()):
+        key_text = str(key or "").strip()
+        if not key_text:
+            continue
+        args.extend(["-c", f"{key_text}={_to_toml_literal(value)}"])
     if response_kind == "json_schema" and response_schema is not None:
         schema_path.write_text(json.dumps(response_schema, ensure_ascii=False, indent=2), encoding="utf-8")
         args.extend(["--output-schema", str(schema_path)])
+    args.append("-")
 
     try:
         proc = subprocess.run(
@@ -190,6 +206,7 @@ def submit_codex_text_job(
     response_schema: dict[str, Any] | None = None,
     timeout_seconds: int | None = None,
     inline: bool = False,
+    codex_config_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     request_id = uuid.uuid4().hex
     normalized_schema = _normalize_codex_response_schema(response_schema)
@@ -207,6 +224,7 @@ def submit_codex_text_job(
             response_kind=response_kind,
             response_schema=normalized_schema,
             workspace_dir=workspace_dir,
+            codex_config_overrides=codex_config_overrides,
         )
 
     request_path = _requests_dir(runtime) / f"{request_id}.json"
@@ -221,6 +239,7 @@ def submit_codex_text_job(
         response_kind=response_kind,
         response_schema=normalized_schema,
         workspace_dir=workspace_dir,
+        codex_config_overrides=codex_config_overrides or {},
     )
     _write_json(request_path, payload)
 

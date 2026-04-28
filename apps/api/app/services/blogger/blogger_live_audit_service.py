@@ -10,6 +10,7 @@ import httpx
 
 
 ARTICLE_TAG_RE = re.compile(r"<(/?)article\b([^>]*)>", re.IGNORECASE)
+STRIP_TAG_RE = re.compile(r"<[^>]+>")
 ATTR_RE = re.compile(
     r"([A-Za-z_:][A-Za-z0-9:._-]*)"
     r"(?:\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s\"'=<>`]+)))?",
@@ -113,19 +114,57 @@ def _article_priority(fragment: _ArticleFragment) -> tuple[int, int, int]:
     )
 
 
-def extract_primary_article_fragment(page_html: str) -> str:
+def _fragment_visible_text(value: str) -> str:
+    return _normalize_space(STRIP_TAG_RE.sub(" ", value or ""))
+
+
+def _normalize_expected_url(value: str | None) -> str:
+    raw = _normalize_space(value)
+    if not raw:
+        return ""
+    return raw.split("#", maxsplit=1)[0].split("?", maxsplit=1)[0].strip().lower()
+
+
+def extract_best_article_fragment(
+    page_html: str,
+    *,
+    expected_title: str | None = None,
+    expected_hero_url: str | None = None,
+) -> str:
     page = str(page_html or "")
     page = SCRIPT_TAG_RE.sub("", page)
     page = STYLE_TAG_RE.sub("", page)
 
     fragments = _extract_article_fragments(page)
-    if fragments:
-        selected = sorted(fragments, key=_article_priority)[0]
-        return selected.html
-    body_match = BODY_TAG_RE.search(page)
-    if body_match:
-        return str(body_match.group(1) or "")
-    return page
+    if not fragments:
+        body_match = BODY_TAG_RE.search(page)
+        if body_match:
+            return str(body_match.group(1) or "")
+        return page
+
+    normalized_title = _normalize_space(expected_title).casefold()
+    normalized_hero_url = _normalize_expected_url(expected_hero_url)
+
+    def _sort_key(fragment: _ArticleFragment) -> tuple[int, int, int, int, int]:
+        fragment_text = _fragment_visible_text(fragment.html).casefold()
+        fragment_html_lower = str(fragment.html or "").lower()
+        title_present = bool(normalized_title) and normalized_title in fragment_text
+        hero_present = bool(normalized_hero_url) and normalized_hero_url in fragment_html_lower
+        hint_score = _article_priority(fragment)
+        prefer_innermost = title_present or hero_present
+        return (
+            0 if title_present else 1,
+            0 if hero_present else 1,
+            hint_score[0],
+            hint_score[1],
+            len(fragment.html) if prefer_innermost else hint_score[2],
+        )
+
+    return sorted(fragments, key=_sort_key)[0].html
+
+
+def extract_primary_article_fragment(page_html: str) -> str:
+    return extract_best_article_fragment(page_html)
 
 
 def _is_renderable_candidate(url: str) -> bool:

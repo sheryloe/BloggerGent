@@ -1,74 +1,80 @@
 [Input]
-- Topic: {keyword}
-- Current date: {current_date}
-- Target audience: {target_audience}
-- Blog focus: {content_brief}
-- Planner brief:
-{planner_brief}
-- Editorial category key: {editorial_category_key}
-- Editorial category label: {editorial_category_label}
-- Editorial category guidance: {editorial_category_guidance}
+        - Topic: {keyword}
+        - Current date: {current_date}
+        - Target audience: {target_audience}
+        - Blog focus: {content_brief}
+        - Planner brief:
+        {planner_brief}
+        - Editorial category key: {editorial_category_key}
+        - Editorial category label: {editorial_category_label}
+        - Editorial category guidance: {editorial_category_guidance}
+        - Selected article pattern id: {article_pattern_id}
 
-[Mission]
-- Write one publish-ready Korean blog article package for Dongri Archive.
-- Make the article useful to a real reader, not a report, audit memo, score sheet, or prompt explanation.
-- Use the planner brief, but do not expose planner wording or internal archive operations.
+        [Mission]
+        - Write one publish-ready Korean article package for Dongri Archive Cloudflare channel.
+        - Category: 삶을 유용하게 (`삶을-유용하게`).
+        - Minimum body length: 4000+ Korean characters excluding markup.
+        - Use the planner brief, but never expose planner wording, internal archive operations, score reports, or prompt notes.
+        - Keep the article useful to a real reader, not a system report.
 
-[Category Fit]
-- Quick brief: {content_brief}
-- Core focus: keep the topic inside this category and anchor it to one concrete subject.
-- Key entities: include the specific places, tools, companies, events, records, or people needed for reader trust.
-- Treat this file as an internal archive instruction source only. Do not write an internal archive introduction.
-- This category is only for actual places, products, events, cases, entities, or decisions that a reader can understand concretely.
+        [allowed_article_patterns]
+        1. `life-hack-tutorial` - Life Hack Tutorial: 생활 문제를 해결하는 단계별 실용 가이드.
+2. `benefit-audit-report` - Benefit Audit Report: 혜택/서비스의 자격, 가치, 신청 흐름을 점검한다.
+3. `efficiency-tool-review` - Efficiency Tool Review: 생산성/생활 품질을 높이는 도구나 습관 리뷰.
+4. `comparison-verdict` - Comparison Verdict: 여러 선택지를 비교해 독자에게 맞는 결론을 준다.
 
-[Category delta]
-- Keep the article centered on one practical life improvement topic: health habit, app workflow, routine fix, or home efficiency choice.
-- Give the reader a usable order of action, not a vague motivational essay.
-- Prefer checklists, friction points, and immediate next steps.
+        [pattern_selection_rule]
+        - Use only one pattern from `allowed_article_patterns`.
+        - If `article_pattern_id` is provided and valid, follow it.
+        - If it is missing or invalid, choose the best pattern from the topic and expose the selected id only in the JSON field.
+        - Return `article_pattern_version = 4`.
 
-[Blog Style]
-- Use natural Korean blog prose with clear section flow.
-- Keep the tone experiential and practical; avoid generic roundup language.
-- Do not expose any internal helper phrases, prompt notes, planner labels, model names, or quality-control labels unless the topic itself requires them.
-- Do not create standalone source, verification, audit, or score-report sections.
+        [category_focus]
+        - 건강 습관, 앱 워크플로, 루틴 개선, 생활 효율을 실제 순서로 정리한다.
+        - Tone: 실용적이고 경험 기반. 동기부여 문장보다 실행 순서를 우선한다.
 
-[Body Rules]
-- Start with a reader-facing lead that explains why this topic matters now.
-- Use <h2> and <h3> section headings that sound like real blog headings.
-- The final body section title must be exactly <h2>마무리 기록</h2>.
-- Do not output visible meta_description or excerpt lines inside html_article.
-- Do not insert image tags inside html_article.
-- Keep FAQ only as a short final appendix when it genuinely helps.
+        [body_structure]
+        - 문제 -> 실행 순서 -> 비교/체크리스트 -> 적용 팁 -> 마무리 기록.
+        - `life-hack-tutorial`: ## 문제 상황 -> ## 준비물 -> ## 실행 순서 -> ## 체크리스트 -> ## 마무리 기록
+- `benefit-audit-report`: ## 혜택 개요 -> ## 대상과 조건 -> ## 실제 가치 -> ## 신청 체크 -> ## 마무리 기록
+- `efficiency-tool-review`: ## 도구 개요 -> ## 써볼 만한 이유 -> ## 장점과 한계 -> ## 추천 대상 -> ## 마무리 기록
+- `comparison-verdict`: ## 선택지 요약 -> ## 비교 기준 -> ## 상황별 추천 -> ## 최종 선택 -> ## 마무리 기록
 
-[Content Requirements]
-- Quick brief, Core focus, and Key entities must be reflected in the article naturally.
-- Include concrete dates, places, tools, companies, or route details when relevant.
-- Explain tradeoffs, timing, risk, or reader action instead of listing abstract facts.
-- Keep the article inside the category; do not write a category introduction or operations memo.
-- Preserve reader trust without adding a separate source-audit block.
+        [faq_policy]
+        - Category default: optional.
+        - Pattern-level FAQ policy must be respected.
+        - Do not add FAQ just to fill space.
 
-[Output Contract]
-Return one JSON object only with these keys:
-- title
-- meta_description
-- labels
-- slug
-- excerpt
-- html_article
-- faq_section
-- image_collage_prompt
-- inline_collage_prompt
-- article_pattern_id
-- article_pattern_version
+        [image_prompt_policy]
+        - 생활 개선, 루틴, 앱/도구, 체크리스트, 집/책상/모바일 화면 중심의 3x3 hero collage.
+        - `image_collage_prompt` must be English.
+        - Cloudflare is hero-only: create one representative hero image prompt only.
+        - Do not request body images, inline images, multiple generated assets, logos, readable text, or watermarks.
 
-[Output Rules]
-- All reader-facing text in title, meta_description, excerpt, html_article, and FAQ answers must be Korean.
-- labels: 5 to 7 items, first label should match the editorial category label when natural.
-- slug: lowercase ASCII with hyphens only.
-- excerpt: exactly 2 Korean sentences.
-- Return JSON only.
+        [forbidden_outputs]
+        - No body-level H1.
+        - Do not insert `<img>`, markdown images, scripts, iframes, or raw external widgets inside `html_article`.
+        - Do not include `meta_description` or `excerpt` visibly inside `html_article`.
+        - Do not mention Antigravity, Codex, Gemini, BloggerGent, pipeline, score, audit, or internal planner unless the topic itself is explicitly about those tools.
+        - Do not move outside the category topic just because the keyword is broad.
 
-[Image Prompt Rules]
-- image_collage_prompt must be English, realistic editorial collage direction, no text, no logo.
-- inline_collage_prompt must be English, realistic supporting collage direction, no text, no logo.
-- Keep image prompts grounded in the actual topic, not abstract symbolism.
+        [Output JSON]
+        Return valid JSON only with these fields:
+        - title
+        - meta_description
+        - excerpt
+        - labels
+        - html_article
+        - faq_section
+        - image_collage_prompt
+        - inline_collage_prompt: return an empty string
+        - article_pattern_id
+        - article_pattern_version
+
+        [adsense_body_policy]
+        - Do not output raw AdSense code inside `html_article`.
+        - Forbidden in `html_article`: `<script`, `<ins class="adsbygoogle"`, `adsbygoogle`, `data-ad-client`, `data-ad-slot`, `ca-pub-`, `googlesyndication`, `doubleclick`, `<!--ADSENSE`, `[AD_SLOT`, and visible Korean text such as `?? ??`.
+        - Do not invent AdSense client ids, slot ids, loader scripts, iframe widgets, ad labels, or visible ad placeholders.
+        - Body ad placement is server-owned metadata only: `render_metadata.body_ads` is computed after generation and expanded by the public renderer.
+        - Keep `html_article` as pure article content with no advertisement code or advertisement marker text.
+

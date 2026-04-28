@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import UTC, datetime, timedelta
+from difflib import SequenceMatcher
+import json
+import re
 from threading import Lock
 
 from sqlalchemy import case, func, literal, select
@@ -511,6 +514,137 @@ def list_content_items(
         ensure_channels=ensure_channels,
     )
     return [serialize_content_item(item) for item in items]
+
+
+_DUPLICATE_TOKEN_PATTERN = re.compile(r"[\W_]+", re.UNICODE)
+
+
+def _normalize_duplicate_text(value: object) -> str:
+    text = str(value or "").casefold()
+    text = _DUPLICATE_TOKEN_PATTERN.sub(" ", text)
+    return " ".join(text.split())
+
+
+def _token_overlap_score(left: str, right: str) -> float:
+    left_tokens = {token for token in left.split() if len(token) > 1}
+    right_tokens = {token for token in right.split() if len(token) > 1}
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / max(1, min(len(left_tokens), len(right_tokens)))
+
+
+def _text_similarity(left: str, right: str) -> float:
+    if not left or not right:
+        return 0.0
+    if left == right:
+        return 1.0
+    sequence_score = SequenceMatcher(None, left, right).ratio()
+    overlap_score = _token_overlap_score(left, right)
+    return max(sequence_score, overlap_score)
+
+
+def _brief_duplicate_text(payload: object) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    values: list[str] = []
+    for key in ("topic", "title", "hook", "angle", "caption", "script_brief", "thumbnail_prompt"):
+        raw = payload.get(key)
+        if raw:
+            values.append(str(raw))
+    cards = payload.get("cards")
+    if isinstance(cards, list):
+        for card in cards:
+            if not isinstance(card, dict):
+                continue
+            values.extend(str(card.get(key) or "") for key in ("headline", "body", "image_prompt"))
+    if not values:
+        try:
+            return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        except TypeError:
+            return str(payload)
+    return " ".join(value for value in values if value)
+
+
+def check_content_item_duplicates(
+    db: Session,
+    *,
+    provider: str,
+    channel_id: str,
+    content_type: str,
+    topic: str = "",
+    title: str = "",
+    limit: int = 5,
+) -> dict:
+    channel = get_managed_channel_by_channel_id(db, channel_id)
+    if channel is None:
+        raise ValueError("Channel not found")
+
+    normalized_provider = str(provider or "").strip()
+    normalized_content_type = str(content_type or "").strip()
+    if normalized_provider and channel.provider != normalized_provider:
+        raise ValueError("Channel provider does not match request provider")
+
+    probes = [
+        ("title", _normalize_duplicate_text(title)),
+        ("topic", _normalize_duplicate_text(topic)),
+    ]
+    probes = [(label, value) for label, value in probes if value]
+    if not probes:
+        return {"is_duplicate": False, "risk_level": "low", "matched_items": []}
+
+    candidates = (
+        db.execute(
+            select(ContentItem)
+            .options(selectinload(ContentItem.managed_channel))
+            .where(ContentItem.managed_channel_id == channel.id)
+            .where(ContentItem.content_type == normalized_content_type)
+            .order_by(ContentItem.updated_at.desc(), ContentItem.id.desc())
+            .limit(200)
+        )
+        .scalars()
+        .all()
+    )
+
+    matches: list[dict] = []
+    for item in candidates:
+        fields = {
+            "title": item.title,
+            "description": item.description,
+            "body_text": item.body_text,
+            "brief": _brief_duplicate_text(item.brief_payload),
+        }
+        best_score = 0.0
+        best_field = ""
+        for probe_label, probe in probes:
+            for field_name, raw_value in fields.items():
+                score = _text_similarity(probe, _normalize_duplicate_text(raw_value))
+                if score > best_score:
+                    best_score = score
+                    best_field = f"{probe_label}:{field_name}"
+        if best_score >= 0.35:
+            matches.append(
+                {
+                    "id": item.id,
+                    "title": item.title,
+                    "channel_id": item.managed_channel.channel_id,
+                    "provider": item.managed_channel.provider,
+                    "content_type": item.content_type,
+                    "lifecycle_status": item.lifecycle_status,
+                    "similarity_score": round(float(best_score), 4),
+                    "matched_field": best_field,
+                    "updated_at": item.updated_at,
+                }
+            )
+
+    matches.sort(key=lambda item: item["similarity_score"], reverse=True)
+    top_matches = matches[: max(1, min(limit, 10))]
+    top_score = top_matches[0]["similarity_score"] if top_matches else 0.0
+    risk_level = "high" if top_score >= 0.78 else "medium" if top_score >= 0.5 else "low"
+    return {
+        "is_duplicate": risk_level == "high",
+        "risk_level": risk_level,
+        "matched_items": top_matches,
+    }
 
 
 def create_content_item(

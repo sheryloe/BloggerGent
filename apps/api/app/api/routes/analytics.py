@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.api.deps.admin_auth import AdminMutationRoute
 from app.schemas.api import (
     AnalyticsArticleFactListResponse,
     AnalyticsBackfillRead,
@@ -28,7 +29,7 @@ from app.services.ops.analytics_service import (
 )
 from app.services.integrations.google_indexing_service import refresh_indexing_for_blog, request_indexing_for_url
 
-router = APIRouter(prefix="/analytics", tags=["analytics"])
+router = APIRouter(prefix="/analytics", tags=["analytics"], route_class=AdminMutationRoute)
 
 
 @router.get("/blogs/monthly", response_model=AnalyticsBlogMonthlyListResponse)

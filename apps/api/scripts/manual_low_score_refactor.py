@@ -339,7 +339,11 @@ def _build_boosted_content(
         ]
     ).strip()
     predicted = compute_seo_geo_scores(title=new_title, html_body=boosted, excerpt=new_excerpt, faq_section=[])
-    if any(float(predicted.get(key) or 0) < 80 for key in ("seo_score", "geo_score", "ctr_score")):
+    predicted_seo = float(predicted.get("seo_score") or 0)
+    predicted_geo = float(predicted.get("geo_score") or 0)
+    predicted_ctr = float(predicted.get("ctr_score") or 0)
+    predicted_lh = (predicted_seo + predicted_geo + predicted_ctr) / 3.0
+    if not _quality_gate_pass(predicted_seo, predicted_geo, predicted_ctr, predicted_lh):
         extra = "\n".join(
             [
                 "<h2>Extra note | record, document, archive, official source</h2>",
@@ -360,25 +364,35 @@ def _blog_home_url(blog: Blog) -> str:
     return url or "https://dongdonggri.blogspot.com/"
 
 
-def _score_triplet_avg(seo: Any, geo: Any, ctr: Any) -> float:
-    values: list[float] = []
-    for value in (seo, geo, ctr):
-        try:
-            if value is not None:
-                values.append(float(value))
-        except (TypeError, ValueError):
-            continue
-    return round(sum(values) / len(values), 1) if values else 0.0
+def _to_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
-def _score_below_80(*values: Any) -> bool:
-    for value in values:
-        try:
-            if value is not None and float(value) < 80.0:
-                return True
-        except (TypeError, ValueError):
-            continue
-    return False
+def _score_quad_avg(seo: Any, geo: Any, ctr: Any, lighthouse: Any) -> float:
+    seo_v = _to_float(seo, 0.0)
+    geo_v = _to_float(geo, 0.0)
+    ctr_v = _to_float(ctr, 0.0)
+    lh_v = _to_float(lighthouse, (seo_v + geo_v + ctr_v) / 3.0)
+    return round((seo_v + geo_v + ctr_v + lh_v) / 4.0, 1)
+
+
+def _score_quad_min(seo: Any, geo: Any, ctr: Any, lighthouse: Any) -> float:
+    seo_v = _to_float(seo, 0.0)
+    geo_v = _to_float(geo, 0.0)
+    ctr_v = _to_float(ctr, 0.0)
+    lh_v = _to_float(lighthouse, (seo_v + geo_v + ctr_v) / 3.0)
+    return round(min(seo_v, geo_v, ctr_v, lh_v), 1)
+
+
+def _quality_gate_pass(seo: Any, geo: Any, ctr: Any, lighthouse: Any) -> bool:
+    avg_score = _score_quad_avg(seo, geo, ctr, lighthouse)
+    min_score = _score_quad_min(seo, geo, ctr, lighthouse)
+    return avg_score >= 80.0 and min_score >= 70.0
 
 
 def refactor_cloudflare(*, month: str, limit: int | None = None) -> dict[str, Any]:
@@ -390,9 +404,24 @@ def refactor_cloudflare(*, month: str, limit: int | None = None) -> dict[str, An
             for row in rows
             if str(row.get("published_at") or "").startswith(month)
             and str(row.get("status") or "").strip().lower() in {"published", "live"}
-            and _score_below_80(row.get("seo_score"), row.get("geo_score"), row.get("ctr"))
+            and not _quality_gate_pass(
+                row.get("seo_score"),
+                row.get("geo_score"),
+                row.get("ctr"),
+                row.get("lighthouse_score"),
+            )
         ]
-        rows.sort(key=lambda row: (_score_triplet_avg(row.get("seo_score"), row.get("geo_score"), row.get("ctr")), str(row.get("title") or "").lower()))
+        rows.sort(
+            key=lambda row: (
+                _score_quad_avg(
+                    row.get("seo_score"),
+                    row.get("geo_score"),
+                    row.get("ctr"),
+                    row.get("lighthouse_score"),
+                ),
+                str(row.get("title") or "").lower(),
+            )
+        )
         if limit is not None:
             rows = rows[: max(int(limit), 0)]
 
@@ -469,12 +498,22 @@ def refactor_cloudflare(*, month: str, limit: int | None = None) -> dict[str, An
         remaining_avg_below = sum(
             1
             for row in refreshed_rows
-            if _score_triplet_avg(row.get("seo_score"), row.get("geo_score"), row.get("ctr")) < 80.0
+            if _score_quad_avg(
+                row.get("seo_score"),
+                row.get("geo_score"),
+                row.get("ctr"),
+                row.get("lighthouse_score"),
+            ) < 80.0
         )
         remaining_any_below = sum(
             1
             for row in refreshed_rows
-            if _score_below_80(row.get("seo_score"), row.get("geo_score"), row.get("ctr"))
+            if not _quality_gate_pass(
+                row.get("seo_score"),
+                row.get("geo_score"),
+                row.get("ctr"),
+                row.get("lighthouse_score"),
+            )
         )
         return {
             "channel": "cloudflare",

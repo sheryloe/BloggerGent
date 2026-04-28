@@ -13,14 +13,17 @@ from app.services.content.travel_blog_policy import (
 
 def test_travel_prompt_requirements_pass_when_all_keywords_present() -> None:
     prompt = (
-        "Create one square 1024x1024 editorial travel collage cover with exactly 8-panel layout. "
-        "Use visible white gutters, no text, and no logo."
+        "Create one single flattened final image with a 5 columns x 4 rows travel collage and exactly 20 visible panels. "
+        "Use thin visible white gutters, do not generate 20 separate images, no text, and no logo."
     )
     assert travel_panel_prompt_missing_requirements(prompt) == []
 
 
 def test_travel_prompt_requirements_fail_on_missing_gutters() -> None:
-    prompt = "Create one square 1024x1024 editorial travel collage cover with exactly 8-panel layout, no text, no logo."
+    prompt = (
+        "Create one single flattened final image with a 5 columns x 4 rows travel collage and exactly 20 visible panels, "
+        "do not generate 20 separate images, no text, no logo."
+    )
     missing = travel_panel_prompt_missing_requirements(prompt)
     assert "missing_visible_gutters" in missing
 

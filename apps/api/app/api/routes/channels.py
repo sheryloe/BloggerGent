@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.api.deps.admin_auth import AdminMutationRoute
 from app.schemas.api import ManagedChannelRead, PromptFlowRead, PromptFlowReorderRequest, PromptFlowStepUpdate, WorkflowStepCreate
 from app.services.platform.blog_service import create_workflow_step, delete_workflow_step, get_blog, get_blog_summary_map, list_blogs, reorder_workflow_steps, update_blog_agent
 from app.services.content.travel_blog_policy import (
@@ -18,7 +19,7 @@ from app.services.cloudflare.cloudflare_channel_service import save_cloudflare_p
 from app.services.integrations.settings_service import upsert_settings
 from app.services.platform.workspace_service import list_managed_channels, serialize_managed_channel
 
-router = APIRouter(prefix="/channels", tags=["channels"])
+router = APIRouter(prefix="/channels", tags=["channels"], route_class=AdminMutationRoute)
 
 
 def _parse_channel_id(channel_id: str) -> tuple[str, str]:

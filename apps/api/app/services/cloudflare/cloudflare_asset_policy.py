@@ -199,6 +199,9 @@ def resolve_cloudflare_category_leaf(category_slug: str | None, *, policy: Cloud
 def resolve_cloudflare_post_slug(post_slug: str | None) -> str:
     normalized = str(post_slug or "").strip().strip("/")
     normalized = normalized.replace("\\", "-").replace("/", "-")
+    # Truncate to 100 characters to avoid double-encoding URL length issues and truncation corruption
+    if len(normalized) > 100:
+        normalized = normalized[:100]
     return normalized or "post"
 
 

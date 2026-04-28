@@ -19,6 +19,7 @@ from app.services.blogger.blogger_editor_service import BloggerEditorAutomationE
 from app.services.blogger.blogger_sync_service import sync_blogger_posts_for_blog
 from app.services.content.content_ops_service import compute_seo_geo_scores
 from app.services.content.html_assembler import assemble_article_html
+from app.services.content.related_posts import find_related_articles
 from app.services.ops.lighthouse_service import LighthouseAuditError, run_lighthouse_audit
 from app.services.ops.model_policy_service import CODEX_TEXT_RUNTIME_MODEL
 from app.services.providers.codex_cli import CodexCLITextProvider
@@ -41,11 +42,11 @@ def _current_month(*, timezone_name: str) -> str:
 
 def _score_below(value: float | None, threshold: float) -> bool:
     if value is None:
-        return False
+        return True
     try:
         return float(value) < float(threshold)
     except (TypeError, ValueError):
-        return False
+        return True
 
 
 def _extract_image_urls(content_html: str | None) -> list[str]:
@@ -316,7 +317,7 @@ def refactor_blogger_low_score_posts(
     report = get_blog_monthly_articles(
         db,
         blog_id=blog.id,
-        month=normalized_month,
+        month=None if normalized_remote_post_ids else normalized_month,
         status="published",
         page=1,
         page_size=max(safe_limit or 1000, 1000),
@@ -576,10 +577,14 @@ def refactor_blogger_low_score_posts(
                 editorial_category_key=editorial_key,
                 editorial_category_label=editorial_label,
             )
+            try:
+                related_posts = find_related_articles(db, temp_article, limit=3)
+            except Exception:  # noqa: BLE001
+                related_posts = []
             assembled_html = assemble_article_html(
                 temp_article,
                 str(candidate.get("cover_image_url") or ""),
-                related_posts=[],
+                related_posts=related_posts,
             )
             summary, raw_payload = provider.update_post(
                 post_id=str(candidate["remote_post_id"]),

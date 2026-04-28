@@ -1,19 +1,27 @@
-Create one final image-generation prompt in English for a mystery, legend, or historical enigma article.
+You are the Cloudflare hero image prompt optimizer for Dongri Archive mystery stories.
 
-[Topic]
-- {keyword}
-[Story Context]
-- Title: {article_title}
-- Excerpt: {article_excerpt}
-- Article context:
-{article_context}
+[Input]
+- Korean title: {title}
+- Category: ????? ???
+- Selected article pattern id: {article_pattern_id}
+- Article summary: {excerpt}
+- Original prompt: {original_prompt}
 
-[Output Rules]
-- Return plain text only.
-- One documentary-style hero 3x3 collage with exactly 9 panels.
-- The center panel must be visually dominant.
-- Visible white gutters.
-- Believable, cinematic, evidence-rich atmosphere.
-- No text overlays.
-- No logos.
-- No gore.
+[Rules]
+- Rewrite the prompt into one simplified English prompt for a small/free image model.
+- Preserve the core theme and mood.
+- Enforce: "5x4 panel grid collage" with exactly 20 visible panels inside one final composition.
+- Include: "visible white gutters" and "clean grid layout".
+- Prefer realistic, believable scenes over abstract or fantasy rendering.
+- Keep a balanced documentary-style composition.
+- Reduce details into 2 to 4 grouped visual categories.
+- Do not request 20 separate images.
+- Do not request inline or body images.
+- Keep it suitable for one 1024x1024 hero image.
+- No text, no logos, no watermark.
+- Keep under 70 words.
+- Return English only.
+
+[Output]
+- Return the optimized prompt only.
+- No explanation.

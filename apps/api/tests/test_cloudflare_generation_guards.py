@@ -156,45 +156,43 @@ def test_build_cloudflare_render_metadata_disables_body_ads_for_daily_memo() -> 
     assert metadata["body_ads"]["structure"]["h2_count"] == 2
 
 
-def test_build_cloudflare_render_metadata_plans_single_body_ad_after_second_h2() -> None:
+def test_build_cloudflare_render_metadata_disables_body_inline_ads_for_layout_managed_categories() -> None:
     article_output = SimpleNamespace(slide_sections=[])
 
     metadata = _build_cloudflare_render_metadata(
         article_output=article_output,
         planner_brief={},
-        title="개발 도구 운영 가이드",
-        category_slug="개발과-프로그래밍",
-        body_markdown="<h2>핵심 요약</h2><p>"
-        + ("가" * 1100)
-        + "</p><h2>운영 기준</h2><p>"
-        + ("나" * 1100)
-        + "</p><h2>마무리 기록</h2><p>정리합니다.</p>",
+        title="developer guide",
+        category_slug="\uac1c\ubc1c\uacfc-\ud504\ub85c\uadf8\ub798\ubc0d",
+        body_markdown="<h2>summary</h2><p>"
+        + ("x" * 1100)
+        + "</p><h2>operation</h2><p>"
+        + ("x" * 1100)
+        + "</p><h2>closing</h2><p>done.</p>",
     )
 
-    assert metadata["body_ads"]["enabled"] is True
-    assert metadata["body_ads"]["placements"] == [
-        {"slot_key": "body_inline_primary", "placement": "after_h2_2", "max_count": 1}
-    ]
-    assert metadata["body_ads"]["structure"]["has_closing_record"] is True
+    assert metadata["body_ads"]["enabled"] is False
+    assert metadata["body_ads"]["placements"] == []
+    assert metadata["body_ads"]["skip_reason"] == "body_inline_ads_disabled_layout_managed"
+    assert metadata["body_ads"]["structure"]["h2_count"] == 3
 
 
-def test_build_cloudflare_render_metadata_plans_stock_second_slot_only_for_long_body() -> None:
+def test_build_cloudflare_render_metadata_does_not_plan_stock_second_slot_when_layout_managed() -> None:
     article_output = SimpleNamespace(slide_sections=[])
-    long_body = "".join(f"<h2>섹션 {idx}</h2><p>{'가' * 850}</p>" for idx in range(1, 6))
+    long_body = "".join(f"<h2>section {idx}</h2><p>{'x' * 850}</p>" for idx in range(1, 6))
 
     metadata = _build_cloudflare_render_metadata(
         article_output=article_output,
         planner_brief={},
-        title="주식 시장 점검",
-        category_slug="주식의-흐름",
+        title="stock market check",
+        category_slug="\uc8fc\uc2dd\uc758-\ud750\ub984",
         body_markdown=long_body,
     )
 
-    assert metadata["body_ads"]["enabled"] is True
-    assert metadata["body_ads"]["placements"] == [
-        {"slot_key": "body_inline_primary", "placement": "after_h2_1", "max_count": 1},
-        {"slot_key": "body_inline_secondary", "placement": "after_h2_3", "max_count": 1},
-    ]
+    assert metadata["body_ads"]["enabled"] is False
+    assert metadata["body_ads"]["placements"] == []
+    assert metadata["body_ads"]["skip_reason"] == "body_inline_ads_disabled_layout_managed"
+    assert metadata["body_ads"]["structure"]["h2_count"] == 5
 
 
 def test_cloudflare_blossom_cap_allows_bootstrap_pick() -> None:

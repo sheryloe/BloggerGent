@@ -1,22 +1,32 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import delete, func, select
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
-from app.models.entities import AIUsageEvent, Article, AuditLog, Blog, BloggerPost, Image, Job, PostStatus, PublishMode, PublishQueueItem, Topic
-from app.schemas.api import GeneratedDataResetResponse, JobCreate, JobDetailRead, JobListItemRead, JobRetryResponse
+from app.api.deps.admin_auth import AdminMutationRoute
+from app.models.entities import Article, Job, PublishMode, Topic
+from app.schemas.api import (
+    GeneratedDataResetRequest,
+    GeneratedDataResetResponse,
+    JobCreate,
+    JobDetailRead,
+    JobListItemRead,
+    JobRetryResponse,
+)
 from app.services.platform.blog_service import get_blog, list_visible_blog_ids
 from app.services.content.content_guard_service import DuplicateContentError
 from app.services.ops.job_service import create_job, load_job
-from app.services.providers.factory import get_blogger_provider
 from app.services.integrations.settings_service import get_settings_map
-from app.services.integrations.storage_service import clear_generated_storage
+from app.services.ops.generated_data_reset_service import (
+    GeneratedDataResetConfirmationError,
+    reset_generated_data,
+)
 from app.services.content.topic_guard_service import TopicGuardConflictError
 from app.tasks.pipeline import PIPELINE_CONTROL_KEY, _resolve_stop_after, _serialize_pipeline_control, run_job
 
-router = APIRouter()
+router = APIRouter(route_class=AdminMutationRoute)
 
 
 @router.get("", response_model=list[JobListItemRead])
@@ -86,7 +96,12 @@ def create_job_endpoint(payload: JobCreate, db: Session = Depends(get_db)) -> Jo
             keyword=keyword,
             topic_id=topic.id if topic else None,
             publish_mode=publish_mode,
-            raw_prompts={PIPELINE_CONTROL_KEY: _serialize_pipeline_control(stop_after_status)},
+            raw_prompts={
+                PIPELINE_CONTROL_KEY: _serialize_pipeline_control(
+                    stop_after_status,
+                    defer_images=payload.defer_images,
+                )
+            },
         )
     except TopicGuardConflictError as exc:
         raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
@@ -111,50 +126,12 @@ def retry_job(job_id: int, db: Session = Depends(get_db)) -> JobRetryResponse:
 
 
 @router.delete("/generated-data", response_model=GeneratedDataResetResponse)
-def reset_generated_data(db: Session = Depends(get_db)) -> GeneratedDataResetResponse:
-    draft_posts = db.execute(
-        select(BloggerPost, Blog)
-        .join(Blog, BloggerPost.blog_id == Blog.id)
-        .where(BloggerPost.post_status != PostStatus.PUBLISHED)
-    ).all()
-
-    for blogger_post, blog in draft_posts:
-        post_id = (blogger_post.blogger_post_id or "").strip()
-        blog_id = (blog.blogger_blog_id or "").strip()
-        if not post_id or not blog_id:
-            continue
-        try:
-            provider = get_blogger_provider(db, blog)
-            delete_post = getattr(provider, "delete_post", None)
-            if callable(delete_post):
-                delete_post(post_id)
-        except Exception:
-            pass
-
-    counts = {
-        "deleted_jobs": int(db.execute(select(func.count()).select_from(Job)).scalar_one()),
-        "deleted_topics": int(db.execute(select(func.count()).select_from(Topic)).scalar_one()),
-        "deleted_articles": int(db.execute(select(func.count()).select_from(Article)).scalar_one()),
-        "deleted_images": int(db.execute(select(func.count()).select_from(Image)).scalar_one()),
-        "deleted_blogger_posts": int(db.execute(select(func.count()).select_from(BloggerPost)).scalar_one()),
-        "deleted_ai_usage_events": int(db.execute(select(func.count()).select_from(AIUsageEvent)).scalar_one()),
-        "deleted_publish_queue_items": int(db.execute(select(func.count()).select_from(PublishQueueItem)).scalar_one()),
-        "deleted_audit_logs": int(db.execute(select(func.count()).select_from(AuditLog)).scalar_one()),
-    }
-
-    db.execute(delete(AuditLog))
-    db.execute(delete(AIUsageEvent))
-    db.execute(delete(PublishQueueItem))
-    db.execute(delete(BloggerPost))
-    db.execute(delete(Image))
-    db.execute(delete(Article))
-    db.execute(delete(Job))
-    db.execute(delete(Topic))
-    db.commit()
-
-    deleted_storage_files = clear_generated_storage()
-    return GeneratedDataResetResponse(
-        **counts,
-        deleted_storage_files=deleted_storage_files,
-        message="생성 작업, 글, 이미지, 토픽, 감사 로그를 모두 정리했습니다.",
-    )
+def reset_generated_data_deprecated(
+    payload: GeneratedDataResetRequest = Body(default_factory=GeneratedDataResetRequest),
+    db: Session = Depends(get_db),
+) -> GeneratedDataResetResponse:
+    try:
+        result = reset_generated_data(db, dry_run=payload.dry_run, confirm_text=payload.confirm_text)
+    except GeneratedDataResetConfirmationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return GeneratedDataResetResponse(**result)

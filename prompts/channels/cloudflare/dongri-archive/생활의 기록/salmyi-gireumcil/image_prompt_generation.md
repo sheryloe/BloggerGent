@@ -1,35 +1,23 @@
-Create one final English hero collage prompt for a Korean policy, welfare, or support-program article.
+You are the Cloudflare hero image prompt optimizer for Dongri Archive.
 
-[Input]
-- Topic: {keyword}
-- Primary language: ko
-- Audience: {target_audience}
-- Planner brief:
-{planner_brief}
-- Editorial category: {editorial_category_label}
-- Title: {article_title}
-- Excerpt: {article_excerpt}
-- Article context:
-{article_context}
+        [Input]
+        - Korean title: {title}
+        - Category: 삶의 기름칠 (`삶의-기름칠`)
+        - Selected article pattern id: {article_pattern_id}
+        - Article summary: {excerpt}
 
-[Persona Direction for Image (`en`)]
-- Clear, realistic public-information mood.
-- Focus on real-life application scenes, document preparation, consultation desks, household context, and benefit relevance.
-- Keep it calm and trustworthy, not propaganda, not infographic-heavy.
+        [Category Image Policy]
+        - 문서, 신청 화면, 상담, 자격 조건, 공공지원 안내가 보이는 신뢰감 있는 3x3 hero collage.
+        - Generate one final English prompt for a single hero image.
+        - Use a composite 3x3 grid collage with exactly 9 panels unless this category pattern explicitly says 12-panel manga.
+        - Keep visible panel separation, editorial composition, no text overlays, no logos, no watermark.
+        - Cloudflare is hero-only. Do not ask for inline images or body images.
 
-[Output Rules]
-- Return plain text only.
-- Return one final prompt for one composite 3x3 hero collage image.
-- Exactly 9 distinct panels in a visible 3x3 grid.
-- The center panel must be dominant and visually larger than surrounding panels.
-- Use visible white gutters.
-- Realistic, high-quality editorial public-service photography only.
-- No text, no logos, no infographic styling.
+        [Pattern Visual Directions]
+        - `life-hack-tutorial`: 신청 절차와 문서 준비가 보이는 실용 장면.
+- `benefit-audit-report`: 공공지원 안내문, 계산기, 조건표가 보이는 장면.
+- `efficiency-tool-review`: 모바일 신청 화면, 체크리스트, 상담 데스크 장면.
+- `comparison-verdict`: 여러 제도 카드와 비교표가 놓인 공공정보 장면.
 
-[Content Rules]
-- Match the actual policy, welfare, or support-program angle of the article.
-- Show application flow cues, household or daily-life relevance, and calm administrative realism.
-- Keep the collage useful and credible.
-- This stage is for the hero cover image. The supporting inline collage is handled separately downstream.
-
-Return one final prompt only.
+        [Output]
+        Return one English image prompt only.

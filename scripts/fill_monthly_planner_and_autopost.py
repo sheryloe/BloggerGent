@@ -11,7 +11,7 @@ from sqlalchemy import and_
 
 from app.db.session import SessionLocal
 from app.models.entities import Blog, ContentPlanDay, ContentPlanSlot, ManagedChannel, WorkflowStageType
-from app.services.platform.blog_service import ensure_all_blog_workflows, enforce_free_tier_model_policy, get_blog, sync_stage_prompts_from_profile_files
+from app.services.platform.blog_service import ensure_all_blog_workflows, get_blog, sync_stage_prompts_from_profile_files
 from app.services.cloudflare.cloudflare_channel_service import sync_cloudflare_prompts_from_files
 from app.services.ops.openai_usage_service import FREE_TIER_DEFAULT_LARGE_TEXT_MODEL
 from app.services.ops.planner_service import analyze_day_briefs, apply_day_briefs, create_month_plan, get_calendar
@@ -242,7 +242,6 @@ def main() -> int:
     db = SessionLocal()
     try:
         ensure_all_blog_workflows(db)
-        enforce_free_tier_model_policy(db)
 
         settings_updates = ensure_runtime_defaults(
             db,

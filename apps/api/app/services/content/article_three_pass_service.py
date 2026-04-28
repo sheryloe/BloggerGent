@@ -12,6 +12,8 @@ _TOTAL_MIN_KO = 3000
 _TOTAL_MAX_KO = 4000
 _TRAVEL_TOTAL_MIN_KO = 3200
 _TRAVEL_TOTAL_MAX_KO = 3600
+_TRAVEL_TOTAL_MIN_NON_KO = 3000
+_TRAVEL_TOTAL_RECOMMENDED_NON_KO = 3500
 _RATIO_TOLERANCE = 0.08
 
 
@@ -189,6 +191,33 @@ def _evaluate_travel_ko_lengths(pass_lengths: dict[str, int]) -> dict[str, objec
         "target_total_min": _TRAVEL_TOTAL_MIN_KO,
         "target_total_max": _TRAVEL_TOTAL_MAX_KO,
         "target_total_ok": _TRAVEL_TOTAL_MIN_KO <= total <= _TRAVEL_TOTAL_MAX_KO,
+        "recommended_total_ok": _TRAVEL_TOTAL_MIN_KO <= total <= _TRAVEL_TOTAL_MAX_KO,
+        "failing_passes": sorted(failing),
+    }
+
+
+def _evaluate_travel_non_ko_lengths(pass_lengths: dict[str, int]) -> dict[str, object]:
+    total = sum(pass_lengths.values())
+    ratios = {key: (pass_lengths[key] / total if total > 0 else 0.0) for key in pass_lengths}
+    failing: set[str] = set()
+
+    if total < _TRAVEL_TOTAL_MIN_NON_KO:
+        for beat_key, expected_ratio in _TRAVEL_BEAT_RATIOS.items():
+            minimum_share = max(350, int(_TRAVEL_TOTAL_MIN_NON_KO * expected_ratio * 0.7))
+            if pass_lengths.get(beat_key, 0) < minimum_share:
+                failing.add(beat_key)
+        if not failing and pass_lengths:
+            shortest = min(pass_lengths.keys(), key=lambda key: pass_lengths[key])
+            failing.add(shortest)
+
+    return {
+        "total_plain_text_length": total,
+        "ratios": ratios,
+        "pass_lengths": dict(pass_lengths),
+        "target_total_min": _TRAVEL_TOTAL_MIN_NON_KO,
+        "target_total_max": None,
+        "target_total_ok": total >= _TRAVEL_TOTAL_MIN_NON_KO,
+        "recommended_total_ok": total >= _TRAVEL_TOTAL_RECOMMENDED_NON_KO,
         "failing_passes": sorted(failing),
     }
 
@@ -416,6 +445,9 @@ def _build_travel_pass_prompt(
         target_min, target_max = _TRAVEL_BEAT_TARGETS.get(beat_key, (800, 1000))
         lines.append(f"- Korean plain-text target for this beat (`html_article` only): {target_min}~{target_max} chars.")
         lines.append("- For all 4 beats combined, target 3200~3600 Korean chars with 20/30/30/20 composition.")
+    else:
+        lines.append("- For all 4 beats combined, the final assembled visible body text must be at least 3000 non-space characters.")
+        lines.append("- Keep each beat substantial enough that the final article can naturally reach 3500+ non-space characters.")
     if retry_reason:
         lines.append(f"- Retry fix required for this beat: {retry_reason}")
         lines.append("- Rewrite this beat once with tighter scope and stronger section ownership.")
@@ -480,13 +512,7 @@ def generate_travel_four_beat_article(
             }
         )
 
-    validation = _evaluate_travel_ko_lengths(pass_lengths) if is_korean else {
-        "total_plain_text_length": sum(pass_lengths.values()),
-        "ratios": {key: 0.0 for key in pass_lengths},
-        "pass_lengths": dict(pass_lengths),
-        "failing_passes": [],
-        "target_total_ok": True,
-    }
+    validation = _evaluate_travel_ko_lengths(pass_lengths) if is_korean else _evaluate_travel_non_ko_lengths(pass_lengths)
     retries: list[dict[str, object]] = []
     beat_index_by_key = {str(beat.get("key") or "").strip(): index for index, beat in enumerate(planner["beats"], start=1)}
     for failed_key in list(validation.get("failing_passes", [])):
@@ -521,13 +547,7 @@ def generate_travel_four_beat_article(
         )
 
     final_output = _assemble_travel_four_beat_output(planner=planner, pass_outputs=pass_outputs)
-    final_validation = _evaluate_travel_ko_lengths(pass_lengths) if is_korean else {
-        "total_plain_text_length": _plain_text_length(final_output.html_article),
-        "ratios": {key: 0.0 for key in pass_lengths},
-        "pass_lengths": dict(pass_lengths),
-        "failing_passes": [],
-        "target_total_ok": True,
-    }
+    final_validation = _evaluate_travel_ko_lengths(pass_lengths) if is_korean else _evaluate_travel_non_ko_lengths(pass_lengths)
     metadata = {
         "travel_four_beat_article_assembly": True,
         "language": str(language or "").strip() or None,
@@ -549,7 +569,7 @@ _MYSTERY_PARTS: tuple[dict[str, str], ...] = (
     {"key": "status", "label": "Current Status & Open Questions"},
 )
 _MYSTERY_TOTAL_MIN = 3200
-_MYSTERY_TOTAL_MAX = 3600
+_MYSTERY_TOTAL_MAX = 4200
 
 
 def _normalize_mystery_planner_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -601,7 +621,7 @@ def _build_mystery_planner_prompt(*, base_prompt: str) -> str:
             '- Output exactly these top-level keys: "title_direction", "meta_description_direction", "slug_basis", "labels", "faq_intent", "image_seed", "fact_vs_claim_policy", "beats".',
             '- "labels" must contain 5 to 6 short strings.',
             '- "beats" must contain exactly 4 objects in order; each object must include "label", "goal", "must_include", and "avoid".',
-            "- Keep the final assembled article in roughly 3200~3600 plain-text characters.",
+            "- Keep the final assembled article in roughly 3200~4200 plain-text characters.",
             "- Do not write article body HTML in this step.",
         ]
     ).strip()
@@ -634,6 +654,7 @@ def _build_mystery_pass_prompt(
     planner: dict[str, Any],
     beat: dict[str, Any],
     beat_index: int,
+    is_korean: bool = False,
 ) -> str:
     must_include = ", ".join(str(value).strip() for value in (beat.get("must_include") or []) if str(value).strip())
     avoid = ", ".join(str(value).strip() for value in (beat.get("avoid") or []) if str(value).strip())
@@ -645,7 +666,7 @@ def _build_mystery_pass_prompt(
         "- Return valid JSON using the existing article output schema.",
         "- In this pass, `html_article` must contain only the current part content.",
         "- Do not write content for the other three parts in this pass.",
-        "- Keep this pass in roughly 700~1000 plain-text characters to land near 3200~3600 after assembly.",
+        "- Keep this pass in roughly 700~1100 plain-text characters to land near 3200~4200 after assembly.",
         f"- Planner title direction: {planner.get('title_direction') or ''}",
         f"- Planner meta direction: {planner.get('meta_description_direction') or ''}",
         f"- Planner FAQ intent: {planner.get('faq_intent') or ''}",
@@ -657,6 +678,7 @@ def _build_mystery_pass_prompt(
         lines.append(f"- Must include: {must_include}")
     if avoid:
         lines.append(f"- Avoid overlap with: {avoid}")
+
     if beat_index == 1:
         lines.append("- title/meta_description/labels/slug/excerpt in this pass are the canonical final values.")
     elif beat_index == 4:
@@ -664,6 +686,12 @@ def _build_mystery_pass_prompt(
         lines.append("- inline_collage_prompt must be null or empty.")
     else:
         lines.append("- Keep title/meta_description/labels/slug/excerpt aligned with part 1.")
+    
+    if is_korean:
+        lines.append("- CRITICAL: All fields (title, html_article, meta_description, labels, slug, faq_section) MUST be written in Korean.")
+        lines.append("- meta_description은 반드시 50자 이상의 상세한 문장으로 작성하세요.")
+        lines.append("- 슬러그(slug)는 한글 제목을 영어 소문자와 하이픈으로 번역하여 작성하세요.")
+    
     return "\n".join(line for line in lines if str(line).strip()).strip()
 
 
@@ -707,6 +735,7 @@ def generate_mystery_four_part_article(
             planner=planner,
             beat=beat,
             beat_index=index,
+            is_korean=_is_korean_language(language),
         )
         output, raw = generate_pass(pass_prompt)
         pass_outputs.append(output)
@@ -748,3 +777,37 @@ def generate_mystery_four_part_article(
         },
     }
     return final_output, metadata
+
+def generate_mystery_topic_suggestion(db: Any, blog_id: int) -> dict[str, str]:
+    """Generates a random mystery topic suggestion using the article provider."""
+    from app.services.providers.factory import get_article_provider
+    provider = get_article_provider(db)
+    
+    prompt = """
+    Generate a unique and compelling mystery topic for a documentary-style blog.
+    The topic should be one of:
+    - Unsolved crime (Case Files)
+    - Historical enigma (Mystery Archives)
+    - Folklore or urban legend (Legends & Lore)
+    - Paranormal or unexplained phenomena
+    
+    Return a JSON object with:
+    - title: A catchy, investigative title.
+    - audience: Target audience description.
+    - information_level: Description of depth.
+    - editorial_category_key: one of [case-files, mystery-archives, legends-lore]
+    - editorial_category_label: the display name for the category.
+    """
+    
+    try:
+        suggestion, _ = provider.generate_structured_json(prompt)
+        return suggestion
+    except Exception:
+        # Fallback
+        return {
+            "title": f"The Mystery of the Unknown {blog_id}",
+            "audience": "Mystery enthusiasts",
+            "information_level": "Deep-dive",
+            "editorial_category_key": "case-files",
+            "editorial_category_label": "Case Files"
+        }

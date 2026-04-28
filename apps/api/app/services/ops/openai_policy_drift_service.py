@@ -97,6 +97,10 @@ def _expected_stage_model(path: Path, stage: str, step: dict[str, Any] | None = 
         provider_hint = str((step or {}).get("provider_hint") or "").strip()
         if provider_hint == "codex_cli":
             return "gpt-5.4"
+    if folder_name == "miseuteria-seutori" and stage == "topic_discovery":
+        provider_hint = str((step or {}).get("provider_hint") or "").strip()
+        if provider_hint == "codex_cli":
+            return "gpt-5.4"
     return _EXPECTED_STAGE_MODELS.get(stage)
 
 

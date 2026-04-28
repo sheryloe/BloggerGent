@@ -1,75 +1,82 @@
 [Input]
-- Topic: {keyword}
-- Current date: {current_date}
-- Target audience: {target_audience}
-- Blog focus: {content_brief}
-- Planner brief:
-{planner_brief}
-- Editorial category key: {editorial_category_key}
-- Editorial category label: {editorial_category_label}
-- Editorial category guidance: {editorial_category_guidance}
+        - Topic: {keyword}
+        - Current date: {current_date}
+        - Target audience: {target_audience}
+        - Blog focus: {content_brief}
+        - Planner brief:
+        {planner_brief}
+        - Editorial category key: {editorial_category_key}
+        - Editorial category label: {editorial_category_label}
+        - Editorial category guidance: {editorial_category_guidance}
+        - Selected article pattern id: {article_pattern_id}
 
-[Mission]
-- Write one publish-ready Korean blog article package for Dongri Archive.
-- Make the article useful to a real reader, not a report, audit memo, score sheet, or prompt explanation.
-- Use the planner brief, but do not expose planner wording or internal archive operations.
+        [Mission]
+        - Write one publish-ready Korean article package for Dongri Archive Cloudflare channel.
+        - Category: 주식의 흐름 (`주식의-흐름`).
+        - Minimum body length: 4000+ Korean characters excluding markup.
+        - Use the planner brief, but never expose planner wording, internal archive operations, score reports, or prompt notes.
+        - Keep the article useful to a real reader, not a system report.
 
-[Category Fit]
-- Quick brief: {content_brief}
-- Core focus: keep the topic inside this category and anchor it to one concrete subject.
-- Key entities: include the specific places, tools, companies, events, records, or people needed for reader trust.
-- Treat this file as an internal archive instruction source only. Do not write an internal archive introduction.
-- This category is only for actual places, products, events, cases, entities, or decisions that a reader can understand concretely.
+        [allowed_article_patterns]
+        1. `stock-cartoon-summary` - Cartoon Summary: 시장 이슈를 만화식 요약으로 쉽게 풀어낸다.
+2. `stock-technical-analysis` - Technical Analysis: 가격 흐름과 기술적 구간을 정리한다.
+3. `stock-macro-intelligence` - Macro Intelligence: 금리, 물가, 정책, 지표가 시장에 미치는 영향을 본다.
+4. `stock-corporate-event-watch` - Corporate Event Watch: 실적, 이벤트, 기업 뉴스 중심 분석.
+5. `stock-risk-timing` - Risk Timing: 진입/관망/리스크 타이밍을 정리한다.
 
-[Category delta]
-- Center the article on one market move, sector shift, listed-company cluster, or investable theme.
-- Explain what moved, why the market cared, what risk remains, and what to watch next.
-- Stay calm and decision-first. Avoid trading-room hype.
-- Keep the market story tied to one sector, listed-company cluster, flow, risk, and reader decision point.
+        [pattern_selection_rule]
+        - Use only one pattern from `allowed_article_patterns`.
+        - If `article_pattern_id` is provided and valid, follow it.
+        - If it is missing or invalid, choose the best pattern from the topic and expose the selected id only in the JSON field.
+        - Return `article_pattern_version = 4`.
 
-[Blog Style]
-- Use natural Korean blog prose with clear section flow.
-- Keep the tone experiential and practical; avoid generic roundup language.
-- Do not expose any internal helper phrases, prompt notes, planner labels, model names, or quality-control labels unless the topic itself requires them.
-- Do not create standalone source, verification, audit, or score-report sections.
+        [category_focus]
+        - 글로벌 증시, 섹터, 기업 실적, 투자심리, 정책 변수를 분석한다.
+        - Tone: 투자 조언이 아니라 시장 관찰과 리스크 정리.
 
-[Body Rules]
-- Start with a reader-facing lead that explains why this topic matters now.
-- Use <h2> and <h3> section headings that sound like real blog headings.
-- The final body section title must be exactly <h2>마무리 기록</h2>.
-- Do not output visible meta_description or excerpt lines inside html_article.
-- Do not insert image tags inside html_article.
-- Keep FAQ only as a short final appendix when it genuinely helps.
+        [body_structure]
+        - 시장 요약 -> 주요 뉴스/지표 -> 섹터 관찰 -> 리스크 -> 다음 일정.
+        - `stock-cartoon-summary`: ## 만화 요약 -> ## 오늘의 시장 흐름 -> ## 주요 이슈 -> ## 마무리 기록
+- `stock-technical-analysis`: ## 오늘의 시장 흐름 -> ## 기술적 구간 -> ## 확인할 지표 -> ## 마무리 기록
+- `stock-macro-intelligence`: ## 거시 환경 -> ## 시장 반응 -> ## 투자심리 -> ## 마무리 기록
+- `stock-corporate-event-watch`: ## 기업 이벤트 -> ## 실적/뉴스 포인트 -> ## 리스크 -> ## 마무리 기록
+- `stock-risk-timing`: ## 현재 위치 -> ## 리스크 신호 -> ## 확인할 일정 -> ## 마무리 기록
 
-[Content Requirements]
-- Quick brief, Core focus, and Key entities must be reflected in the article naturally.
-- Include concrete dates, places, tools, companies, or route details when relevant.
-- Explain tradeoffs, timing, risk, or reader action instead of listing abstract facts.
-- Keep the article inside the category; do not write a category introduction or operations memo.
-- Preserve reader trust without adding a separate source-audit block.
+        [faq_policy]
+        - Category default: optional.
+        - Pattern-level FAQ policy must be respected.
+        - Do not add FAQ just to fill space.
 
-[Output Contract]
-Return one JSON object only with these keys:
-- title
-- meta_description
-- labels
-- slug
-- excerpt
-- html_article
-- faq_section
-- image_collage_prompt
-- inline_collage_prompt
-- article_pattern_id
-- article_pattern_version
+        [image_prompt_policy]
+        - 패턴1은 12컷 만화형, 나머지는 금융 리포트형 3x3 hero collage.
+        - `image_collage_prompt` must be English.
+        - Cloudflare is hero-only: create one representative hero image prompt only.
+        - Do not request body images, inline images, multiple generated assets, logos, readable text, or watermarks.
 
-[Output Rules]
-- All reader-facing text in title, meta_description, excerpt, html_article, and FAQ answers must be Korean.
-- labels: 5 to 7 items, first label should match the editorial category label when natural.
-- slug: lowercase ASCII with hyphens only.
-- excerpt: exactly 2 Korean sentences.
-- Return JSON only.
+        [forbidden_outputs]
+        - No body-level H1.
+        - Do not insert `<img>`, markdown images, scripts, iframes, or raw external widgets inside `html_article`.
+        - Do not include `meta_description` or `excerpt` visibly inside `html_article`.
+        - Do not mention Antigravity, Codex, Gemini, BloggerGent, pipeline, score, audit, or internal planner unless the topic itself is explicitly about those tools.
+        - Do not move outside the category topic just because the keyword is broad.
 
-[Image Prompt Rules]
-- image_collage_prompt must be English, realistic editorial collage direction, no text, no logo.
-- inline_collage_prompt must be English, realistic supporting collage direction, no text, no logo.
-- Keep image prompts grounded in the actual topic, not abstract symbolism.
+        [Output JSON]
+        Return valid JSON only with these fields:
+        - title
+        - meta_description
+        - excerpt
+        - labels
+        - html_article
+        - faq_section
+        - image_collage_prompt
+        - inline_collage_prompt: return an empty string
+        - article_pattern_id
+        - article_pattern_version
+
+        [adsense_body_policy]
+        - Do not output raw AdSense code inside `html_article`.
+        - Forbidden in `html_article`: `<script`, `<ins class="adsbygoogle"`, `adsbygoogle`, `data-ad-client`, `data-ad-slot`, `ca-pub-`, `googlesyndication`, `doubleclick`, `<!--ADSENSE`, `[AD_SLOT`, and visible Korean text such as `?? ??`.
+        - Do not invent AdSense client ids, slot ids, loader scripts, iframe widgets, ad labels, or visible ad placeholders.
+        - Body ad placement is server-owned metadata only: `render_metadata.body_ads` is computed after generation and expanded by the public renderer.
+        - Keep `html_article` as pure article content with no advertisement code or advertisement marker text.
+

@@ -1470,6 +1470,60 @@ export interface ContentItemRead {
   updatedAt: string;
 }
 
+export interface ContentItemCreatePayload {
+  channelId: string;
+  idempotencyKey?: string | null;
+  contentType: "blog_article" | "youtube_video" | "instagram_image" | "instagram_reel" | string;
+  title: string;
+  description?: string;
+  bodyText?: string;
+  assetManifest?: Record<string, unknown>;
+  briefPayload?: Record<string, unknown>;
+  scheduledFor?: string | null;
+  createdByAgent?: string | null;
+}
+
+export interface ContentItemUpdatePayload {
+  lifecycleStatus?: string | null;
+  title?: string | null;
+  description?: string | null;
+  bodyText?: string | null;
+  approvalStatus?: string | null;
+  assetManifest?: Record<string, unknown> | null;
+  briefPayload?: Record<string, unknown> | null;
+  reviewNotes?: unknown[] | null;
+  scheduledFor?: string | null;
+  lastFeedback?: string | null;
+  blockedReason?: string | null;
+  lastScore?: Record<string, unknown> | null;
+}
+
+export interface ContentItemDuplicateCheckPayload {
+  provider: string;
+  channelId: string;
+  contentType: string;
+  topic: string;
+  title: string;
+}
+
+export interface ContentItemDuplicateMatchRead {
+  id: number;
+  title: string;
+  channelId: string;
+  provider: string;
+  contentType: string;
+  lifecycleStatus: string;
+  similarityScore: number;
+  matchedField: string;
+  updatedAt: string;
+}
+
+export interface ContentItemDuplicateCheckRead {
+  isDuplicate: boolean;
+  riskLevel: "low" | "medium" | "high" | string;
+  matchedItems: ContentItemDuplicateMatchRead[];
+}
+
 export interface AgentWorkerRead {
   id: number;
   managedChannelId: number | null;

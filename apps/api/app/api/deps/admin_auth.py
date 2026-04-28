@@ -3,6 +3,8 @@ from __future__ import annotations
 import secrets
 
 from fastapi import Depends, Header, HTTPException, status
+from fastapi.params import Depends as DependsParam
+from fastapi.routing import APIRoute
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy.orm import Session
 
@@ -55,3 +57,21 @@ def require_admin_auth(
         _unauthorized("admin_auth_invalid_username")
     if not secrets.compare_digest(supplied_password, expected_password):
         _unauthorized("admin_auth_invalid_password")
+
+
+class AdminMutationRoute(APIRoute):
+    """Require admin auth for write methods while leaving GET routes public."""
+
+    _MUTATION_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+    def __init__(self, *args, **kwargs):
+        methods = {str(method).upper() for method in kwargs.get("methods") or []}
+        dependencies = list(kwargs.pop("dependencies", None) or [])
+        if methods & self._MUTATION_METHODS and not _contains_admin_auth_dependency(dependencies):
+            dependencies.append(Depends(require_admin_auth))
+        kwargs["dependencies"] = dependencies
+        super().__init__(*args, **kwargs)
+
+
+def _contains_admin_auth_dependency(dependencies: list[DependsParam]) -> bool:
+    return any(getattr(dependency, "dependency", None) is require_admin_auth for dependency in dependencies)

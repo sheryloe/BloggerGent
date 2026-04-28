@@ -11,3 +11,7 @@ Notes
 - The runtime executes this stage automatically.
 - This file is written to keep the backup folder structure consistent with the settings UI.
 - Prompt editing is not supported for this stage.
+
+- AdSense body policy: do not place raw AdSense code, `<script>`, `<ins class="adsbygoogle">`, iframe, `data-ad-client`, `data-ad-slot`, `ca-pub-*`, `googlesyndication`, `doubleclick`, `<!--ADSENSE-->`, `[AD_SLOT]`, or visible ad placeholder text in the body.
+- Body ad placement is renderer metadata only; this assembly file must preserve a pure content body.
+

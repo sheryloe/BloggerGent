@@ -174,19 +174,26 @@ def _score_payload(title: str, content: str, excerpt: str) -> dict[str, int]:
         excerpt=excerpt,
         faq_section=[],
     )
+    seo = int(payload.get("seo_score") or 0)
+    geo = int(payload.get("geo_score") or 0)
+    ctr = int(payload.get("ctr_score") or 0)
+    lighthouse = int(round((seo + geo + ctr) / 3.0))
+    avg_score = int(round((seo + geo + ctr + lighthouse) / 4.0))
+    min_score = min(seo, geo, ctr, lighthouse)
     return {
-        "seo_score": int(payload.get("seo_score") or 0),
-        "geo_score": int(payload.get("geo_score") or 0),
-        "ctr_score": int(payload.get("ctr_score") or 0),
+        "seo_score": seo,
+        "geo_score": geo,
+        "ctr_score": ctr,
+        "lighthouse_score": lighthouse,
+        "avg_score": avg_score,
+        "min_score": min_score,
     }
 
 
 def _needs_rewrite(scores: dict[str, int], threshold: int) -> bool:
-    return (
-        scores["seo_score"] < threshold
-        or scores["geo_score"] < threshold
-        or scores["ctr_score"] < threshold
-    )
+    avg_score = int(scores.get("avg_score") or 0)
+    min_score = int(scores.get("min_score") or 0)
+    return avg_score < threshold or min_score < 70
 
 
 def _sanitize_tags(raw_tags: list[str], title: str) -> list[str]:
@@ -519,7 +526,9 @@ def _score_rank(scores: dict[str, int]) -> tuple[int, int, int, int]:
     seo = int(scores.get("seo_score") or 0)
     geo = int(scores.get("geo_score") or 0)
     ctr = int(scores.get("ctr_score") or 0)
-    return (min(seo, geo, ctr), seo, geo, ctr)
+    lh = int(scores.get("lighthouse_score") or 0)
+    avg = int(scores.get("avg_score") or 0)
+    return (int(scores.get("min_score") or min(seo, geo, ctr, lh)), avg, seo, geo)
 
 
 def _write_reports(

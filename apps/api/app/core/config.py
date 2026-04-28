@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
 
@@ -118,6 +118,23 @@ class Settings(BaseSettings):
     instagram_client_secret: str = ""
     instagram_redirect_uri: str = ""
     instagram_publish_api_enabled: bool = False
+    media_studio_storage_root: str = "/app/storage/media-studio"
+    media_studio_pdf_import_dir: str = "pdf-imports"
+    media_studio_rendered_card_dir: str = "cards"
+    media_studio_r2_prefix: str = "assets/media/media-studio"
+    media_studio_instagram_r2_prefix: str = "assets/media/media-studio/instagram"
+    media_studio_openai_enabled: bool = True
+    media_studio_openai_model: str = ""
+    media_studio_openai_temperature: float = 0.6
+    media_studio_pdf_max_mb: int = 50
+    media_studio_pdf_max_pages: int = 12
+    media_studio_card_width: int = 1080
+    media_studio_card_height: int = 1350
+    media_studio_card_image_format: str = "webp"
+    media_studio_default_domain: str = "psychology_relationships"
+    media_studio_default_language: str = "ko"
+    media_studio_default_audience: str = "심리학, 일상 관계, 인간관계에 관심 있는 20~40대"
+    media_studio_required_asset_mode: str = "carousel"
     blogger_playwright_enabled: bool = False
     blogger_playwright_auto_sync: bool = False
     blogger_playwright_cdp_url: str = "http://host.docker.internal:9223"
@@ -141,6 +158,7 @@ class Settings(BaseSettings):
     auto_trigger_on_discovery: bool = True
     related_post_count: int = 3
     settings_encryption_secret: str = ""
+    pagespeed_api_key: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

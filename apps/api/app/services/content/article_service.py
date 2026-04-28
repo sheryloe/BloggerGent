@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 from datetime import datetime, timezone
-from html import escape
+from html import escape, unescape
 from html.parser import HTMLParser
 from typing import Any
 
@@ -16,11 +16,16 @@ from app.schemas.ai import ArticleGenerationOutput
 from app.services.content.content_guard_service import assert_article_not_duplicate
 from app.services.content.faq_hygiene import strip_generic_faq_leak_html
 from app.services.content.travel_blog_policy import (
+    TRAVEL_PATTERN_KEY_TO_LEGACY_ID,
+    TRAVEL_PATTERN_VERSION,
     TRAVEL_BLOG_IDS,
     build_travel_asset_object_key,
     build_travel_collage_context,
     get_travel_blog_policy,
+    normalize_travel_pattern_key,
+    normalize_travel_pattern_version_key,
     normalize_travel_category_key,
+    travel_pattern_missing_requirements,
 )
 from app.services.content.travel_translation_state_service import seed_article_travel_sync_fields
 from app.services.cloudflare.cloudflare_asset_policy import (
@@ -30,6 +35,7 @@ from app.services.cloudflare.cloudflare_asset_policy import (
 
 
 TAG_RE = re.compile(r"<[^>]+>")
+H1_RE = re.compile(r"(?is)<h1\b")
 ALLOWED_HTML_TAGS = {
     "section",
     "article",
@@ -59,9 +65,10 @@ ALLOWED_HTML_TAGS = {
     "h2",
     "h3",
     "br",
+    "iframe",
 }
 VOID_HTML_TAGS = {"br", "hr", "img"}
-BLOCKED_CONTENT_TAGS = {"script", "style", "iframe", "form"}
+BLOCKED_CONTENT_TAGS = {"script", "style", "form"}
 CLASS_TOKEN_PREFIXES = (
     "callout-",
     "timeline-",
@@ -538,9 +545,11 @@ class _SafeHtmlSanitizer(HTMLParser):
         class_value = _sanitize_class_value(str(attr_map.get("class") or ""))
         if class_value:
             rendered_attrs.append(f'class="{escape(class_value, quote=True)}"')
-        data_slot = str(attr_map.get("data-slot") or "").strip()
-        if data_slot and tag in {"figure", "img", "div", "section", "article"}:
-            rendered_attrs.append(f'data-slot="{escape(data_slot, quote=True)}"')
+        # Allow all data-* attributes for whitelisted tags to support client-side interactive blocks
+        if tag in {"figure", "img", "div", "section", "article", "span"}:
+            for attr_name, attr_value in attr_map.items():
+                if attr_name.startswith("data-"):
+                    rendered_attrs.append(f'{attr_name}="{escape(str(attr_value or ""), quote=True)}"')
         if tag == "a":
             href = str(attr_map.get("href") or "").strip()
             if href and _is_safe_href(href):
@@ -567,9 +576,24 @@ class _SafeHtmlSanitizer(HTMLParser):
                 value = str(attr_map.get(dimension) or "").strip()
                 if value.isdigit():
                     rendered_attrs.append(f'{dimension}="{value}"')
+        elif tag in {"h2", "h3"}:
+            id_val = str(attr_map.get("id") or "").strip()
+            if id_val:
+                rendered_attrs.append(f'id="{escape(id_val, quote=True)}"')
         elif tag == "details":
             if "open" in attr_map:
                 rendered_attrs.append("open")
+        elif tag == "iframe":
+            src = str(attr_map.get("src") or "").strip()
+            if src and (src.startswith("https://s.tradingview.com/") or src.startswith("https://www.google.com/maps/")):
+                rendered_attrs.append(f'src="{escape(src, quote=True)}"')
+            for attr in ("width", "height", "frameborder", "allowfullscreen"):
+                if attr in attr_map:
+                    val = str(attr_map.get(attr) or "").strip()
+                    if val:
+                        rendered_attrs.append(f'{attr}="{escape(val, quote=True)}"')
+                    else:
+                        rendered_attrs.append(attr)
 
         attr_suffix = f" {' '.join(rendered_attrs)}" if rendered_attrs else ""
         if self_closing or tag in VOID_HTML_TAGS:
@@ -639,6 +663,26 @@ def _strip_hangul_text(value: str) -> str:
     return cleaned.strip()
 
 
+def _plain_text_length(value: str) -> int:
+    raw = TAG_RE.sub(" ", str(value or ""))
+    normalized = MULTISPACE_RE.sub("", unescape(raw))
+    return len(normalized.strip())
+
+
+def _legacy_travel_pattern_version(value: int | str | None) -> int | None:
+    if value == TRAVEL_PATTERN_VERSION:
+        return TRAVEL_PATTERN_VERSION
+    if isinstance(value, str):
+        stripped = value.strip().lower()
+        if stripped.isdigit() and int(stripped) == TRAVEL_PATTERN_VERSION:
+            return TRAVEL_PATTERN_VERSION
+    return None
+
+
+def _body_h1_count(value: str) -> int:
+    return len(H1_RE.findall(str(value or "")))
+
+
 def _normalize_english_mystery_faq(faq_items: list[dict]) -> list[dict]:
     defaults = [
         {
@@ -649,6 +693,10 @@ def _normalize_english_mystery_faq(faq_items: list[dict]) -> list[dict]:
             "question": "How should readers evaluate competing theories?",
             "answer": "Compare each theory against documented evidence, timeline consistency, and source credibility.",
         },
+        {
+            "question": "What still makes this case unresolved today?",
+            "answer": "The remaining gap is usually a missing record, a weak chain of custody, or conflicting testimony that has never been fully reconciled.",
+        },
     ]
     normalized: list[dict] = []
     for item in faq_items:
@@ -657,9 +705,9 @@ def _normalize_english_mystery_faq(faq_items: list[dict]) -> list[dict]:
         if question and answer:
             normalized.append({"question": question, "answer": answer})
 
-    if len(normalized) >= 2:
-        return normalized
-    return normalized + defaults[: max(0, 2 - len(normalized))]
+    if len(normalized) >= 3:
+        return normalized[:3]
+    return normalized + defaults[: max(0, 3 - len(normalized))]
 
 
 def ensure_unique_slug(db: Session, blog_id: int, slug_base: str, article_id: int | None = None) -> str:
@@ -875,8 +923,17 @@ def ensure_article_editorial_labels(db: Session, article: Article, *, commit: bo
     return list(article.labels or [])
 
 
-def save_article(db: Session, *, job: Job, topic: Topic | None, output: ArticleGenerationOutput) -> Article:
-    article = db.execute(select(Article).where(Article.job_id == job.id)).scalar_one_or_none()
+def save_article(
+    db: Session,
+    *,
+    job: Job,
+    topic: Topic | None,
+    output: ArticleGenerationOutput,
+    persist: bool = True,
+    commit: bool = True,
+    upsert_fact: bool = True,
+) -> Article:
+    article = db.execute(select(Article).where(Article.job_id == job.id)).scalar_one_or_none() if persist else None
     sanitized_title = output.title
     sanitized_meta_description = output.meta_description
     sanitized_excerpt = output.excerpt
@@ -905,6 +962,47 @@ def save_article(db: Session, *, job: Job, topic: Topic | None, output: ArticleG
         sanitized_html = _strip_hangul_text(sanitized_html) or sanitized_html
         sanitized_faq_section = _normalize_english_mystery_faq(sanitized_faq_section)
         slug_candidate = slugify(output.slug or sanitized_title) or "post"
+        if _plain_text_length(sanitized_html) < 3000:
+            raise ValueError("mystery_article_plain_text_too_short")
+        if _body_h1_count(sanitized_html) > 0:
+            raise ValueError("mystery_article_body_h1_forbidden")
+        if len(sanitized_faq_section) != 3:
+            raise ValueError("mystery_article_faq_count_invalid")
+        if not str(output.image_collage_prompt or "").strip():
+            raise ValueError("mystery_article_image_prompt_missing")
+    travel_policy = get_travel_blog_policy(blog_id=job.blog_id)
+    resolved_article_pattern_key = normalize_travel_pattern_key(
+        getattr(output, "article_pattern_key", None),
+        pattern_id=output.article_pattern_id,
+    )
+    resolved_article_pattern_version_key = normalize_travel_pattern_version_key(
+        getattr(output, "article_pattern_version_key", None),
+        pattern_version=output.article_pattern_version,
+    )
+    resolved_article_pattern_id = (
+        output.article_pattern_id
+        or TRAVEL_PATTERN_KEY_TO_LEGACY_ID.get(resolved_article_pattern_key)
+    )
+    resolved_article_pattern_version = _legacy_travel_pattern_version(output.article_pattern_version)
+    if resolved_article_pattern_version is None and resolved_article_pattern_version_key:
+        resolved_article_pattern_version = TRAVEL_PATTERN_VERSION
+    if travel_policy is not None:
+        if _plain_text_length(sanitized_html) < 2500:
+            raise ValueError("travel_article_plain_text_too_short")
+        if _body_h1_count(sanitized_html) > 0:
+            raise ValueError("travel_article_body_h1_forbidden")
+        missing_pattern_requirements = travel_pattern_missing_requirements(
+            resolved_article_pattern_id,
+            output.article_pattern_version,
+            pattern_key=resolved_article_pattern_key,
+            pattern_version_key=resolved_article_pattern_version_key,
+        )
+        if missing_pattern_requirements:
+            raise ValueError(
+                "travel_article_pattern_invalid:" + ",".join(missing_pattern_requirements)
+            )
+        if "<img" in str(output.html_article or "").lower():
+            raise ValueError("travel_article_inline_image_forbidden")
     resolved_editorial_key, resolved_editorial_label, resolved_labels = canonicalize_editorial_labels(
         profile_key=profile_key,
         primary_language=primary_language,
@@ -925,8 +1023,10 @@ def save_article(db: Session, *, job: Job, topic: Topic | None, output: ArticleG
         "html_article": sanitized_html,
         "faq_section": sanitized_faq_section,
         "image_collage_prompt": output.image_collage_prompt,
-        "article_pattern_id": output.article_pattern_id,
-        "article_pattern_version": output.article_pattern_version,
+        "article_pattern_id": resolved_article_pattern_id,
+        "article_pattern_version": resolved_article_pattern_version,
+        "article_pattern_key": resolved_article_pattern_key,
+        "article_pattern_version_key": resolved_article_pattern_version_key,
         "render_metadata": _build_render_metadata_from_output(output),
         "editorial_category_key": resolved_editorial_key,
         "editorial_category_label": resolved_editorial_label,
@@ -935,9 +1035,17 @@ def save_article(db: Session, *, job: Job, topic: Topic | None, output: ArticleG
     if article:
         for key, value in payload.items():
             setattr(article, key, value)
-    else:
+    elif persist:
         article = Article(job_id=job.id, **payload)
         db.add(article)
+    else:
+        article = Article(job_id=job.id, **payload)
+        article.blog = getattr(job, "blog", None)
+        article.job = job
+        if topic is not None:
+            article.topic = topic
+        return article
+
     db.flush()
     seed_article_travel_sync_fields(db, article, commit=False)
     travel_sync_payload = {}
@@ -970,11 +1078,15 @@ def save_article(db: Session, *, job: Job, topic: Topic | None, output: ArticleG
     if planner_slot is not None:
         planner_slot.article_id = article.id
         db.add(planner_slot)
-    db.commit()
-    db.refresh(article)
-    from app.services.ops.analytics_service import upsert_article_fact
+    if commit:
+        db.commit()
+        db.refresh(article)
+    else:
+        db.flush()
+    if upsert_fact:
+        from app.services.ops.analytics_service import upsert_article_fact
 
-    upsert_article_fact(db, article.id)
+        upsert_article_fact(db, article.id, commit=commit)
     return article
 
 
@@ -1026,9 +1138,12 @@ def build_collage_prompt(article: Article, prompt_template: str | None = None) -
     if travel_policy is not None:
         return (
             f"{prefix}"
-            "Create one vertical editorial travel collage with exactly 8 distinct rectangular photo panels. "
+            "Create one single flattened final editorial travel image. "
+            "Make it a 5 columns x 4 rows collage with exactly 20 distinct visible panels inside one composition. "
             "Use thin visible white gutters between panels. "
-            "Do not blend the panels into one seamless panorama. "
+            "Do not generate 20 separate images. "
+            "Do not generate one single hero shot without panel structure. "
+            "Do not describe a sprite sheet, contact sheet, or separate assets. "
             "Realistic Korea travel photography only, no text, no logos."
         )
     is_mystery = (
@@ -1038,9 +1153,9 @@ def build_collage_prompt(article: Article, prompt_template: str | None = None) -
     if is_mystery:
         return (
             f"{prefix}"
-            'Rewrite into one "8-panel collage" hero prompt with clear panel separation, visible white gutters, '
-            "clean grid layout, center-focused or balanced composition, 2-4 grouped visual categories, realistic "
-            "documentary mood, no text/logo/watermark, no gore, under 60 words."
+            'Rewrite into one "5x4 panel grid collage" hero prompt with visible white gutters, '
+            "clean grid layout, one balanced single-image composition, 2-4 grouped visual categories, realistic "
+            "documentary mood, no text/logo/watermark, no gore, do not request 20 separate images, under 60 words."
         )
     return (
         f"{prefix}"

@@ -3,13 +3,14 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.api.deps.admin_auth import AdminMutationRoute
 from app.db.session import get_db
 from app.schemas.api import SeoTargetRead
 from app.services.platform.blog_service import list_connected_blogs
 from app.services.cloudflare.cloudflare_channel_service import get_cloudflare_overview
 from app.services.platform.workspace_service import list_managed_channels
 
-router = APIRouter(prefix="/seo", tags=["seo"])
+router = APIRouter(prefix="/seo", tags=["seo"], route_class=AdminMutationRoute)
 
 _MOJIBAKE_HINTS: tuple[str, ...] = ("�",)
 

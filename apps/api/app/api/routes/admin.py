@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import get_db
+from app.api.deps.admin_auth import AdminMutationRoute
 from app.schemas.api import (
     BloggerEditorialLabelBackfillRead,
     BloggerEditorialLabelBackfillRequest,
@@ -20,6 +21,8 @@ from app.schemas.api import (
     CloudflarePostDedupeRequest,
     CloudflareR2MigrationRead,
     CloudflareR2MigrationRequest,
+    GeneratedDataResetRequest,
+    GeneratedDataResetResponse,
 )
 from app.services.platform.blog_service import list_visible_blog_ids
 from app.services.blogger.blogger_label_backfill_service import dry_run_blogger_editorial_label_backfill
@@ -29,12 +32,16 @@ from app.services.cloudflare.cloudflare_asset_rebuild_service import (
     rebuild_cloudflare_assets,
 )
 from app.services.cloudflare.cloudflare_post_dedupe_service import dedupe_cloudflare_posts
+from app.services.ops.generated_data_reset_service import (
+    GeneratedDataResetConfirmationError,
+    reset_generated_data,
+)
 from app.services.ops.ops_health_service import generate_ops_health_report
 from app.services.cloudflare.cloudflare_r2_migration_service import run_cloudflare_r2_image_migration
 from app.services.providers.base import ProviderRuntimeError
 from app.tasks.admin import run_blogger_editorial_label_backfill
 
-router = APIRouter()
+router = APIRouter(route_class=AdminMutationRoute)
 
 
 def _empty_image_migration_response(mode: str) -> dict:
@@ -121,6 +128,23 @@ def sync_ops_health_report(db: Session = Depends(get_db)) -> dict:
         "report": report,
         "recent_files": recent_files,
     }
+
+
+@router.post("/generated-data/reset", response_model=GeneratedDataResetResponse)
+def reset_generated_data_route(
+    payload: GeneratedDataResetRequest | None = Body(default=None),
+    db: Session = Depends(get_db),
+) -> GeneratedDataResetResponse:
+    request_payload = payload or GeneratedDataResetRequest()
+    try:
+        result = reset_generated_data(
+            db,
+            dry_run=request_payload.dry_run,
+            confirm_text=request_payload.confirm_text,
+        )
+    except GeneratedDataResetConfirmationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return GeneratedDataResetResponse(**result)
 
 
 @router.post("/image-migrations/cloudflare-r2", response_model=CloudflareR2MigrationRead)

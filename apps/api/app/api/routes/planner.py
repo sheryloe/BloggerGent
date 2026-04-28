@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.api.deps.admin_auth import AdminMutationRoute
 from app.schemas.api import (
     PlannerCalendarRead,
     PlannerCategoryRead,
@@ -32,7 +33,7 @@ from app.services.ops.planner_service import (
     update_category_rules,
 )
 
-router = APIRouter(prefix="/planner", tags=["planner"])
+router = APIRouter(prefix="/planner", tags=["planner"], route_class=AdminMutationRoute)
 
 
 @router.get("/calendar", response_model=PlannerCalendarRead)

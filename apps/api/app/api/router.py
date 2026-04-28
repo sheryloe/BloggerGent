@@ -13,6 +13,7 @@ from app.api.routes import (
     google,
     help,
     jobs,
+    manual_images,
     planner,
     prompts,
     seo,
@@ -30,6 +31,7 @@ api_router.include_router(channels.router)
 api_router.include_router(blogs.router, prefix="/blogs", tags=["blogs"])
 api_router.include_router(topics.router, prefix="/topics", tags=["topics"])
 api_router.include_router(jobs.router, prefix="/jobs", tags=["jobs"])
+api_router.include_router(manual_images.router, prefix="/manual-images", tags=["manual-images"])
 api_router.include_router(articles.router, prefix="/articles", tags=["articles"])
 api_router.include_router(content_ops.router, prefix="/content-ops", tags=["content-ops"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])

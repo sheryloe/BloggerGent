@@ -18,7 +18,7 @@
       "objective": "외국인에게 인기 있는 한국 여행 검색 수요 주제를 찾습니다.",
       "provider_hint": null,
       "provider_model": null,
-      "is_enabled": true,
+      "is_enabled": false,
       "is_required": false,
       "prompt_enabled": true,
       "sort_order": 10,
@@ -91,15 +91,15 @@
       "structure_segments": null,
       "locked_image_model": null,
       "image_policy_version": null,
-      "image_layout_policy": "travel_editorial_8panel_mar2026",
+      "image_layout_policy": "travel_editorial_20panel_5x4_apr2026",
       "text_generation_route": "codex_cli",
       "policy_config": {
         "text_generation_route": "codex_cli",
         "provider_hint": "codex_cli",
         "provider_model": "gpt-5.4-mini",
-        "image_layout_policy": "travel_editorial_8panel_mar2026",
+        "image_layout_policy": "travel_editorial_20panel_5x4_apr2026",
         "hero_only": true,
-        "panel_count": 8
+        "panel_count": 20
       }
     },
     {
@@ -149,14 +149,14 @@
       "structure_mode": null,
       "structure_segments": null,
       "locked_image_model": "gpt-image-1",
-      "image_policy_version": "2025-04-23",
-      "image_layout_policy": "travel_editorial_8panel_mar2026",
+      "image_policy_version": "2026-04-27",
+      "image_layout_policy": "travel_editorial_20panel_5x4_apr2026",
       "text_generation_route": null,
       "policy_config": {
         "locked_image_model": "gpt-image-1",
-        "image_policy_version": "2025-04-23",
-        "image_layout_policy": "travel_editorial_8panel_mar2026",
-        "panel_count": 8,
+        "image_policy_version": "2026-04-27",
+        "image_layout_policy": "travel_editorial_20panel_5x4_apr2026",
+        "panel_count": 20,
         "hero_only": true,
         "inline_disabled": true,
         "image_size": "1024x1024"
