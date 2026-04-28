@@ -364,16 +364,16 @@ class OpenAIImageProvider:
 
         collage_prefix = (
             "Create exactly one single flattened final editorial collage image. "
-            "Do not generate 20 separate images, files, tiles, sprite sheets, or contact sheets. "
+            "Respect any explicit panel count or grid layout already present in the caller prompt. "
+            "Do not generate separate images, files, tiles, sprite sheets, or contact sheets. "
             "Do not generate one single hero shot without panel structure. "
-            "The final image must visibly contain a 5 columns x 4 rows collage with exactly 20 distinct panels inside one composition. "
             "Each panel must be clearly separated by thin white gutters or borders so the collage reads as separate photos in one image. "
             "Do not blend the panels into one wide landscape or one continuous scene. "
             "Make it feel like a premium magazine collage cover. "
         )
         collage_suffix = (
             " Important: the result is wrong if it looks like one wide scene, a single hero shot, or a bundle of separate assets. "
-            "It must look like one finished collage poster containing twenty clearly separated panels."
+            "It must look like one finished collage poster with clearly separated panels."
         )
         return f"{collage_prefix}{normalized_prompt}{collage_suffix}", size
 

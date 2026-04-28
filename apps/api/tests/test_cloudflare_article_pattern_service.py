@@ -1,4 +1,89 @@
+import pytest
+
 from app.services import article_pattern_service, cloudflare_channel_service
+
+
+EXPECTED_CLOUDFLARE_ALLOWED_PATTERNS = {
+    "개발과-프로그래밍": (
+        "dev-info-deep-dive",
+        "dev-curation-top-points",
+        "dev-insider-field-guide",
+        "dev-expert-perspective",
+        "dev-experience-synthesis",
+    ),
+    "일상과-메모": (
+        "daily-01-reflective-monologue",
+        "daily-02-insight-memo",
+        "daily-03-habit-tracker",
+        "daily-04-emotional-reflection",
+    ),
+    "여행과-기록": (
+        "route-first-story",
+        "spot-focus-review",
+        "seasonal-special",
+        "logistics-budget",
+        "hidden-gem-discovery",
+    ),
+    "삶을-유용하게": (
+        "life-hack-tutorial",
+        "benefit-audit-report",
+        "efficiency-tool-review",
+        "comparison-verdict",
+    ),
+    "삶의-기름칠": (
+        "life-hack-tutorial",
+        "benefit-audit-report",
+        "efficiency-tool-review",
+        "comparison-verdict",
+    ),
+    "동그리의-생각": (
+        "thought-social-context",
+        "thought-tech-culture",
+        "thought-generation-note",
+        "thought-personal-question",
+    ),
+    "미스테리아-스토리": (
+        "case-timeline",
+        "evidence-breakdown",
+        "legend-context",
+        "scene-investigation",
+        "scp-dossier",
+    ),
+    "주식의-흐름": (
+        "stock-cartoon-summary",
+        "stock-technical-analysis",
+        "stock-macro-intelligence",
+        "stock-corporate-event-watch",
+        "stock-risk-timing",
+    ),
+    "나스닥의-흐름": (
+        "nasdaq-technical-deep-dive",
+        "nasdaq-macro-impact",
+        "nasdaq-big-tech-whale-watch",
+        "nasdaq-hypothesis-scenario",
+    ),
+    "크립토의-흐름": (
+        "crypto-cartoon-summary",
+        "crypto-on-chain-analysis",
+        "crypto-protocol-deep-dive",
+        "crypto-regulatory-macro",
+        "crypto-market-sentiment",
+    ),
+    "축제와-현장": (
+        "info-deep-dive",
+        "curation-top-points",
+        "insider-field-guide",
+        "expert-perspective",
+        "experience-synthesis",
+    ),
+    "문화와-공간": (
+        "info-deep-dive",
+        "curation-top-points",
+        "insider-field-guide",
+        "expert-perspective",
+        "experience-synthesis",
+    ),
+}
 
 
 def test_select_cloudflare_article_pattern_uses_category_specific_travel_patterns(monkeypatch) -> None:
@@ -107,3 +192,17 @@ def test_select_cloudflare_article_pattern_supports_nasdaq_category(monkeypatch)
         "nasdaq-big-tech-whale-watch",
         "nasdaq-hypothesis-scenario",
     )
+
+
+@pytest.mark.parametrize("category_slug,expected_ids", EXPECTED_CLOUDFLARE_ALLOWED_PATTERNS.items())
+def test_cloudflare_pattern_map_covers_all_prompt_categories(category_slug: str, expected_ids: tuple[str, ...]) -> None:
+    assert category_slug in cloudflare_channel_service.CLOUDFLARE_PROMPT_CATEGORY_PATH_MAP
+    assert article_pattern_service._CLOUDFLARE_PATTERN_MAP[category_slug] == expected_ids
+    assert article_pattern_service.ARTICLE_PATTERN_VERSION == 4
+
+
+def test_cloudflare_mysteria_aliases_do_not_contain_garbage_placeholders() -> None:
+    aliases = article_pattern_service.MYSTERIA_CATEGORY_SLUG_ALIASES
+    assert "?????????????" not in aliases
+    assert article_pattern_service.MYSTERIA_CATEGORY_SLUG in aliases
+    assert "miseuteria-seutori" in aliases

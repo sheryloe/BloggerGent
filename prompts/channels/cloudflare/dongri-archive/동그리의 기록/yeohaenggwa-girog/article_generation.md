@@ -13,21 +13,17 @@
         [Mission]
         - Write one publish-ready Korean article package for Dongri Archive Cloudflare channel.
         - Category: 여행과 기록 (`여행과-기록`).
-        - Minimum body length: 4000+ Korean characters excluding markup.
+        - Target body length: 4000+ Korean characters excluding markup.
+
         [minimum_korean_body_gate]
-        - Hard gate: 순수 한글 본문 2000글자 이상.
-        - Count only complete Hangul syllables `[가-힣]` after removing HTML tags, Markdown syntax, code blocks, URLs, image alt/caption text, numbers, English, symbols, and whitespace.
-        - Do not treat byte length, markup length, Markdown length, or whitespace-included string length as the passing standard.
-        - Category target length can be higher, but any output below 2000 pure Korean body syllables must be considered invalid.
+        - Hard gate: 순수 한글 본문 2000글자 이상. Count only complete Korean syllables `[가-힣]` after removing HTML, Markdown, code blocks, URLs, image captions, numbers, English, symbols, and spaces.
+        - Use the planner brief, but never expose planner wording, internal archive operations, score reports, or prompt notes.
+        - Keep the article useful to a real reader, not a system report.
 
         [adsense_body_policy]
         - Do not output raw AdSense code inside `html_article`.
-        - Forbidden in `html_article`: `<script`, `<ins class="adsbygoogle"`, `adsbygoogle`, `data-ad-client`, `data-ad-slot`, `ca-pub-`, `googlesyndication`, `doubleclick`, `<!--ADSENSE`, `[AD_SLOT`, and visible Korean text such as `?? ??`.
+        - Forbidden in `html_article`: `<script`, `<ins class="adsbygoogle"`, `adsbygoogle`, `data-ad-client`, `data-ad-slot`, `ca-pub-`, `googlesyndication`, `doubleclick`, `<!--ADSENSE`, `[AD_SLOT`, and visible Korean text such as `광고 위치`.
         - Do not invent AdSense client ids, slot ids, loader scripts, iframe widgets, ad labels, or visible ad placeholders.
-        - Body ad placement is server-owned metadata only: `render_metadata.body_ads` is computed after generation and expanded by the public renderer.
-        - Keep `html_article` as pure article content with no advertisement code or advertisement marker text.
-        - Use the planner brief, but never expose planner wording, internal archive operations, score reports, or prompt notes.
-        - Keep the article useful to a real reader, not a system report.
 
         [allowed_article_patterns]
         1. `route-first-story` - Route First Story: 이동 순서와 시간대가 중심인 루트형 기록.
@@ -59,15 +55,23 @@
         - Pattern-level FAQ policy must be respected.
         - Do not add FAQ just to fill space.
 
+        [image_asset_plan]
+        - layout_policy: `hero_only_place_route`
+- allowed_image_roles: `hero`
+- `hero` is the representative image for every Cloudflare category.
+- `inline_1` and `inline_2` are not allowed.
+- Do not output `data-cf-image-slot`, `<!--CF_IMAGE_SLOT:*-->`, `<img>`, `<figure>`, or markdown images.
+- `inline_collage_prompt` is a legacy field and must be returned as an empty string.
+
         [image_prompt_policy]
-        - 국내 장소, 이동 동선, 현장 표지, 지도 노트, 사진 기록이 보이는 3x3 hero collage.
-        - `image_collage_prompt` must be English.
-        - Cloudflare is hero-only: create one representative hero image prompt only.
-        - Do not request body images, inline images, multiple generated assets, logos, readable text, or watermarks.
+        - Place and route cue: real location mood, walking/transit route, season or weather anchor, cost/reservation hint. Do not mix Blogger Travel rules.
+        - Required visual anchors: place, route cue, visit time, season/weather, budget or booking cue.
+        - `image_collage_prompt` must be English and must describe the `hero` role only.
+        - Do not request logos, readable text, watermarks, unrelated category imagery, or fake official emblems.
 
         [forbidden_outputs]
         - No body-level H1.
-        - Do not insert `<img>`, markdown images, scripts, iframes, or raw external widgets inside `html_article`.
+        - Do not insert `<img>`, `<figure>`, markdown images, scripts, iframes, or raw external widgets inside `html_article`.
         - Do not include `meta_description` or `excerpt` visibly inside `html_article`.
         - Do not mention Antigravity, Codex, Gemini, BloggerGent, pipeline, score, audit, or internal planner unless the topic itself is explicitly about those tools.
         - Do not move outside the category topic just because the keyword is broad.

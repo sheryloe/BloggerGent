@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -45,6 +46,7 @@ class ArticleGenerationOutput(BaseModel):
     html_article: str = Field(min_length=200)
     faq_section: list[FAQItem] = Field(default_factory=list, max_length=6)
     image_collage_prompt: str = Field(min_length=40)
+    image_asset_plan: dict[str, Any] | None = Field(default=None)
     article_pattern_id: str | None = Field(default=None, min_length=2, max_length=100)
     article_pattern_version: int | str | None = Field(default=None)
     article_pattern_key: str | None = Field(default=None, min_length=2, max_length=100)

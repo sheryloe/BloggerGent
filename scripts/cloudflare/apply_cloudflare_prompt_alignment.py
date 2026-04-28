@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -216,6 +217,87 @@ CATEGORIES: tuple[Category, ...] = (
     ),
 )
 
+INLINE_IMAGE_FOLDERS = {"cugjewa-hyeonjang", "munhwawa-gonggan"}
+SOURCE_WRITE_EXCLUDED_FOLDERS = {"miseuteria-seutori"}
+DEPRECATED_PATTERN_IDS_BY_FOLDER: dict[str, set[str]] = {
+    "naseudagyi-heureum": {"nasdaq-cartoon-summary"},
+}
+
+IMAGE_POLICY_BY_FOLDER: dict[str, dict[str, object]] = {
+    "gaebalgwa-peurogeuraeming": {
+        "layout": "hero_only_developer_workflow",
+        "roles": ("hero",),
+        "style": "Developer workflow board: official docs, release notes, IDE/CLI, runtime/version cues, logs, and architecture artifacts. No universal collage requirement.",
+        "anchors": ("reference date", "tool or product version", "language/runtime", "IDE or CLI", "official documentation"),
+    },
+    "ilsanggwa-memo": {
+        "layout": "hero_only_daily_record",
+        "roles": ("hero",),
+        "style": "Quiet routine scene: notebook, desk, window light, repeated action, emotional object anchors. Avoid report-card visuals.",
+        "anchors": ("scene", "time of day", "emotion", "routine action", "small checklist"),
+    },
+    "yeohaenggwa-girog": {
+        "layout": "hero_only_place_route",
+        "roles": ("hero",),
+        "style": "Place and route cue: real location mood, walking/transit route, season or weather anchor, cost/reservation hint. Do not mix Blogger Travel rules.",
+        "anchors": ("place", "route cue", "visit time", "season/weather", "budget or booking cue"),
+    },
+    "salmeul-yuyonghage": {
+        "layout": "hero_only_life_utility",
+        "roles": ("hero",),
+        "style": "Practical life utility: app/tool, routine, checklist, daily problem-solving scene. Welfare/government benefit topics must route to salmyi-gireumcil.",
+        "anchors": ("target user", "tool or service", "cost/benefit", "preparation item", "caution point"),
+    },
+    "salmyi-gireumcil": {
+        "layout": "hero_only_public_benefit",
+        "roles": ("hero",),
+        "style": "Public benefit guide: documents, consultation desk, eligibility checklist, application flow, official-source cue. No government logos, IDs, or readable fake text.",
+        "anchors": ("reference date", "agency", "application period", "eligibility", "benefit amount or scope"),
+    },
+    "donggeuriyi-saenggag": {
+        "layout": "hero_only_reflective_context",
+        "roles": ("hero",),
+        "style": "Reflective social note: dark library, observation scene, notebook, cultural context, unresolved question. Avoid infographic/report visuals.",
+        "anchors": ("social event", "personal question", "generation or culture context", "observation scene", "closing question"),
+    },
+    "miseuteria-seutori": {
+        "layout": "hero_only_mysteria_archive",
+        "roles": ("hero",),
+        "style": "Separate mysteria dark archive policy. Keep hero-only and do not alter in this alignment batch.",
+        "anchors": ("case", "record", "clue", "interpretation boundary", "archive mood"),
+    },
+    "jusigyi-heureum": {
+        "layout": "hero_only_stock_market",
+        "roles": ("hero",),
+        "style": "Stock market image. Only stock-cartoon-summary may use a 12-panel cartoon; all other patterns use a financial report board with charts, calendar, sector, and risk notes.",
+        "anchors": ("reference date", "stock/sector", "price or index zone", "event schedule", "risk"),
+    },
+    "keuribtoyi-heureum": {
+        "layout": "hero_only_crypto_market",
+        "roles": ("hero",),
+        "style": "Crypto market image. Only crypto-cartoon-summary may use a cyber 12-panel cartoon; all other patterns use on-chain/protocol/regulatory analysis boards.",
+        "anchors": ("reference date", "coin/protocol", "price zone", "on-chain or exchange signal", "regulatory risk"),
+    },
+    "naseudagyi-heureum": {
+        "layout": "hero_only_nasdaq_infographic",
+        "roles": ("hero",),
+        "style": "Nasdaq infographic or market analysis board: AI, semiconductor, earnings, guidance, rate/macro context, risk scenario. New rotation must not use cartoon style.",
+        "anchors": ("reference date", "company/sector", "earnings or guidance", "AI/semiconductor context", "risk scenario"),
+    },
+    "cugjewa-hyeonjang": {
+        "layout": "hero_plus_two_inline_event",
+        "roles": ("hero", "inline_1", "inline_2"),
+        "style": "Festival/event field guide: hero for atmosphere, inline_1 for access/queue/route, inline_2 for time-of-day/risk/booth-stage context.",
+        "anchors": ("official site", "venue", "event period", "operating hours", "recommended visit time", "access route", "field risk"),
+    },
+    "munhwawa-gonggan": {
+        "layout": "hero_plus_two_inline_culture",
+        "roles": ("hero", "inline_1", "inline_2"),
+        "style": "Culture/space guide: hero for venue atmosphere, inline_1 for viewing route/access, inline_2 for artwork or space highlight.",
+        "anchors": ("official site", "venue", "period or permanent status", "operating hours", "reservation/admission", "viewing route", "space risk"),
+    },
+}
+
 STAGES = (
     ("topic_discovery", "주제 발굴", "topic_discovery.md"),
     ("article_generation", "본문 생성", "article_generation.md"),
@@ -236,11 +318,55 @@ def rel(cat: Category, filename: str) -> str:
 
 
 def pattern_list(cat: Category) -> str:
-    return "\n".join(f"{i}. `{p.id}` - {p.label}: {p.summary}" for i, p in enumerate(cat.patterns, 1))
+    return "\n".join(f"{i}. `{p.id}` - {p.label}: {p.summary}" for i, p in enumerate(effective_patterns(cat), 1))
 
 
 def structure_list(cat: Category) -> str:
-    return "\n".join(f"- `{p.id}`: {p.structure}" for p in cat.patterns)
+    return "\n".join(f"- `{p.id}`: {p.structure}" for p in effective_patterns(cat))
+
+
+def effective_patterns(cat: Category) -> tuple[Pattern, ...]:
+    deprecated = DEPRECATED_PATTERN_IDS_BY_FOLDER.get(cat.folder, set())
+    return tuple(pattern for pattern in cat.patterns if pattern.id not in deprecated)
+
+
+def image_policy(cat: Category) -> dict[str, object]:
+    return IMAGE_POLICY_BY_FOLDER[cat.folder]
+
+
+def image_roles(cat: Category) -> tuple[str, ...]:
+    return tuple(str(role) for role in image_policy(cat)["roles"])
+
+
+def inline_enabled(cat: Category) -> bool:
+    return cat.folder in INLINE_IMAGE_FOLDERS
+
+
+def image_asset_plan(cat: Category) -> str:
+    roles = image_roles(cat)
+    lines = [
+        f"- layout_policy: `{image_policy(cat)['layout']}`",
+        f"- allowed_image_roles: {', '.join(f'`{role}`' for role in roles)}",
+        "- `hero` is the representative image for every Cloudflare category.",
+    ]
+    if inline_enabled(cat):
+        lines.extend(
+            [
+                "- `inline_1` and `inline_2` are allowed only through inert DOM slot placeholders.",
+                "- Use `<div class=\"cf-image-slot\" data-cf-image-slot=\"inline_1\"></div>` and `<div class=\"cf-image-slot\" data-cf-image-slot=\"inline_2\"></div>`; do not insert `<img>`, `<figure>`, markdown images, or comment-based image slots.",
+                "- `inline_1` must support route/access/viewing-flow explanation.",
+                "- `inline_2` must support highlight/risk/time-context explanation.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "- `inline_1` and `inline_2` are not allowed.",
+                "- Do not output `data-cf-image-slot`, `<!--CF_IMAGE_SLOT:*-->`, `<img>`, `<figure>`, or markdown images.",
+            ]
+        )
+    lines.append("- `inline_collage_prompt` is a legacy field and must be returned as an empty string.")
+    return "\n".join(lines)
 
 
 def article_prompt(cat: Category) -> str:
@@ -261,9 +387,17 @@ def article_prompt(cat: Category) -> str:
         [Mission]
         - Write one publish-ready Korean article package for Dongri Archive Cloudflare channel.
         - Category: {cat.label} (`{cat.slug}`).
-        - Minimum body length: {cat.min_chars}+ Korean characters excluding markup.
+        - Target body length: {cat.min_chars}+ Korean characters excluding markup.
+
+        [minimum_korean_body_gate]
+        - Hard gate: 순수 한글 본문 2000글자 이상. Count only complete Korean syllables `[가-힣]` after removing HTML, Markdown, code blocks, URLs, image captions, numbers, English, symbols, and spaces.
         - Use the planner brief, but never expose planner wording, internal archive operations, score reports, or prompt notes.
         - Keep the article useful to a real reader, not a system report.
+
+        [adsense_body_policy]
+        - Do not output raw AdSense code inside `html_article`.
+        - Forbidden in `html_article`: `<script`, `<ins class="adsbygoogle"`, `adsbygoogle`, `data-ad-client`, `data-ad-slot`, `ca-pub-`, `googlesyndication`, `doubleclick`, `<!--ADSENSE`, `[AD_SLOT`, and visible Korean text such as `광고 위치`.
+        - Do not invent AdSense client ids, slot ids, loader scripts, iframe widgets, ad labels, or visible ad placeholders.
 
         [allowed_article_patterns]
         {pattern_list(cat)}
@@ -287,15 +421,18 @@ def article_prompt(cat: Category) -> str:
         - Pattern-level FAQ policy must be respected.
         - Do not add FAQ just to fill space.
 
+        [image_asset_plan]
+        {image_asset_plan(cat)}
+
         [image_prompt_policy]
-        - {cat.image_policy}
-        - `image_collage_prompt` must be English.
-        - Cloudflare is hero-only: create one representative hero image prompt only.
-        - Do not request body images, inline images, multiple generated assets, logos, readable text, or watermarks.
+        - {image_policy(cat)["style"]}
+        - Required visual anchors: {", ".join(str(item) for item in image_policy(cat)["anchors"])}.
+        - `image_collage_prompt` must be English and must describe the `hero` role only.
+        - Do not request logos, readable text, watermarks, unrelated category imagery, or fake official emblems.
 
         [forbidden_outputs]
         - No body-level H1.
-        - Do not insert `<img>`, markdown images, scripts, iframes, or raw external widgets inside `html_article`.
+        - Do not insert `<img>`, `<figure>`, markdown images, scripts, iframes, or raw external widgets inside `html_article`.
         - Do not include `meta_description` or `excerpt` visibly inside `html_article`.
         - Do not mention Antigravity, Codex, Gemini, BloggerGent, pipeline, score, audit, or internal planner unless the topic itself is explicitly about those tools.
         - Do not move outside the category topic just because the keyword is broad.
@@ -317,23 +454,35 @@ def article_prompt(cat: Category) -> str:
 
 
 def image_prompt(cat: Category) -> str:
-    directions = "\n".join(f"- `{p.id}`: {p.image}" for p in cat.patterns)
+    directions = "\n".join(f"- `{p.id}`: {p.image}" for p in effective_patterns(cat))
+    role_lines = "\n".join(f"- `{role}`" for role in image_roles(cat))
+    time_place_line = (
+        "- Time/place facts are mandatory for this category: 기간, 장소, 운영 시간, 접근 동선.\n"
+        if inline_enabled(cat)
+        else ""
+    )
     return dedent(
         f"""
-        You are the Cloudflare hero image prompt optimizer for Dongri Archive.
+        You are the Cloudflare ImageGen prompt optimizer for Dongri Archive.
 
         [Input]
         - Korean title: {{title}}
         - Category: {cat.label} (`{cat.slug}`)
         - Selected article pattern id: {{article_pattern_id}}
+        - Image role: {{image_role}}
         - Article summary: {{excerpt}}
 
         [Category Image Policy]
-        - {cat.image_policy}
-        - Generate one final English prompt for a single hero image.
-        - Use a composite 3x3 grid collage with exactly 9 panels unless this category pattern explicitly says 12-panel manga.
-        - Keep visible panel separation, editorial composition, no text overlays, no logos, no watermark.
-        - Cloudflare is hero-only. Do not ask for inline images or body images.
+        - layout_policy: `{image_policy(cat)["layout"]}`
+        - allowed_image_roles:
+        {role_lines}
+        - Style: {image_policy(cat)["style"]}
+        - Required visual anchors: {", ".join(str(item) for item in image_policy(cat)["anchors"])}.
+        {time_place_line}\
+        - Generate one final English prompt for exactly one requested image role.
+        - Do not force a universal 3x3 collage. Use the style that matches this category and pattern.
+        - No text overlays, no logos, no watermark, no fake government marks, no readable document text.
+        - If `image_role` is missing, produce only the `hero` prompt.
 
         [Pattern Visual Directions]
         {directions}
@@ -365,9 +514,12 @@ def topic_prompt(cat: Category) -> str:
 
 def stage_prompt(cat: Category, stage: str) -> str:
     if stage == "html_assembly":
-        body = "Preserve meaning and category structure. No body-level H1, images, scripts, iframes, or external widgets."
+        if inline_enabled(cat):
+            body = "Preserve meaning and category structure. No body-level H1, scripts, iframes, external widgets, `<img>`, `<figure>`, or markdown images. Only inert DOM placeholders `<div class=\"cf-image-slot\" data-cf-image-slot=\"inline_1\"></div>` and `<div class=\"cf-image-slot\" data-cf-image-slot=\"inline_2\"></div>` are allowed."
+        else:
+            body = "Preserve meaning and category structure. No body-level H1, images, image slot placeholders, `data-cf-image-slot`, scripts, iframes, or external widgets."
     elif stage == "image_generation":
-        body = "Generate exactly one hero image from image_collage_prompt. No inline image generation."
+        body = f"Use Codex built-in image_gen only for queued roles: {', '.join(image_roles(cat))}. Save PNG first, then WebP/R2 happens in the apply workflow."
     elif stage == "publishing":
         body = "Publish only after title, excerpt, body, category, and hero image URL are verified. Do not create /assets/assets/ URLs."
     elif stage == "related_posts":
@@ -378,16 +530,18 @@ def stage_prompt(cat: Category, stage: str) -> str:
 
 
 def channel_json(cat: Category) -> dict:
+    roles = image_roles(cat)
     return {
         "channel_id": f"cloudflare:dongriarchive::{cat.slug}",
         "root_channel_id": "cloudflare:dongriarchive",
         "channel_name": f"Dongri Archive | {cat.group} | {cat.label}",
         "provider": "cloudflare",
         "backup_directory": f"channels/cloudflare/dongri-archive/{cat.group}/{cat.folder}",
-        "allowed_article_patterns": [p.id for p in cat.patterns],
-        "image_layout_policy": "hero_only_3x3_collage",
-        "hero_only": True,
-        "inline_images": False,
+        "allowed_article_patterns": [p.id for p in effective_patterns(cat)],
+        "image_layout_policy": str(image_policy(cat)["layout"]),
+        "image_asset_plan": {"roles": list(roles), "live_apply_status_default": "blocked"},
+        "hero_only": not inline_enabled(cat),
+        "inline_images": inline_enabled(cat),
         "backup_files": [rel(cat, filename) for _, _, filename in STAGES],
         "steps": [
             {
@@ -418,7 +572,10 @@ def write_rool_docs(cat: Category) -> None:
         "",
         f"- category_slug: `{cat.slug}`",
         f"- source_folder: `{cat.group}/{cat.folder}`",
+        "- article_pattern_version: `4`",
+        f"- allowed_article_pattern_ids: `{', '.join(p.id for p in effective_patterns(cat))}`",
         f"- minimum_characters: `{cat.min_chars}`",
+        "- hard_gate: `순수 한글 본문 2000글자 이상`",
         f"- faq_policy: `{cat.faq_policy}`",
         "",
         "## Category Focus",
@@ -429,14 +586,35 @@ def write_rool_docs(cat: Category) -> None:
         "",
         "## Allowed Patterns",
     ]
-    for p in cat.patterns:
-        article += ["", f"### {p.id}", f"- label: {p.label}", f"- summary: {p.summary}", f"- structure: {p.structure}", f"- faq: {p.faq}", f"- html_hint: {p.html_hint}"]
+    for p in effective_patterns(cat):
+        article += ["", f"### {p.id}", f"- article_pattern_id: `{p.id}`", f"- label: {p.label}", f"- summary: {p.summary}", f"- structure: {p.structure}", f"- faq: {p.faq}", f"- html_hint: {p.html_hint}"]
     (d / "article-patterns.md").write_text("\n".join(article).strip() + "\n", encoding="utf-8", newline="\n")
 
-    image = [f"# {cat.label} image prompt policy", "", f"- category_slug: `{cat.slug}`", "- hero_only: `true`", "- inline_images: `false`", "", "## Base Policy", cat.image_policy, "", "## Pattern Directions"]
-    for p in cat.patterns:
+    image = [
+        f"# {cat.label} image prompt policy",
+        "",
+        f"- category_slug: `{cat.slug}`",
+        f"- image_layout_policy: `{image_policy(cat)['layout']}`",
+        f"- allowed_image_roles: `{', '.join(image_roles(cat))}`",
+        f"- hero_only: `{str(not inline_enabled(cat)).lower()}`",
+        f"- inline_images: `{str(inline_enabled(cat)).lower()}`",
+        "- live_apply_status_default: `blocked`",
+        "",
+        "## Image Asset Plan",
+        image_asset_plan(cat),
+        "",
+        "## Base Policy",
+        str(image_policy(cat)["style"]),
+        "",
+        "## Required Visual Anchors",
+    ]
+    image.extend(f"- {item}" for item in image_policy(cat)["anchors"])
+    image += ["", "## Pattern Directions"]
+    for p in effective_patterns(cat):
         image += ["", f"### {p.id}", p.image]
-    image += ["", "## Forbidden", "- No text overlays.", "- No logos.", "- No body or inline image requests.", "- No unrelated category imagery."]
+    image += ["", "## Forbidden", "- No text overlays.", "- No logos.", "- No watermark.", "- No unrelated category imagery.", "- Do not generate live images until the queue row has `verify_status=ok`."]
+    if not inline_enabled(cat):
+        image.append("- No body or inline image requests.")
     (d / "image-prompt-policy.md").write_text("\n".join(image).strip() + "\n", encoding="utf-8", newline="\n")
 
     checklist = dedent(
@@ -444,11 +622,13 @@ def write_rool_docs(cat: Category) -> None:
         # {cat.label} generation checklist
 
         - [ ] Category slug is `{cat.slug}`.
-        - [ ] Selected `article_pattern_id` is one of: {', '.join(p.id for p in cat.patterns)}.
+        - [ ] Selected `article_pattern_id` is one of: {', '.join(p.id for p in effective_patterns(cat))}.
+        - [ ] `article_pattern_version` is `4`.
         - [ ] Body stays inside category focus: {cat.focus}
         - [ ] Body has no H1, image tags, scripts, iframes, or internal pipeline notes.
+        - [ ] Body passes `순수 한글 본문 2000글자 이상`.
         - [ ] Final section is `마무리 기록`.
-        - [ ] Image prompt is hero-only and category-specific.
+        - [ ] Image roles follow `{', '.join(image_roles(cat))}`.
         - [ ] `inline_collage_prompt` is empty or ignored.
         - [ ] No Travel/Blogger/Mystery Blogger cross-channel assumptions.
         """
@@ -458,34 +638,45 @@ def write_rool_docs(cat: Category) -> None:
 
 def patch_pattern_service() -> None:
     text = PATTERN_SERVICE.read_text(encoding="utf-8")
+    text = re.sub(
+        r"MYSTERIA_CATEGORY_SLUG_ALIASES = \{.*?\}\n",
+        (
+            "MYSTERIA_CATEGORY_SLUG_ALIASES = {\n"
+            "    MYSTERIA_CATEGORY_SLUG,\n"
+            '    "miseuteria-seutori",\n'
+            "}\n"
+        ),
+        text,
+        count=1,
+        flags=re.S,
+    )
     additions: list[str] = []
     seen: set[str] = set()
     for cat in CATEGORIES:
-        for p in cat.patterns:
+        for p in effective_patterns(cat):
             if p.id in seen:
                 continue
             seen.add(p.id)
-            if f'"{p.id}": ArticlePatternDefinition(' in text:
-                continue
-            additions.append(
-                dedent(
-                    f'''\
-                    "{p.id}": ArticlePatternDefinition(
-                        pattern_id="{p.id}",
-                        label="{p.label}",
-                        summary="{p.summary}",
-                        html_hint="{p.html_hint}",
-                    ),
-                    '''
+            if f'"{p.id}": ArticlePatternDefinition(' not in text:
+                additions.append(
+                    dedent(
+                        f'''\
+                        "{p.id}": ArticlePatternDefinition(
+                            pattern_id="{p.id}",
+                            label="{p.label}",
+                            summary="{p.summary}",
+                            html_hint="{p.html_hint}",
+                        ),
+                        '''
+                    )
                 )
-            )
     if additions:
         marker = "\n}\n\n\n_MYSTERY_ALLOWED_PATTERN_IDS"
         text = text.replace(marker, "\n" + "".join(additions) + "}\n\n\n_MYSTERY_ALLOWED_PATTERN_IDS", 1)
 
     lines = ["_CLOUDFLARE_PATTERN_MAP: dict[str, tuple[str, ...]] = {"]
     for cat in CATEGORIES:
-        ids = ", ".join(f'"{p.id}"' for p in cat.patterns)
+        ids = ", ".join(f'"{p.id}"' for p in effective_patterns(cat))
         lines.append(f'    "{cat.slug}": ({ids},),')
     lines.append("}")
     start = text.index("_CLOUDFLARE_PATTERN_MAP: dict[str, tuple[str, ...]] = {")
@@ -498,8 +689,9 @@ def write_reports() -> None:
     ROOL_ROOT.mkdir(parents=True, exist_ok=True)
     pattern_rows: list[dict[str, str]] = []
     image_rows: list[dict[str, str]] = []
+    fact_rows: list[dict[str, str]] = []
     for cat in CATEGORIES:
-        for p in cat.patterns:
+        for p in effective_patterns(cat):
             pattern_rows.append(
                 {
                     "category_slug": cat.slug,
@@ -518,13 +710,24 @@ def write_reports() -> None:
                     "category_slug": cat.slug,
                     "pattern_id": p.id,
                     "image_direction": p.image,
-                    "hero_only": "true",
-                    "inline_images": "false",
+                    "image_layout_policy": str(image_policy(cat)["layout"]),
+                    "allowed_image_roles": ",".join(image_roles(cat)),
+                    "hero_only": str(not inline_enabled(cat)).lower(),
+                    "inline_images": str(inline_enabled(cat)).lower(),
+                }
+            )
+        for anchor in image_policy(cat)["anchors"]:
+            fact_rows.append(
+                {
+                    "category_slug": cat.slug,
+                    "required_fact_or_anchor": str(anchor),
+                    "policy_source": str(image_policy(cat)["layout"]),
                 }
             )
     for path, rows in (
         (ROOL_ROOT / "category-pattern-audit-latest.csv", pattern_rows),
         (ROOL_ROOT / "category-image-prompt-audit-latest.csv", image_rows),
+        (ROOL_ROOT / "category-required-fact-schema-audit-latest.csv", fact_rows),
     ):
         with path.open("w", encoding="utf-8-sig", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
@@ -540,9 +743,11 @@ def write_reports() -> None:
                 "label": cat.label,
                 "group": cat.group,
                 "folder": cat.folder,
-                "patterns": [p.id for p in cat.patterns],
-                "hero_only": True,
-                "inline_images": False,
+                "patterns": [p.id for p in effective_patterns(cat)],
+                "image_layout_policy": str(image_policy(cat)["layout"]),
+                "image_asset_plan": {"roles": list(image_roles(cat))},
+                "hero_only": not inline_enabled(cat),
+                "inline_images": inline_enabled(cat),
             }
             for cat in CATEGORIES
         ],
@@ -560,13 +765,14 @@ def write_reports() -> None:
             - Operational prompt source is `{PROMPT_ROOT}`.
             - `apps/api/prompts/channels/cloudflare/dongri-archive` is treated as Antigravity reference material, not runtime source.
             - Category `channel.json` files must be Cloudflare-only and must not reference `blogger:35` or `The Midnight Archives`.
-            - Cloudflare image generation is hero-only. Inline image prompt fields may exist for compatibility, but generation instructions are disabled.
+            - Cloudflare image generation is role-based: most categories use `hero`, while `문화와-공간` and `축제와-현장` may use `hero`, `inline_1`, and `inline_2`.
 
             ## Main Conflicts Fixed
             - Development patterns were split between Rool `dev-01..dev-07`, backend dev patterns, and Antigravity prompt prose. Final development IDs now use `dev-*` prefixed five-pattern taxonomy.
             - Festival and culture keep the shared information/curation/field-guide/expert/experience taxonomy.
             - Daily memo keeps the four Rool daily patterns.
             - Market categories now use channel-specific IDs instead of generic `problem-solution` or single chat patterns.
+            - `nasdaq-cartoon-summary` is deprecated for new rotation; Nasdaq defaults to infographic and market-analysis board prompts.
             """
         ).strip() + "\n",
         encoding="utf-8",
@@ -590,17 +796,18 @@ def write_reports() -> None:
 
 def main() -> None:
     for cat in CATEGORIES:
-        d = cat_dir(cat)
-        d.mkdir(parents=True, exist_ok=True)
-        (d / "article_generation.md").write_text(article_prompt(cat), encoding="utf-8", newline="\n")
-        (d / "image_prompt_generation.md").write_text(image_prompt(cat), encoding="utf-8", newline="\n")
-        (d / "topic_discovery.md").write_text(topic_prompt(cat), encoding="utf-8", newline="\n")
-        for stage, _, filename in STAGES:
-            if filename in {"article_generation.md", "image_prompt_generation.md", "topic_discovery.md"}:
-                continue
-            (d / filename).write_text(stage_prompt(cat, stage), encoding="utf-8", newline="\n")
-        (d / "channel.json").write_text(json.dumps(channel_json(cat), ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
-        write_rool_docs(cat)
+        if cat.folder not in SOURCE_WRITE_EXCLUDED_FOLDERS:
+            d = cat_dir(cat)
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "article_generation.md").write_text(article_prompt(cat), encoding="utf-8", newline="\n")
+            (d / "image_prompt_generation.md").write_text(image_prompt(cat), encoding="utf-8", newline="\n")
+            (d / "topic_discovery.md").write_text(topic_prompt(cat), encoding="utf-8", newline="\n")
+            for stage, _, filename in STAGES:
+                if filename in {"article_generation.md", "image_prompt_generation.md", "topic_discovery.md"}:
+                    continue
+                (d / filename).write_text(stage_prompt(cat, stage), encoding="utf-8", newline="\n")
+            (d / "channel.json").write_text(json.dumps(channel_json(cat), ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+            write_rool_docs(cat)
 
     root_data = json.loads((PROMPT_ROOT / "channel.json").read_text(encoding="utf-8-sig"))
     root_data["channel_id"] = "cloudflare:dongriarchive"
@@ -609,8 +816,16 @@ def main() -> None:
     root_data["backup_directory"] = "channels/cloudflare/dongri-archive"
     root_data["backup_files"] = [rel(cat, filename) for cat in CATEGORIES for _, _, filename in STAGES]
     root_data["allowed_category_slugs"] = [cat.slug for cat in CATEGORIES]
-    root_data["hero_only"] = True
-    root_data["inline_images"] = False
+    root_data["image_asset_plan"] = {
+        cat.slug: {
+            "image_layout_policy": str(image_policy(cat)["layout"]),
+            "roles": list(image_roles(cat)),
+        }
+        for cat in CATEGORIES
+    }
+    root_data["inline_allowed_category_slugs"] = [cat.slug for cat in CATEGORIES if inline_enabled(cat)]
+    root_data["hero_only"] = False
+    root_data["inline_images"] = True
     (PROMPT_ROOT / "channel.json").write_text(json.dumps(root_data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
 
     patch_pattern_service()

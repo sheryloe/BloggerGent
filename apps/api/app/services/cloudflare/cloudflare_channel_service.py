@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
-from html import unescape
+from html import escape, unescape
 import hashlib
 from html.parser import HTMLParser
 import io
@@ -134,6 +134,15 @@ CLOUDFLARE_BODY_ADS_EXPERIMENTAL_TWO_SLOT_CATEGORY = "주식의-흐름"
 CLOUDFLARE_BODY_ADS_TWO_SLOT_MIN_KOREAN_SYLLABLES = 4000
 CLOUDFLARE_BODY_ADS_TWO_SLOT_MIN_H2 = 5
 CLOUDFLARE_BODY_ADS_INLINE_ENABLED = False
+
+
+def _cloudflare_allows_inline_image_slots(category_slug: str | None) -> bool:
+    return get_cloudflare_prompt_category_relative_path(str(category_slug or "")).name in {
+        "cugjewa-hyeonjang",
+        "munhwawa-gonggan",
+    }
+
+
 CLOUDFLARE_LAYOUT_TEMPLATE_BY_CATEGORY: dict[str, str] = {
     "여행과-기록": "route-hero-card",
     "축제와-현장": "event-hero",
@@ -189,6 +198,66 @@ CLOUDFLARE_LAYOUT_CLASS_STYLES: dict[str, str] = {
     "risk-factor-table": "display:block;background:#fff7ed;border-left:4px solid #c2410c;padding:18px 20px;margin:0 0 22px 0;text-align:left;",
     "reflection-scene": "display:block;background:#fafaf9;border-left:4px solid #57534e;padding:18px 20px;margin:0 0 22px 0;text-align:left;",
     "thought-block": "display:block;background:#fff;border:1px solid #d6d3d1;padding:16px 18px;margin:0 0 18px 0;text-align:left;",
+}
+CLOUDFLARE_BODY_ALLOWED_TAGS: set[str] = {
+    "section",
+    "article",
+    "div",
+    "aside",
+    "blockquote",
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "th",
+    "td",
+    "details",
+    "summary",
+    "h2",
+    "h3",
+    "p",
+    "ul",
+    "ol",
+    "li",
+    "strong",
+    "em",
+    "span",
+    "br",
+    "hr",
+}
+CLOUDFLARE_BODY_ALLOWED_CLASSES: set[str] = {
+    "callout",
+    "timeline",
+    "card-grid",
+    "fact-box",
+    "caution-box",
+    "quote-box",
+    "chat-thread",
+    "comparison-table",
+    *CLOUDFLARE_LAYOUT_CLASS_STYLES.keys(),
+    "cf-image-slot",
+}
+CLOUDFLARE_BODY_ALLOWED_SLOT_ROLES: set[str] = {"inline_1", "inline_2"}
+CLOUDFLARE_BODY_DROP_CONTENT_TAGS: set[str] = {
+    "script",
+    "style",
+    "iframe",
+    "object",
+    "embed",
+    "svg",
+    "canvas",
+    "video",
+    "audio",
+    "picture",
+}
+CLOUDFLARE_BODY_OUTER_LAYOUT_CLASSES: set[str] = {
+    "editorial-page",
+    "detail-layout",
+    "detail-article",
+    "detail-sidebar",
+    "detail-hero",
+    "article-content",
+    "page-shell",
 }
 _CLOUDFLARE_VISIBLE_TRACE_TOKENS: tuple[str, ...] = (
     "quick brief",
@@ -748,6 +817,9 @@ def _build_cloudflare_render_metadata(
 
     if str(metadata.get("series_variant") or "").strip() == "us-stock-dialogue-v1":
         metadata["viewpoints"] = ["동그리", "햄니"]
+    faq_items = _normalize_cloudflare_faq_items(getattr(article_output, "faq_section", None))
+    if faq_items:
+        metadata["faq_section"] = faq_items
     if category_slug:
         metadata["body_ads"] = _build_cloudflare_body_ads_metadata(
             category_slug=category_slug,
@@ -915,6 +987,58 @@ def adsense_body_token_violations(text: str | None) -> list[str]:
 
 def validate_no_adsense_tokens_in_body(text: str | None) -> bool:
     return not adsense_body_token_violations(text)
+
+
+def _normalize_cloudflare_faq_items(raw_items: Any) -> list[dict[str, str]]:
+    normalized: list[dict[str, str]] = []
+    for item in raw_items or []:
+        if hasattr(item, "model_dump"):
+            payload = item.model_dump()
+        elif isinstance(item, dict):
+            payload = item
+        else:
+            continue
+        question = str(payload.get("question") or "").strip()
+        answer = str(payload.get("answer") or "").strip()
+        if question and answer:
+            normalized.append({"question": question, "answer": answer})
+        if len(normalized) >= 6:
+            break
+    return normalized
+
+
+def _cloudflare_faq_allowed(category_slug: str | None, article_pattern_id: str | None = None) -> bool:
+    _ = article_pattern_id
+    return str(category_slug or "").strip() not in {"일상과-메모", "동그리의-생각"}
+
+
+def _sync_cloudflare_faq_section_into_body(
+    body_html: str,
+    *,
+    category_slug: str,
+    article_pattern_id: str | None,
+    faq_section: Any,
+) -> tuple[str, list[dict[str, str]]]:
+    if not _cloudflare_faq_allowed(category_slug, article_pattern_id):
+        return body_html, []
+    faq_items = _normalize_cloudflare_faq_items(faq_section)
+    if not faq_items:
+        return body_html, []
+    if re.search(r"(?is)<h2[^>]*>\s*(?:FAQ|자주 묻는 질문)\s*</h2>", body_html):
+        return body_html, faq_items
+    details = "\n".join(
+        "<details>"
+        f"<summary>{escape(item['question'], quote=False)}</summary>"
+        f"<p>{escape(item['answer'], quote=False)}</p>"
+        "</details>"
+        for item in faq_items
+    )
+    faq_html = f'<section class="fact-box"><h2>자주 묻는 질문</h2>{details}</section>'
+    closing_match = re.search(r"(?is)<h2[^>]*>\s*마무리 기록\s*</h2>", body_html)
+    if closing_match:
+        insert_at = closing_match.start()
+        return f"{body_html[:insert_at].rstrip()}\n{faq_html}\n{body_html[insert_at:].lstrip()}", faq_items
+    return f"{body_html.rstrip()}\n{faq_html}", faq_items
 
 
 def _cloudflare_h2_count(body_markdown: str | None) -> int:
@@ -1819,10 +1943,10 @@ def _build_cloudflare_master_article_prompt(
         f"{base_rendered}\n\n"
         f"{build_article_pattern_prompt_block(pattern_selection)}\n"
         "[HTML structure policy]\n"
-        "- Allowed tags only: <section>, <article>, <div>, <aside>, <blockquote>, <table>, <thead>, <tbody>, <tr>, <th>, <td>, <details>, <summary>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <span>, <br>, <hr>, <iframe>.\n"
+        "- Allowed tags only: <section>, <article>, <div>, <aside>, <blockquote>, <table>, <thead>, <tbody>, <tr>, <th>, <td>, <details>, <summary>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <span>, <br>, <hr>.\n"
         "- Allowed class presets only: callout, timeline, card-grid, fact-box, caution-box, quote-box, chat-thread, comparison-table, route-steps, route-hero-card, step-flow, timing-box, timing-table, local-tip-box, event-checklist, event-hero, crowd-timing-box, food-lodging-table, field-caution-box, policy-summary, summary-box, comparison-matrix, workflow-strip, scene-intro, scene-divider, note-block, note-aside, closing-record, viewing-order-box, highlight-table, curator-note, case-summary, timeline-board, evidence-table, interpretation-compare, checklist-box, step-box, friction-table, eligibility-table, process-strip, document-checklist, market-summary, factor-table, viewpoint-compare, company-brief, dialogue-thread, checkpoint-box, checkpoint-strip, risk-factor-table, reflection-scene, thought-block.\n"
         "- Return article_pattern_id and article_pattern_version in the JSON output.\n"
-        f"{_article_output_contract(is_mysteria=_is_mysteria_story_category(category_slug))}"
+        f"{_article_output_contract(is_mysteria=_is_mysteria_story_category(category_slug), category_slug=category_slug)}"
     )
 
 
@@ -2017,11 +2141,8 @@ Rules:
 - Do not request 20 separate images or later compositing.
 - Do not request inline_collage_prompt, supporting 3x2 images, or body images.
 - Keep the visual grounded in realistic documentary tone.
-- No text overlays, no logos, no infographic styling, and no generic checklist visuals.
+- No readable text overlays, no logos, no fake UI brand marks, and no generic checklist visuals.
 """
-
-    is_finance = any(token in category_slug.lower() for token in ("stock", "crypto", "nasdaq"))
-    collage_layout = "3x4 grid with exactly 12 distinct panels" if is_finance else "3x3 grid with exactly 9 distinct panels"
 
     return f"""You are preparing one final English hero-image prompt for the Cloudflare blog category "{category_name}".
 
@@ -2032,13 +2153,12 @@ Image guidance: {_category_image_guidance(category_slug)}
 
 Rules:
 - Return plain text only.
-- Write one final prompt for a single {collage_layout}.
-- Each panel should represent a specific segment or summary point of the article.
-- Write one final supporting 3x2 collage prompt separately when the schema requests inline_collage_prompt.
-- Use visible white gutters and one dominant center panel.
+- Write one final prompt for a single hero image using the category-specific visual policy.
+- Do not force a universal 3x3 collage.
+- Do not write supporting inline prompts from this fallback prompt.
 - Keep the visual grounded in realistic Korean context when the topic is Korea-facing.
-- For financial categories, use a vibrant anime/cartoon character style as requested.
-- No text overlays, no logos, no infographic styling, and no generic checklist visuals.
+- Stock and crypto may use cartoon only when the selected pattern is a cartoon-summary pattern. Nasdaq should use infographic or market-analysis board style.
+- No readable text overlays, no logos, no fake UI brand marks, and no generic checklist visuals. Infographic or market-board styling is allowed only when the category policy explicitly requires it.
 - Avoid generic stock-photo mood. Show the real problem and the real usage scene.
 - Match the category tone of "{category_name}" rather than a generic stock-photo mood.
 """
@@ -2301,6 +2421,206 @@ def _strip_cloudflare_visible_trace_blocks(body_html: str) -> str:
     return cleaned.strip()
 
 
+def _normalize_cloudflare_image_slot_markers(body_html: str) -> str:
+    """Convert legacy comment slots into inert DOM slots before comment cleanup."""
+
+    def _replace_comment_slot(match: re.Match[str]) -> str:
+        role = str(match.group("role") or "").strip().lower().replace("-", "_")
+        return f'<div class="cf-image-slot" data-cf-image-slot="{escape(role, quote=True)}"></div>'
+
+    return re.sub(
+        r"<!--\s*CF_IMAGE_SLOT\s*:\s*(?P<role>[a-zA-Z0-9_-]+)\s*-->",
+        _replace_comment_slot,
+        str(body_html or ""),
+        flags=re.IGNORECASE,
+    )
+
+
+def _protect_cloudflare_image_slot_markers(body_html: str) -> str:
+    normalized = _normalize_cloudflare_image_slot_markers(body_html)
+
+    def _replace_slot(match: re.Match[str]) -> str:
+        role = str(match.group("role") or "").strip().lower().replace("-", "_")
+        safe_role = re.sub(r"[^a-z0-9_]+", "", role) or "invalid"
+        return f"\n__CF_IMAGE_SLOT_{safe_role.upper()}__\n"
+
+    return re.sub(
+        r'(?is)<div\b(?=[^>]*\bdata-cf-image-slot\s*=\s*(["\'])(?P<role>.*?)\1)[^>]*>\s*</div>',
+        _replace_slot,
+        normalized,
+    )
+
+
+def _restore_cloudflare_image_slot_markers(body_html: str) -> str:
+    def _restore_slot(match: re.Match[str]) -> str:
+        role = str(match.group("role") or "").strip().lower()
+        return f'<div class="cf-image-slot" data-cf-image-slot="{escape(role, quote=True)}"></div>'
+
+    return re.sub(
+        r"__CF_IMAGE_SLOT_(?P<role>[A-Z0-9_]+)__",
+        _restore_slot,
+        str(body_html or ""),
+    )
+
+
+class _CloudflareArticleBodySanitizer(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.parts: list[str] = []
+        self._drop_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if tag in CLOUDFLARE_BODY_DROP_CONTENT_TAGS:
+            self._drop_depth += 1
+            return
+        if self._drop_depth:
+            return
+        if tag == "h1":
+            self.parts.append("<h2>")
+            return
+        if tag not in CLOUDFLARE_BODY_ALLOWED_TAGS:
+            return
+        attr_text = self._clean_attrs(tag, attrs)
+        self.parts.append(f"<{tag}{attr_text}>")
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag in CLOUDFLARE_BODY_DROP_CONTENT_TAGS:
+            if self._drop_depth:
+                self._drop_depth -= 1
+            return
+        if self._drop_depth:
+            return
+        if tag == "h1":
+            self.parts.append("</h2>")
+            return
+        if tag in CLOUDFLARE_BODY_ALLOWED_TAGS and tag not in {"br", "hr"}:
+            self.parts.append(f"</{tag}>")
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if self._drop_depth:
+            return
+        if tag not in CLOUDFLARE_BODY_ALLOWED_TAGS:
+            return
+        attr_text = self._clean_attrs(tag, attrs)
+        self.parts.append(f"<{tag}{attr_text}>")
+
+    def handle_data(self, data: str) -> None:
+        if not self._drop_depth:
+            self.parts.append(escape(data, quote=False))
+
+    def handle_entityref(self, name: str) -> None:
+        if not self._drop_depth:
+            self.parts.append(f"&{name};")
+
+    def handle_charref(self, name: str) -> None:
+        if not self._drop_depth:
+            self.parts.append(f"&#{name};")
+
+    def _clean_attrs(self, tag: str, attrs: list[tuple[str, str | None]]) -> str:
+        raw_attrs = {name.lower(): value for name, value in attrs if name}
+        clean_attrs: list[tuple[str, str]] = []
+        class_tokens = [
+            token
+            for token in str(raw_attrs.get("class") or "").split()
+            if token in CLOUDFLARE_BODY_ALLOWED_CLASSES and token not in CLOUDFLARE_BODY_OUTER_LAYOUT_CLASSES
+        ]
+        slot_role = str(raw_attrs.get("data-cf-image-slot") or "").strip().lower().replace("-", "_")
+        if tag == "div" and slot_role:
+            if "cf-image-slot" not in class_tokens:
+                class_tokens.insert(0, "cf-image-slot")
+            clean_attrs.append(("data-cf-image-slot", slot_role))
+        if class_tokens:
+            clean_attrs.insert(0, ("class", " ".join(dict.fromkeys(class_tokens))))
+        if tag in {"td", "th"}:
+            for attr_name in ("colspan", "rowspan"):
+                value = str(raw_attrs.get(attr_name) or "").strip()
+                if value.isdigit() and 1 <= int(value) <= 12:
+                    clean_attrs.append((attr_name, value))
+        if tag == "ol":
+            value = str(raw_attrs.get("start") or "").strip()
+            if value.isdigit():
+                clean_attrs.append(("start", value))
+        if tag == "details" and "open" in raw_attrs:
+            clean_attrs.append(("open", ""))
+        if not clean_attrs:
+            return ""
+        return "".join(
+            f" {name}" if value == "" else f' {name}="{escape(value, quote=True)}"'
+            for name, value in clean_attrs
+        )
+
+
+def _sanitize_cloudflare_article_body_contract(body_html: str) -> str:
+    parser = _CloudflareArticleBodySanitizer()
+    parser.feed(str(body_html or ""))
+    parser.close()
+    cleaned = "".join(parser.parts)
+    cleaned = re.sub(r"(?is)<(p|section|aside|blockquote)[^>]*>\s*</\1>", "", cleaned)
+    cleaned = re.sub(r"(?is)<div(?![^>]*data-cf-image-slot)[^>]*>\s*</div>", "", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def _extract_cloudflare_inline_slot_roles(body_html: str) -> list[str]:
+    body = str(body_html or "")
+    roles = [
+        match.group("role").strip().lower().replace("-", "_")
+        for match in re.finditer(r"<!--\s*CF_IMAGE_SLOT\s*:\s*(?P<role>[a-zA-Z0-9_-]+)\s*-->", body, flags=re.IGNORECASE)
+    ]
+    roles.extend(
+        match.group("role").strip().lower().replace("-", "_")
+        for match in re.finditer(
+            r'(?is)\bdata-cf-image-slot\s*=\s*(["\'])(?P<role>.*?)\1',
+            body,
+        )
+    )
+    return roles
+
+
+def _cloudflare_body_contract_violations(body_html: str, *, category_slug: str) -> list[str]:
+    body = str(body_html or "")
+    lowered = body.casefold()
+    reasons: list[str] = []
+    forbidden_patterns = {
+        "h1_present": r"(?is)<\s*h1\b",
+        "script_present": r"(?is)<\s*script\b",
+        "iframe_present": r"(?is)<\s*iframe\b",
+        "image_tag_present": r"(?is)<\s*img\b",
+        "figure_present": r"(?is)<\s*figure\b",
+        "style_tag_present": r"(?is)<\s*style\b",
+        "inline_style_present": r"(?is)\sstyle\s*=",
+        "adsense_body_token_present": r"(?is)(adsbygoogle|data-ad-client|ca-pub-|googlesyndication|doubleclick|\[ad_slot)",
+        "markdown_image_present": r"(?m)!\[[^\]]*\]\([^)]+\)",
+        "outer_layout_wrapper_present": r"(?is)(editorial-page|detail-layout|detail-article|detail-sidebar|detail-hero|article-content)",
+        "null_empty_block_present": r"(?is)>\s*(null|undefined|n/a)\s*<",
+    }
+    for reason, pattern in forbidden_patterns.items():
+        if re.search(pattern, body):
+            reasons.append(reason)
+
+    for class_match in re.finditer(r'(?is)\bclass\s*=\s*(["\'])(?P<class>.*?)\1', body):
+        tokens = [token.strip() for token in class_match.group("class").split() if token.strip()]
+        if any(token in CLOUDFLARE_BODY_OUTER_LAYOUT_CLASSES for token in tokens):
+            if "outer_layout_wrapper_present" not in reasons:
+                reasons.append("outer_layout_wrapper_present")
+        if any(token not in CLOUDFLARE_BODY_ALLOWED_CLASSES for token in tokens):
+            reasons.append("disallowed_class_present")
+            break
+
+    slot_roles = _extract_cloudflare_inline_slot_roles(body)
+    if slot_roles and not _cloudflare_allows_inline_image_slots(category_slug):
+        reasons.append("inline_slot_not_allowed")
+    if any(role not in CLOUDFLARE_BODY_ALLOWED_SLOT_ROLES for role in slot_roles):
+        reasons.append("invalid_inline_slot")
+    if "<!--cf_image_slot" in lowered:
+        # Legacy comments are normalized before publish, but they should not remain in final body.
+        reasons.append("legacy_comment_slot_present")
+    return list(dict.fromkeys(reasons))
+
+
 def _cloudflare_closing_record_paragraph(category_slug: str, title: str) -> str:
     if category_slug == "여행과-기록":
         return "이 동선은 하루를 길게 끌지 않으면서도 장면이 또렷하게 남는 코스다. 이동과 체류의 리듬이 맞는 여행을 좋아한다면 다시 펼쳐볼 가치가 있다."
@@ -2400,13 +2720,16 @@ def _apply_cloudflare_class_styles(body_html: str, *, layout_template: str) -> s
 
 
 def _sanitize_cloudflare_public_body(body_html: str, *, category_slug: str, title: str, layout_template: str | None = None) -> str:
-    cleaned = _strip_cloudflare_visible_trace_blocks(body_html)
+    cleaned = _protect_cloudflare_image_slot_markers(body_html)
+    cleaned = _strip_cloudflare_visible_trace_blocks(cleaned)
     cleaned = strip_generic_faq_leak_html(cleaned)
+    cleaned = _restore_cloudflare_image_slot_markers(cleaned)
     cleaned = _ensure_cloudflare_closing_record(cleaned, category_slug=category_slug, title=title)
     cleaned = _apply_cloudflare_class_styles(
         cleaned,
         layout_template=_cloudflare_layout_template(category_slug, layout_template),
     )
+    cleaned = _sanitize_cloudflare_article_body_contract(cleaned)
     return cleaned.strip()
 
 
@@ -2439,6 +2762,9 @@ def _cloudflare_public_body_quality_reasons(body_markdown: str, *, category_slug
         reasons.append("category_intro_leak")
     if adsense_body_token_violations(body_markdown):
         reasons.append("adsense_body_token_present")
+    for contract_reason in _cloudflare_body_contract_violations(body_markdown, category_slug=category_slug):
+        if contract_reason not in reasons:
+            reasons.append(contract_reason)
     return reasons
 
 
@@ -3529,37 +3855,39 @@ def _build_history_exclusion_prompt_from_entries(entries: Sequence[Any], *, limi
     )
 
 
-def _article_output_contract(*, is_mysteria: bool = False) -> str:
-    inline_contract = (
-        '  "inline_collage_prompt": null\n'
-        if is_mysteria
-        else '  "inline_collage_prompt": "string"\n'
+def _article_output_contract(*, is_mysteria: bool = False, category_slug: str = "") -> str:
+    inline_slots_allowed = (not is_mysteria) and _cloudflare_allows_inline_image_slots(category_slug)
+    inline_contract = '  "inline_collage_prompt": null,\n'
+    image_asset_plan_contract = (
+        '  "image_asset_plan": {"roles":["hero","inline_1","inline_2"],"live_apply_status":"blocked"},\n'
+        if inline_slots_allowed
+        else '  "image_asset_plan": {"roles":["hero"],"live_apply_status":"blocked"},\n'
     )
     layout_rule = (
         "- Use the same live layout pattern as the exemplar post: one left-aligned lead section, 4 or 5 H2 sections, optional H3 subsections, at least one bordered table, one inline FAQ section near the end, and a final closing section.\n"
         if is_mysteria
-        else "- Use the same live layout pattern as the exemplar post: one left-aligned lead section, 4 to 6 H2 sections, optional H3 subsections, at least one bordered table, one inline FAQ section near the end, and a final closing section.\n"
+        else "- Use the same live layout pattern as the category policy: one left-aligned lead section, 4 to 6 H2 sections, optional H3 subsections, at least one structured block, and a final closing section.\n"
     )
-    inline_rule = (
-        "- The final live article must contain no supporting body image blocks, and inline_collage_prompt must be null.\n"
-        if is_mysteria
-        else "- The final live article must end up with exactly one mid-article inline image. If downstream insertion is used, leave a natural gap after the middle table or section break.\n"
-    )
+    if inline_slots_allowed:
+        inline_rule = (
+            '- Do not insert <img>, <figure>, or markdown image syntax. Use only inert DOM slots: <div class="cf-image-slot" data-cf-image-slot="inline_1"></div> and <div class="cf-image-slot" data-cf-image-slot="inline_2"></div> where the category needs body image slots.\n'
+            "- inline_collage_prompt must be null or empty; ImageGen prompt preparation is handled by the role-based queue.\n"
+        )
+    else:
+        inline_rule = (
+            "- The final live article must contain no supporting body image blocks, no image slot placeholders, and inline_collage_prompt must be null.\n"
+        )
     hero_rule = (
         '- image_collage_prompt must be one final English prompt for one single flattened "5x4 panel grid collage" hero image with visible white gutters, clean grid layout, no text, and no logos.\n'
         if is_mysteria
-        else "- image_collage_prompt must be one final English prompt for one hero 3x3 collage with exactly 9 distinct panels.\n"
+        else "- image_collage_prompt must be one final English prompt for the hero role using the category-specific image policy. Do not force a universal 3x3 collage.\n"
     )
     panel_rule = (
         "- Keep the grid balanced as one single composed hero image, and do not request 20 separate panels for later compositing.\n"
         if is_mysteria
-        else "- The center panel must be visually dominant and the panel borders must remain visible.\n"
+        else "- Use the visual format required by the selected category and article pattern. Cartoon is allowed only for stock/crypto cartoon-summary patterns; Nasdaq uses infographic/market-board style.\n"
     )
-    inline_prompt_rule = (
-        ""
-        if is_mysteria
-        else "- inline_collage_prompt must be one final English prompt for one supporting 3x2 collage with exactly 6 distinct panels.\n"
-    )
+    inline_prompt_rule = ""
     return (
         "\n\n[Output contract]\n"
         "Return only one JSON object (no markdown fence) using exact keys:\n"
@@ -3572,8 +3900,11 @@ def _article_output_contract(*, is_mysteria: bool = False) -> str:
         '  "html_article": "string",\n'
         '  "faq_section": [{"question":"string","answer":"string"}],\n'
         '  "image_collage_prompt": "string",\n'
+        f"{image_asset_plan_contract}"
         '  "article_pattern_id": "string",\n'
-        '  "article_pattern_version": 1,\n'
+        '  "article_pattern_version": 4,\n'
+        '  "article_pattern_key": "string or null",\n'
+        '  "article_pattern_version_key": "string or null",\n'
         '  "series_variant": "string or null",\n'
         '  "company_name": "string or null",\n'
         '  "ticker": "string or null",\n'
@@ -3583,16 +3914,22 @@ def _article_output_contract(*, is_mysteria: bool = False) -> str:
         '  "chart_interval": "string or null",\n'
         '  "slide_sections": [{"title":"string","summary":"string","speaker":"string","key_points":["string"]}],\n'
         f"{inline_contract}"
+        '  "infographic_prompt": null,\n'
+        '  "trading_chart_prompt": null,\n'
+        '  "market_chart_prompt": null,\n'
+        '  "crypto_chart_prompt": null\n'
         "}\n"
-        "- html_article must be valid sanitized HTML-ready article content.\n"
+        "- html_article must be valid sanitized HTML-ready article content for the inner article body only. The public renderer owns editorial-page, detail-layout, detail-article, detail-sidebar, detail-hero, and article-content wrappers.\n"
         f"{layout_rule}"
         "- Keep structure SEO-friendly, readable, and blog-like rather than report-like.\n"
         "- Allowed tags only: <section>, <article>, <div>, <aside>, <blockquote>, <table>, <thead>, <tbody>, <tr>, <th>, <td>, <details>, <summary>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <span>, <br>, <hr>.\n"
-        "- Allowed class presets only: callout, timeline, card-grid, fact-box, caution-box, quote-box, chat-thread, comparison-table, route-steps, route-hero-card, step-flow, timing-box, timing-table, local-tip-box, event-checklist, event-hero, crowd-timing-box, food-lodging-table, field-caution-box, policy-summary, summary-box, comparison-matrix, workflow-strip, scene-intro, scene-divider, note-block, note-aside, closing-record, viewing-order-box, highlight-table, curator-note, case-summary, timeline-board, evidence-table, interpretation-compare, checklist-box, step-box, friction-table, eligibility-table, process-strip, document-checklist, market-summary, factor-table, viewpoint-compare, company-brief, dialogue-thread, checkpoint-box, checkpoint-strip, risk-factor-table, reflection-scene, thought-block.\n"
+        "- Allowed class presets only: callout, timeline, card-grid, fact-box, caution-box, quote-box, chat-thread, comparison-table, route-steps, route-hero-card, step-flow, timing-box, timing-table, local-tip-box, event-checklist, event-hero, crowd-timing-box, food-lodging-table, field-caution-box, policy-summary, summary-box, comparison-matrix, workflow-strip, scene-intro, scene-divider, note-block, note-aside, closing-record, viewing-order-box, highlight-table, curator-note, case-summary, timeline-board, evidence-table, interpretation-compare, checklist-box, step-box, friction-table, eligibility-table, process-strip, document-checklist, market-summary, factor-table, viewpoint-compare, company-brief, dialogue-thread, checkpoint-box, checkpoint-strip, risk-factor-table, reflection-scene, thought-block, cf-image-slot.\n"
         "- Do not use a centered wrapper, one giant card container, max-width hero box, or visible source/meta block.\n"
+        "- Do not use inline style attributes. Use the allowed class presets only.\n"
         f"{inline_rule}"
         "- meta_description and excerpt must not appear as visible duplicated summary lines inside html_article.\n"
-        "- The FAQ should read correctly inline as one H2 section near the end of the article body. faq_section is legacy optional only and must not be the sole source of the public FAQ layout.\n"
+        "- FAQ should be omitted when the selected category or pattern policy says FAQ none. When FAQ is allowed and useful, include the FAQ section inside html_article and mirror the same items in faq_section.\n"
+        "- Do not render null, undefined, N/A, empty summary, empty FAQ, or empty metadata blocks.\n"
         "- series_variant/company_name/ticker/exchange/chart_provider/chart_symbol/chart_interval/slide_sections are optional, but must be included when the planner brief explicitly requests a hybrid stock-series post.\n"
         f"{hero_rule}"
         f"{panel_rule}"
@@ -3600,23 +3937,24 @@ def _article_output_contract(*, is_mysteria: bool = False) -> str:
     )
 
 
-def _append_no_inline_image_rule(prompt: str, *, disallow_inline: bool = False) -> str:
-    if disallow_inline:
+def _append_no_inline_image_rule(prompt: str, *, allow_inline_slots: bool = False) -> str:
+    if allow_inline_slots:
         return (
             f"{prompt}\n\n"
-            "[Inline image policy]\n"
-            "- Do not output inline image tags or markdown image syntax in the public body.\n"
+            "[Inline image slot policy]\n"
+            "- Do not output <img>, <figure>, or markdown image syntax in the public body.\n"
             "- inline_collage_prompt must be null or empty.\n"
-            "- The final live article must contain no supporting body image blocks.\n"
+            '- This category may place only these inert body image slots: <div class="cf-image-slot" data-cf-image-slot="inline_1"></div> and <div class="cf-image-slot" data-cf-image-slot="inline_2"></div>.\n'
+            "- Use slots only when they support route/access/viewing flow or highlight/risk context; never use midpoint auto insertion.\n"
         )
     return (
         f"{prompt}\n\n"
         "[Inline image policy]\n"
-        "- The final live article must contain exactly one mid-article inline image.\n"
-        "- Keep a natural insertion point after the middle table or after the third H2 section.\n"
-        "- Do not use side-by-side galleries, centered figure wrappers, or caption-heavy image blocks.\n"
-        "- If downstream insertion is used, inline_collage_prompt must still describe one supporting image distinct from the cover.\n"
+        "- Do not output inline image tags, <figure>, image slot placeholders, or markdown image syntax in the public body.\n"
+        "- inline_collage_prompt must be null or empty.\n"
+        "- The final live article must contain no supporting body image blocks.\n"
     )
+
 
 def _append_cloudflare_seo_trust_guard(prompt: str, *, category_slug: str, current_date: str) -> str:
     guard_lines = [
@@ -3660,10 +3998,12 @@ def _append_hero_only_visual_rule(prompt: str, *, is_mysteria: bool = False) -> 
         f"{prompt}\n\n"
         "[Hero image policy]\n"
         "- Generate one cover-image prompt only.\n"
-        "- Use one composite 3x3 collage with exactly 9 distinct panels.\n"
-        "- Keep visible white gutters and make the center panel visually dominant.\n"
-        "- Do not request inline, supplementary, infographic, or chart body images.\n"
+        "- Follow the category-specific image policy and selected article pattern.\n"
+        "- Do not force a universal 3x3 collage.\n"
+        "- Cartoon style is allowed only for stock/crypto cartoon-summary patterns; Nasdaq defaults to infographic or market-analysis board style.\n"
+        "- Do not request inline, supplementary, or body images from this direct generation path.\n"
     )
+
 
 def _category_hard_gate(category_slug: str, category_name: str) -> str:
     lines = [
@@ -5012,7 +5352,8 @@ def generate_cloudflare_posts(
                     )
                 planner_brief_block = "\n".join(planner_lines)
             is_mysteria_category = _is_mysteria_story_category(category_id=category_id, category_slug=category_slug)
-            inline_images_enabled_for_category = inline_images_enabled and not is_mysteria_category
+            inline_slots_allowed_for_category = (not is_mysteria_category) and _cloudflare_allows_inline_image_slots(category_slug)
+            inline_images_enabled_for_category = False
             try:
                 locked_pattern_selection = select_cloudflare_article_pattern(db, category_slug=category_slug)
                 prn_preview = preview_cloudflare_prn_titles(
@@ -5037,7 +5378,10 @@ def generate_cloudflare_posts(
                     pattern_selection=locked_pattern_selection,
                 )
                 article_prompt = f"{article_prompt}{category_gate}{persona_article_block}{persona_ctr_block}{prn_prompt_block}"
-                article_prompt = _append_no_inline_image_rule(article_prompt, disallow_inline=is_mysteria_category)
+                article_prompt = _append_no_inline_image_rule(
+                    article_prompt,
+                    allow_inline_slots=inline_slots_allowed_for_category,
+                )
                 article_model = article_requested_model
                 if runtime.provider_mode == "live":
                     article_model = _route_cloudflare_text_model(
@@ -5070,6 +5414,13 @@ def generate_cloudflare_posts(
                     category_slug=category_slug,
                     title=article_output.title,
                 )
+                article_output.html_article, normalized_faq_items = _sync_cloudflare_faq_section_into_body(
+                    article_output.html_article,
+                    category_slug=category_slug,
+                    article_pattern_id=getattr(article_output, "article_pattern_id", None),
+                    faq_section=getattr(article_output, "faq_section", None),
+                )
+                article_output.faq_section = normalized_faq_items
                 quality_attempts: list[dict[str, Any]] = []
                 for quality_attempt in range(1, 3):
                     quality_assessment = _assess_cloudflare_quality_gate(
@@ -5128,6 +5479,13 @@ def generate_cloudflare_posts(
                         category_slug=category_slug,
                         title=article_output.title,
                     )
+                    article_output.html_article, normalized_faq_items = _sync_cloudflare_faq_section_into_body(
+                        article_output.html_article,
+                        category_slug=category_slug,
+                        article_pattern_id=getattr(article_output, "article_pattern_id", None),
+                        faq_section=getattr(article_output, "faq_section", None),
+                    )
+                    article_output.faq_section = normalized_faq_items
 
                 final_quality = quality_attempts[-1] if quality_attempts else {
                     "passed": True,

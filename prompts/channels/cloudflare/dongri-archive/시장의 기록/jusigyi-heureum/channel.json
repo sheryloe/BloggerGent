@@ -11,7 +11,13 @@
     "stock-corporate-event-watch",
     "stock-risk-timing"
   ],
-  "image_layout_policy": "hero_only_3x3_collage",
+  "image_layout_policy": "hero_only_stock_market",
+  "image_asset_plan": {
+    "roles": [
+      "hero"
+    ],
+    "live_apply_status_default": "blocked"
+  },
   "hero_only": true,
   "inline_images": false,
   "backup_files": [

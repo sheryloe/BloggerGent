@@ -2299,6 +2299,88 @@
     "축제와-현장",
     "문화와-공간"
   ],
-  "hero_only": true,
-  "inline_images": false
+  "hero_only": false,
+  "inline_images": true,
+  "image_asset_plan": {
+    "개발과-프로그래밍": {
+      "image_layout_policy": "hero_only_developer_workflow",
+      "roles": [
+        "hero"
+      ]
+    },
+    "일상과-메모": {
+      "image_layout_policy": "hero_only_daily_record",
+      "roles": [
+        "hero"
+      ]
+    },
+    "여행과-기록": {
+      "image_layout_policy": "hero_only_place_route",
+      "roles": [
+        "hero"
+      ]
+    },
+    "삶을-유용하게": {
+      "image_layout_policy": "hero_only_life_utility",
+      "roles": [
+        "hero"
+      ]
+    },
+    "삶의-기름칠": {
+      "image_layout_policy": "hero_only_public_benefit",
+      "roles": [
+        "hero"
+      ]
+    },
+    "동그리의-생각": {
+      "image_layout_policy": "hero_only_reflective_context",
+      "roles": [
+        "hero"
+      ]
+    },
+    "미스테리아-스토리": {
+      "image_layout_policy": "hero_only_mysteria_archive",
+      "roles": [
+        "hero"
+      ]
+    },
+    "주식의-흐름": {
+      "image_layout_policy": "hero_only_stock_market",
+      "roles": [
+        "hero"
+      ]
+    },
+    "크립토의-흐름": {
+      "image_layout_policy": "hero_only_crypto_market",
+      "roles": [
+        "hero"
+      ]
+    },
+    "나스닥의-흐름": {
+      "image_layout_policy": "hero_only_nasdaq_infographic",
+      "roles": [
+        "hero"
+      ]
+    },
+    "축제와-현장": {
+      "image_layout_policy": "hero_plus_two_inline_event",
+      "roles": [
+        "hero",
+        "inline_1",
+        "inline_2"
+      ]
+    },
+    "문화와-공간": {
+      "image_layout_policy": "hero_plus_two_inline_culture",
+      "roles": [
+        "hero",
+        "inline_1",
+        "inline_2"
+      ]
+    }
+  },
+  "inline_allowed_category_slugs": [
+    "축제와-현장",
+    "문화와-공간"
+  ]
 }

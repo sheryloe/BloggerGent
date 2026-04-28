@@ -11,9 +11,17 @@
     "expert-perspective",
     "experience-synthesis"
   ],
-  "image_layout_policy": "hero_only_3x3_collage",
-  "hero_only": true,
-  "inline_images": false,
+  "image_layout_policy": "hero_plus_two_inline_culture",
+  "image_asset_plan": {
+    "roles": [
+      "hero",
+      "inline_1",
+      "inline_2"
+    ],
+    "live_apply_status_default": "blocked"
+  },
+  "hero_only": false,
+  "inline_images": true,
   "backup_files": [
     "channels/cloudflare/dongri-archive/정보의 기록/munhwawa-gonggan/topic_discovery.md",
     "channels/cloudflare/dongri-archive/정보의 기록/munhwawa-gonggan/article_generation.md",

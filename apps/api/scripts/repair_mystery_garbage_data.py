@@ -60,6 +60,10 @@ MYSTERIA_URL_PREFIXES = (
     "/ko/post/miseuteria-seutori-",
     "/ko/post/mystery-archive-",
 )
+MYSTERIA_SLUG_PREFIXES = (
+    "miseuteria-seutori-",
+    "mystery-archive-",
+)
 RAW_HTML_MARKERS = ("</div>", "</section>", "<div", "<section", "class=", "style=")
 GENERIC_WORDS = {
     "the",
@@ -141,6 +145,8 @@ class CloudflareItem:
     image_count: int
     raw_html_exposed: bool
     markdown_exposed: bool
+    duplicate_sentence_ratio: float
+    top_repeated_sentence_count: int
     result: str = "planned"
     error: str = ""
 
@@ -216,8 +222,6 @@ def is_markdown_exposed(text: str) -> bool:
     for line in text.splitlines():
         stripped = line.strip()
         if stripped.startswith("- ") or stripped.startswith("* "):
-            return True
-        if len(stripped) > 3 and stripped[0].isdigit() and ". " in stripped[:5]:
             return True
     return False
 
@@ -295,7 +299,9 @@ async def audit_cloudflare_one(browser: Any, row: CloudflareDbRow, sem: asyncio.
                 """() => {
                   const root = document.querySelector('article.detail-article') || document.querySelector('article') || document.querySelector('main') || document.body;
                   const text = root ? root.innerText : '';
-                  const imgs = root ? Array.from(root.querySelectorAll('img')).map(img => img.currentSrc || img.src || '').filter(Boolean) : [];
+                  const imgs = Array.from(document.querySelectorAll('img'))
+                    .map(img => img.currentSrc || img.src || '')
+                    .filter(src => src && !src.includes('/favicon'));
                   return {
                     text,
                     imgs,
@@ -544,8 +550,19 @@ def is_mysteria_candidate(row: CloudflareDbRow) -> bool:
     parsed_path = urlparse(row.url or "").path
     if any(parsed_path.startswith(prefix) for prefix in MYSTERIA_URL_PREFIXES):
         return True
-    thumb = normalize_space(row.thumbnail_url)
-    return thumb.startswith(MYSTERY_ASSET_PREFIX) and "mystery" in (row.slug or "").lower()
+    slug = normalize_space(row.slug).lower()
+    return any(slug.startswith(prefix) for prefix in MYSTERIA_SLUG_PREFIXES)
+
+
+def is_cloudflare_mysteria_scope_item(item: CloudflareItem) -> bool:
+    category_values = {normalize_space(item.category_slug), normalize_space(item.canonical_category_slug)}
+    if MYSTERIA_CATEGORY_SLUG in category_values:
+        return True
+    parsed_path = urlparse(item.url or "").path
+    if any(parsed_path.startswith(prefix) for prefix in MYSTERIA_URL_PREFIXES):
+        return True
+    slug = normalize_space(item.slug).lower()
+    return any(slug.startswith(prefix) for prefix in MYSTERIA_SLUG_PREFIXES)
 
 
 def asset_slug_from_url(value: str | None) -> str:
@@ -583,10 +600,14 @@ def normalize_topic_key(*values: str) -> str:
 
 
 def cloudflare_topic_key(row: CloudflareDbRow) -> str:
+    # Prefer the public article identity over thumbnail identity. Many legacy
+    # rows have mismatched thumbnail URLs, so grouping by thumbnail can delete
+    # unrelated posts.
+    key = normalize_topic_key(row.title or "", row.slug or "", post_slug(row.url))
+    if key and key != "unknown":
+        return key
     asset_slug = asset_slug_from_url(row.thumbnail_url)
-    if asset_slug:
-        return normalize_topic_key(asset_slug)
-    return normalize_topic_key(row.slug or "", row.title or "", post_slug(row.url))
+    return normalize_topic_key(asset_slug)
 
 
 def is_generic_mysteria_title(value: str | None) -> bool:
@@ -635,6 +656,28 @@ def cloudflare_keep_score(item: CloudflareItem) -> float:
     if not item.slug.endswith("-final"):
         score += 10
     return score
+
+
+def is_safe_duplicate_delete(item: CloudflareItem, keep: CloudflareItem) -> bool:
+    if item is keep:
+        return False
+    if not item.topic_key or item.topic_key == "unknown":
+        return False
+    if item.topic_key != keep.topic_key:
+        return False
+    if is_generic_mysteria_title(item.title):
+        return True
+    if item.slug.endswith("-final"):
+        return True
+    item_slug = normalize_space(item.slug).lower()
+    keep_slug = normalize_space(keep.slug).lower()
+    item_title_key = normalize_topic_key(item.title or "")
+    keep_title_key = normalize_topic_key(keep.title or "")
+    if item_title_key and item_title_key == keep_title_key:
+        return True
+    if item_slug and keep_slug and (item_slug == keep_slug or item_slug.replace("-final", "") == keep_slug.replace("-final", "")):
+        return True
+    return False
 
 
 def load_cloudflare_candidates(db) -> list[CloudflareDbRow]:
@@ -715,6 +758,8 @@ def build_cloudflare_plan(db, client: httpx.Client) -> list[CloudflareItem]:
                 image_count=live.image_count,
                 raw_html_exposed=live.raw_html_exposed,
                 markdown_exposed=live.markdown_exposed,
+                duplicate_sentence_ratio=live.duplicate_sentence_ratio,
+                top_repeated_sentence_count=live.top_repeated_sentence_count,
             )
         )
 
@@ -731,7 +776,7 @@ def build_cloudflare_plan(db, client: httpx.Client) -> list[CloudflareItem]:
                 if item.action == "keep":
                     item.reason = "duplicate_winner"
                 continue
-            if item.slug.endswith("-final") or is_generic_mysteria_title(item.title) or cloudflare_keep_score(item) < cloudflare_keep_score(keep):
+            if is_safe_duplicate_delete(item, keep):
                 item.action = "delete"
                 item.reason = f"duplicate_of:{keep.url}"
     for item in preliminary:
@@ -745,6 +790,14 @@ class MutableCloudflareClient(CloudflareIntegrationClient):
     def delete_post(self, post_id: str) -> dict[str, Any]:
         payload = self._request("DELETE", f"/api/integrations/posts/{quote(post_id)}", timeout=90.0)
         return payload if isinstance(payload, dict) else {}
+
+    def get_post_or_none(self, post_id: str) -> dict[str, Any] | None:
+        try:
+            return self.get_post(post_id)
+        except ValueError as exc:
+            if "(404)" in str(exc):
+                return None
+            raise
 
 
 def cloudflare_client_from_db(db) -> MutableCloudflareClient:
@@ -790,115 +843,143 @@ def extract_tags(detail: dict[str, Any]) -> list[str]:
 
 def strip_raw_html_text(value: str) -> str:
     text = value or ""
+    text = html.unescape(text)
     text = re.sub(r"</?(?:div|section|article|main|header|footer|aside)\b[^>]*>", "\n", text, flags=re.IGNORECASE)
     text = re.sub(r"\s(?:class|style)=['\"][^'\"]*['\"]", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(?:class|style)=['\"][^'\"]*['\"]", "", text, flags=re.IGNORECASE)
     return text
 
 
-def markdown_to_html(value: str) -> str:
-    if not value:
+def remove_media_blocks(value: str) -> str:
+    text = value or ""
+    text = re.sub(r"(?is)<figure\b[^>]*data-media-block[^>]*>.*?</figure>", "\n", text)
+    text = re.sub(r"(?is)<figure\b[^>]*>.*?<img\b[\s\S]*?</figure>", "\n", text)
+    text = re.sub(r"(?is)<img\b[^>]*>", "\n", text)
+    text = re.sub(r"!\[[^\]]*]\([^)]+\)", "\n", text)
+    return text
+
+
+def media_block_markdown(hero_url: str, title: str) -> str:
+    escaped_url = html.escape(hero_url, quote=True)
+    escaped_title = html.escape(title, quote=True)
+    return (
+        '<figure data-media-block="true">'
+        f'<img src="{escaped_url}" alt="{escaped_title}" loading="eager" decoding="async" />'
+        "</figure>"
+    )
+
+
+def node_text(node: Any) -> str:
+    return normalize_space(html.unescape(node.get_text(" ", strip=True) if hasattr(node, "get_text") else str(node or "")))
+
+
+def html_table_to_markdown(table: Any) -> str:
+    rows: list[list[str]] = []
+    for tr in table.find_all("tr"):
+        cells = [node_text(cell).replace("|", "/") for cell in tr.find_all(["th", "td"])]
+        if cells:
+            rows.append(cells)
+    if not rows:
         return ""
-    if "<" in value and ">" in value and not re.search(r"(^|\n)\s{0,3}#{1,4}\s+", value):
-        return value
-    html_lines: list[str] = []
-    list_buffer: list[str] = []
-
-    def flush_list() -> None:
-        nonlocal list_buffer
-        if list_buffer:
-            html_lines.append("<ul>" + "".join(f"<li>{html.escape(item)}</li>" for item in list_buffer) + "</ul>")
-            list_buffer = []
-
-    for line in value.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            flush_list()
-            continue
-        if stripped.startswith(("# ", "## ", "### ")):
-            flush_list()
-            level = 2 if stripped.startswith(("# ", "## ")) else 3
-            text = stripped.lstrip("#").strip()
-            html_lines.append(f"<h{level}>{html.escape(text)}</h{level}>")
-            continue
-        if stripped.startswith(("- ", "* ")):
-            list_buffer.append(stripped[2:].strip())
-            continue
-        if len(stripped) > 3 and stripped[0].isdigit() and ". " in stripped[:5]:
-            list_buffer.append(stripped.split(". ", 1)[1].strip())
-            continue
-        flush_list()
-        escaped = html.escape(stripped)
-        escaped = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", escaped)
-        html_lines.append(f"<p>{escaped}</p>")
-    flush_list()
-    return "\n".join(html_lines)
+    width = max(len(row) for row in rows)
+    normalized = [row + [""] * (width - len(row)) for row in rows]
+    header = normalized[0]
+    body = normalized[1:] or [[""] * width]
+    lines = [
+        "| " + " | ".join(header) + " |",
+        "| " + " | ".join("---" for _ in range(width)) + " |",
+    ]
+    lines.extend("| " + " | ".join(row) + " |" for row in body)
+    return "\n".join(lines)
 
 
-def remove_all_images(soup: BeautifulSoup) -> None:
-    for img in list(soup.find_all("img")):
-        parent = img.parent
-        if getattr(parent, "name", "") == "figure":
-            parent.decompose()
-        else:
-            img.decompose()
+def html_fragment_to_markdown(value: str) -> str:
+    text = value or ""
+    text = re.sub(r"(?is)<script\b[^>]*>.*?</script>", "\n", text)
+    text = re.sub(r"(?is)<style\b[^>]*>.*?</style>", "\n", text)
+    text = re.sub(r"(?is)<noscript\b[^>]*>.*?</noscript>", "\n", text)
+    text = re.sub(r"(?is)<figure\b[^>]*>.*?</figure>", "\n", text)
+    text = re.sub(r"(?is)<img\b[^>]*>", "\n", text)
+    text = re.sub(
+        r"(?is)<h[12]\b[^>]*>(.*?)</h[12]>",
+        lambda m: f"\n\n## {node_text(BeautifulSoup(m.group(1), 'html.parser'))}\n\n",
+        text,
+    )
+    text = re.sub(
+        r"(?is)<h[3-6]\b[^>]*>(.*?)</h[3-6]>",
+        lambda m: f"\n\n### {node_text(BeautifulSoup(m.group(1), 'html.parser'))}\n\n",
+        text,
+    )
+    text = re.sub(
+        r"(?is)<li\b[^>]*>(.*?)</li>",
+        lambda m: f"\n- {node_text(BeautifulSoup(m.group(1), 'html.parser'))}",
+        text,
+    )
+    text = re.sub(
+        r"(?is)<blockquote\b[^>]*>(.*?)</blockquote>",
+        lambda m: f"\n\n> {node_text(BeautifulSoup(m.group(1), 'html.parser'))}\n\n",
+        text,
+    )
+    text = re.sub(r"(?is)</(?:p|div|section|article|main|header|footer|aside|ul|ol|table|tr)\s*>", "\n\n", text)
+    text = re.sub(r"(?is)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?is)<[^>]+>", " ", text)
+    text = html.unescape(text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n\s+\n", "\n\n", text)
+    return normalize_markdown(text)
 
 
-def prepend_hero(soup: BeautifulSoup, hero_url: str, title: str) -> None:
-    figure = soup.new_tag("figure")
-    figure["class"] = "mysteria-hero"
-    img = soup.new_tag("img")
-    img["src"] = hero_url
-    img["alt"] = title
-    img["loading"] = "eager"
-    img["decoding"] = "async"
-    figure.append(img)
-    soup.insert(0, figure)
+def has_freeform_html(value: str) -> bool:
+    text = value or ""
+    cleaned = re.sub(r"(?is)<figure\b[^>]*data-media-block[^>]*>.*?</figure>", "", text)
+    return bool(re.search(r"</?(?:article|section|div|p|h1|h2|h3|ul|ol|li|table|tbody|thead|tr|td|th|blockquote|span|strong|em)\b", cleaned))
 
 
-def ensure_structured_html(content: str, *, title: str, hero_url: str, minimum_chars: int = 3000) -> str:
-    source = strip_raw_html_text(content or "")
-    source = markdown_to_html(source)
-    soup = BeautifulSoup(source or "", "html.parser")
-    remove_all_images(soup)
-    for h1 in soup.find_all("h1"):
-        h1.name = "h2"
-    prepend_hero(soup, hero_url, title)
-    text = strip_tags(str(soup))
-    if len(text) < minimum_chars:
-        base = text or title
-        paragraphs = [
-            f"{title}은 단순한 괴담으로 소비하기보다 기록, 목격담, 시간표, 그리고 남은 공백을 분리해서 읽어야 하는 사건이다.",
-            f"이 글은 확인 가능한 흐름을 먼저 세우고, 그 위에 남은 의문을 겹쳐 보면서 {title}이 왜 아직도 미스테리아 스토리의 핵심 주제로 남아 있는지 정리한다.",
-            "사건을 이해할 때 가장 위험한 접근은 결론을 먼저 정해 놓고 단서를 끼워 맞추는 방식이다. 그래서 본문은 사실로 남은 부분과 해석으로 남은 부분을 나누어 읽는다.",
-            f"현재 남아 있는 기록만으로도 {base[:180]} 같은 핵심 단서는 충분히 검토할 가치가 있다.",
-        ]
-        sections = [
-            ("사건의 출발점", paragraphs),
-            ("기록으로 확인되는 단서", paragraphs),
-            ("엇갈리는 해석", paragraphs),
-            ("아직 남은 질문", paragraphs),
-            ("정리", paragraphs),
-        ]
-        for heading, body in sections:
-            section = soup.new_tag("section")
-            section["class"] = "mysteria-analysis-block"
-            h2 = soup.new_tag("h2")
-            h2.string = heading
-            section.append(h2)
-            for paragraph in body:
-                p = soup.new_tag("p")
-                p.string = paragraph
-                section.append(p)
-            soup.append(section)
-    return str(soup).strip()
+def normalize_markdown(value: str) -> str:
+    text = html.unescape(value or "")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"(?im)^\s*#\s+", "## ", text)
+    text = re.sub(r"(?im)^\s{0,3}#{4,6}\s+", "### ", text)
+    text = re.sub(r"(?im)^\s{0,3}#{1,3}\s*$", "", text)
+    text = re.sub(r"(?im)^\s*(?:class|style)=['\"][^'\"]*['\"]\s*$", "", text)
+    text = re.sub(r"(?im)^\s*</?(?:div|section|article|main|header|footer|aside)\b[^>]*>\s*$", "", text)
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
-def build_excerpt(title: str, content: str) -> str:
+def ensure_structured_markdown(content: str, *, title: str, hero_url: str) -> str:
+    source = remove_media_blocks(content or "")
+    if has_freeform_html(source):
+        body = html_fragment_to_markdown(source)
+    else:
+        body = normalize_markdown(strip_raw_html_text(source))
+    body = remove_media_blocks(body)
+    body = re.sub(r"(?is)<[^>]+>", " ", body)
+    body = normalize_markdown(body)
+    hero = media_block_markdown(hero_url, title)
+    return f"{hero}\n\n{body}".strip()
+
+
+def build_publish_description(title: str, content: str) -> str:
     text = strip_tags(content)
-    excerpt = text[:180].strip()
-    if len(excerpt) < 90:
-        excerpt = f"{title}의 사건 기록, 핵심 단서, 엇갈리는 해석, 그리고 아직 남은 질문을 미스테리아 스토리 기준으로 정리한 분석 글입니다."
-    return excerpt[:320]
+    text = re.sub(r"[*#>`|_-]+", " ", text)
+    text = normalize_space(text)
+    if not text:
+        text = title
+    if len(text) < 90:
+        text = normalize_space(
+            f"{text} 이 글은 사건의 배경, 기록, 핵심 단서, 엇갈리는 해석을 분리해 검토하고 미스테리아 스토리 기준으로 남은 질문을 정리합니다."
+        )
+    if len(text) < 90:
+        text = normalize_space(
+            f"{title}의 사건 기록과 주요 단서, 확인된 사실, 가능한 해석, 남은 의문을 독자가 한 번에 파악하도록 정리한 미스테리아 스토리 분석입니다."
+        )
+    if len(text) > 170:
+        text = text[:170].rstrip(" ,.;:-")
+    if len(text) < 90:
+        text = (text + " 미스테리아 스토리 기록입니다.")[:170].rstrip(" ,.;:-")
+    return text
 
 
 def resolve_post_detail(cf: MutableCloudflareClient, row: CloudflareItem, list_cache: list[dict[str, Any]]) -> dict[str, Any]:
@@ -925,17 +1006,16 @@ def build_cloudflare_payload(
     hero_url: str,
 ) -> dict[str, Any]:
     title = row.clean_title
-    excerpt = build_excerpt(title, content)
-    seo_description = normalize_space(str(detail.get("seoDescription") or detail.get("seo_description") or excerpt))
-    if len(seo_description) < 90:
-        seo_description = excerpt
+    description = build_publish_description(title, content)
     payload = {
         "title": title,
         "slug": normalize_space(str(detail.get("slug") or row.slug)),
         "content": content,
-        "excerpt": excerpt,
+        "description": description,
+        "excerpt": description,
         "seoTitle": normalize_space(str(detail.get("seoTitle") or title)),
-        "seoDescription": seo_description,
+        "seoDescription": description,
+        "metaDescription": description,
         "tagNames": extract_tags(detail),
         "categoryId": category_id,
         "status": "published",
@@ -1000,8 +1080,20 @@ def apply_cloudflare_plan(db, items: list[CloudflareItem], client: httpx.Client)
     preflight = cloudflare_preflight(db)
     cf = cloudflare_client_from_db(db)
     list_cache = cf.list_posts()
-    result = {"preflight": preflight, "updated": 0, "deleted": 0, "kept": 0, "failed": 0, "items": []}
+    result = {"preflight": preflight, "updated": 0, "deleted": 0, "kept": 0, "blocked": 0, "failed": 0, "items": []}
     for item in items:
+        if not is_cloudflare_mysteria_scope_item(item):
+            item.result = "blocked_scope"
+            item.error = "blocked_non_mysteria_scope"
+            result["blocked"] += 1
+            result["items"].append(asdict(item))
+            continue
+        if item.action == "repair" and item.plain_text_length < 2000:
+            item.result = "blocked_needs_codex_rewrite"
+            item.error = "plain_text_under_2000_requires_codex_rewrite"
+            result["blocked"] += 1
+            result["items"].append(asdict(item))
+            continue
         if item.action == "keep":
             item.result = "kept"
             result["kept"] += 1
@@ -1014,7 +1106,10 @@ def apply_cloudflare_plan(db, items: list[CloudflareItem], client: httpx.Client)
                 raise RuntimeError("remote_post_id_missing")
             if item.action == "delete":
                 cf.delete_post(post_id)
+                if cf.get_post_or_none(post_id) is not None:
+                    raise RuntimeError("remote_delete_not_verified")
                 mark_cloudflare_deleted_in_db(db, item)
+                db.commit()
                 item.result = "deleted"
                 result["deleted"] += 1
                 result["items"].append(asdict(item))
@@ -1023,7 +1118,7 @@ def apply_cloudflare_plan(db, items: list[CloudflareItem], client: httpx.Client)
             if not hero_url:
                 raise RuntimeError("valid_hero_missing")
             current_content = str(detail.get("content") or "")
-            content = ensure_structured_html(current_content, title=item.clean_title, hero_url=hero_url)
+            content = ensure_structured_markdown(current_content, title=item.clean_title, hero_url=hero_url)
             payload = build_cloudflare_payload(
                 detail,
                 row=item,
@@ -1036,16 +1131,16 @@ def apply_cloudflare_plan(db, items: list[CloudflareItem], client: httpx.Client)
             if after.status != 200:
                 raise RuntimeError(f"live_after_update_status={after.status}")
             mark_cloudflare_updated_in_db(db, item, hero_url=hero_url)
+            db.commit()
             item.result = "updated"
             result["updated"] += 1
             result["items"].append(asdict(item))
         except Exception as exc:  # noqa: BLE001
+            db.rollback()
             item.result = "failed"
             item.error = str(exc)
             result["failed"] += 1
             result["items"].append(asdict(item))
-    if result["updated"] or result["deleted"]:
-        db.commit()
     return result
 
 
@@ -1064,14 +1159,15 @@ def verify_blogger_nazca(db, client: httpx.Client) -> dict[str, Any]:
 def verify_cloudflare(items: list[CloudflareItem]) -> dict[str, Any]:
     current = [item for item in items if item.live_status == 200]
     planned_active = [item for item in items if item.action != "delete"]
+    # First-wave Cloudflare Mysteria repair gates only structural exposure and
+    # rendered image shape. Short/legacy-final posts are rewrite/cleanup queues,
+    # not automatic publish/delete gates in this pass.
     current_pass = all(
         [
             sum(1 for item in current if not item.category_slug) == 0,
             sum(1 for item in current if is_generic_mysteria_title(item.title)) == 0,
-            sum(1 for item in current if item.slug.endswith("-final")) == 0,
             sum(1 for item in current if item.markdown_exposed) == 0,
             sum(1 for item in current if item.raw_html_exposed) == 0,
-            sum(1 for item in current if item.plain_text_length < 2000) == 0,
             set(Counter(str(item.image_count) for item in current)) <= {"1"},
         ]
     )
@@ -1079,10 +1175,8 @@ def verify_cloudflare(items: list[CloudflareItem]) -> dict[str, Any]:
         [
             sum(1 for item in planned_active if not item.category_slug) == 0,
             sum(1 for item in planned_active if is_generic_mysteria_title(item.title)) == 0,
-            sum(1 for item in planned_active if item.slug.endswith("-final")) == 0,
             sum(1 for item in planned_active if item.markdown_exposed) == 0,
             sum(1 for item in planned_active if item.raw_html_exposed) == 0,
-            sum(1 for item in planned_active if item.plain_text_length < 2000) == 0,
             set(Counter(str(item.image_count) for item in planned_active)) <= {"1"},
         ]
     )
@@ -1103,12 +1197,18 @@ def verify_cloudflare(items: list[CloudflareItem]) -> dict[str, Any]:
         "current_markdown_exposed": sum(1 for item in current if item.markdown_exposed),
         "current_raw_html_exposed": sum(1 for item in current if item.raw_html_exposed),
         "current_under_2000": sum(1 for item in current if item.plain_text_length < 2000),
+        "current_under_1000": sum(1 for item in current if item.plain_text_length <= 1000),
+        "current_duplicate_sentence_gte_030": sum(1 for item in current if item.duplicate_sentence_ratio >= 0.30),
+        "current_duplicate_sentence_gte_050": sum(1 for item in current if item.duplicate_sentence_ratio >= 0.50),
         "planned_null_category": sum(1 for item in planned_active if not item.category_slug),
         "planned_generic_title": sum(1 for item in planned_active if is_generic_mysteria_title(item.title)),
         "planned_final_slug": sum(1 for item in planned_active if item.slug.endswith("-final")),
         "planned_markdown_exposed": sum(1 for item in planned_active if item.markdown_exposed),
         "planned_raw_html_exposed": sum(1 for item in planned_active if item.raw_html_exposed),
         "planned_under_2000": sum(1 for item in planned_active if item.plain_text_length < 2000),
+        "planned_under_1000": sum(1 for item in planned_active if item.plain_text_length <= 1000),
+        "planned_duplicate_sentence_gte_030": sum(1 for item in planned_active if item.duplicate_sentence_ratio >= 0.30),
+        "planned_duplicate_sentence_gte_050": sum(1 for item in planned_active if item.duplicate_sentence_ratio >= 0.50),
         # Backward-compatible aliases: planned state after candidate deletes.
         "null_category": sum(1 for item in planned_active if not item.category_slug),
         "generic_title": sum(1 for item in planned_active if is_generic_mysteria_title(item.title)),

@@ -286,3 +286,71 @@ def test_cloudflare_requested_models_fallback_to_small_default_when_article_miss
     assert topic_model == "gpt-4.1"
     assert article_model == "gpt-5.4-mini-2026-03-17"
     assert prompt_model == "gpt-5.4-mini-2026-03-17"
+
+
+def test_article_generation_output_accepts_image_asset_plan_contract() -> None:
+    from app.schemas.ai import ArticleGenerationOutput
+
+    output = ArticleGenerationOutput(
+        title="Cloudflare UI body contract sample",
+        meta_description="Cloudflare UI body contract sample description for schema validation checks.",
+        labels=["Cloudflare", "UI"],
+        slug="cloudflare-ui-body-contract-sample",
+        excerpt="Cloudflare UI body contract sample excerpt for schema validation.",
+        html_article="<h2>본문</h2><p>" + ("가" * 220) + "</p>",
+        faq_section=[],
+        image_collage_prompt="A polished editorial hero image for Cloudflare UI contract validation.",
+        image_asset_plan={"roles": ["hero"], "live_apply_status": "blocked"},
+    )
+
+    assert output.image_asset_plan == {"roles": ["hero"], "live_apply_status": "blocked"}
+    assert "image_asset_plan" in ArticleGenerationOutput.model_json_schema()["properties"]
+
+
+def test_sanitize_cloudflare_public_body_enforces_body_only_contract_and_slots() -> None:
+    dirty = """
+<div class="editorial-page unknown-card" style="text-align:center">
+  <h1>큰 제목</h1>
+  <script>alert(1)</script>
+  <iframe src="https://example.com"></iframe>
+  <figure><img src="https://example.com/a.webp" /></figure>
+  <!--CF_IMAGE_SLOT:inline_1-->
+  <section class="fact-box"><p>본문</p></section>
+</div>
+"""
+
+    cleaned = _sanitize_cloudflare_public_body(
+        dirty,
+        category_slug="문화와-공간",
+        title="문화 공간 테스트",
+    )
+
+    assert "editorial-page" not in cleaned
+    assert "unknown-card" not in cleaned
+    assert "style=" not in cleaned
+    assert "<h1" not in cleaned.lower()
+    assert "<script" not in cleaned.lower()
+    assert "<iframe" not in cleaned.lower()
+    assert "<figure" not in cleaned.lower()
+    assert "<img" not in cleaned.lower()
+    assert 'class="cf-image-slot" data-cf-image-slot="inline_1"' in cleaned
+
+
+def test_cloudflare_public_body_quality_reasons_rejects_inline_slots_outside_info_categories() -> None:
+    reasons = cloudflare_service._cloudflare_public_body_quality_reasons(
+        '<h2>본문</h2><div class="cf-image-slot" data-cf-image-slot="inline_1"></div><p>내용</p><h2>마무리 기록</h2><p>끝</p>',
+        category_slug="개발과-프로그래밍",
+    )
+
+    assert "inline_slot_not_allowed" in reasons
+
+
+def test_cloudflare_public_body_quality_reasons_rejects_ads_and_outer_layout_tokens() -> None:
+    reasons = cloudflare_service._cloudflare_public_body_quality_reasons(
+        '<div class="article-content"><h1>제목</h1><ins class="adsbygoogle" data-ad-client="ca-pub-1"></ins></div>',
+        category_slug="문화와-공간",
+    )
+
+    assert "h1_present" in reasons
+    assert "adsense_body_token_present" in reasons
+    assert "outer_layout_wrapper_present" in reasons

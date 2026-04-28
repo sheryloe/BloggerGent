@@ -32,26 +32,87 @@ CATEGORY_LEAF_MAP = {
 }
 
 CATEGORY_IMAGE_BRIEFS = {
-    "개발과-프로그래밍": (
-        "AI 개발 도구, IDE/CLI 워크플로, 운영 대시보드, 아키텍처 보드가 보이는 "
-        "현대적인 3x3 기술 문서형 hero collage"
-    ),
-    "나스닥의-흐름": "미국 기술주, 반도체, 실적, 리스크 지표가 보이는 금융 리포트형 3x3 hero collage",
-    "동그리의-생각": "다크 라이브러리, 생각 노트, 사회 장면, 창가 책상이 어우러진 사색형 3x3 hero collage",
-    "문화와-공간": (
-        "전시/문화 공간의 장소성, 운영 기간 또는 상설 맥락, 입구와 관람 동선, 작품 배치, "
-        "관람자 흐름, 공간 조명이 보이는 문화 공간 가이드형 3x3 hero collage"
-    ),
-    "삶을-유용하게": "생활 개선, 도구, 체크리스트, 실용 루틴이 보이는 명확한 생활 정보형 3x3 hero collage",
-    "삶의-기름칠": "정책 서류, 신청 화면, 상담 장면, 자격 조건 카드가 보이는 공공지원 안내형 3x3 hero collage",
-    "여행과-기록": "국내 장소, 동선, 현장 기록, 계절감이 보이는 실제 여행 기록형 3x3 hero collage",
-    "일상과-메모": "노트, 책상, 창가 빛, 루틴 체크리스트가 보이는 조용한 일상 기록형 3x3 hero collage",
-    "주식의-흐름": "시장 차트, 기업 이벤트, 리스크 타이밍, 투자 메모가 보이는 금융 분석형 3x3 hero collage",
-    "축제와-현장": (
-        "축제/행사의 개최 장소, 기간과 시간대 분위기, 방문 동선, 대기줄, 부스/무대, "
-        "교통/입구 정보가 보이는 현장 가이드형 3x3 hero collage"
-    ),
-    "크립토의-흐름": "블록체인 네트워크, 온체인 지표, 거래 심리, 규제 이슈가 보이는 사이버 분석형 3x3 hero collage",
+    "개발과-프로그래밍": "Developer workflow hero with official docs, tool version, IDE/CLI, logs, and architecture board.",
+    "나스닥의-흐름": "Nasdaq infographic board with AI, semiconductors, earnings, rates, and risk scenarios.",
+    "동그리의-생각": "Reflective note hero with social scene, notebook, desk, window light, and closing question.",
+    "문화와-공간": "Culture space image with venue, operating period, viewing route, artwork placement, and lighting.",
+    "미스테리아-스토리": "Dark mystery archive hero with case file, clues, timeline, and old documents.",
+    "삶을-유용하게": "Life utility hero with tool, app, routine, checklist, and preparation item.",
+    "삶의-기름칠": "Public benefit guide hero with documents, consultation, application flow, and eligibility checklist.",
+    "여행과-기록": "Travel record hero with place, route cue, visit time, season, and booking or cost cue.",
+    "일상과-메모": "Quiet daily record hero with notebook, desk, window light, routine object, and emotion cue.",
+    "주식의-흐름": "Stock market hero with reference date, sector, price zone, event schedule, and risk.",
+    "축제와-현장": "Festival field guide image with venue, period, operating hours, queue, booth, and access route.",
+    "크립토의-흐름": "Crypto analysis hero with protocol, price zone, on-chain signal, sentiment, and regulation risk.",
+}
+
+IMAGEGEN_POLICY_BY_LEAF = {
+    "gaebalgwa-peurogeuraeming": {
+        "layout_policy": "hero_only_developer_workflow",
+        "roles": ("hero",),
+        "style": "developer workflow board with official docs, version/runtime cues, IDE/CLI, logs, and architecture artifacts",
+        "anchors": ("reference date", "tool/version", "language/runtime", "IDE/CLI", "official docs"),
+    },
+    "ilsanggwa-memo": {
+        "layout_policy": "hero_only_daily_record",
+        "roles": ("hero",),
+        "style": "quiet daily record with notebook, desk, window light, routine object, and emotional cue",
+        "anchors": ("scene", "time of day", "emotion", "routine", "small checklist"),
+    },
+    "yeohaenggwa-girog": {
+        "layout_policy": "hero_only_place_route",
+        "roles": ("hero",),
+        "style": "place and route editorial image with real location mood, transit/walking cue, season/weather, and booking/cost hint",
+        "anchors": ("place", "route cue", "visit time", "season/weather", "budget or booking"),
+    },
+    "salmeul-yuyonghage": {
+        "layout_policy": "hero_only_life_utility",
+        "roles": ("hero",),
+        "style": "practical life utility scene with app/tool, daily routine, checklist, and preparation items",
+        "anchors": ("target user", "tool/service", "cost/benefit", "preparation item", "caution point"),
+    },
+    "salmyi-gireumcil": {
+        "layout_policy": "hero_only_public_benefit",
+        "roles": ("hero",),
+        "style": "public benefit guide scene with documents, consultation desk, eligibility checklist, and application flow; no government logos or readable fake text",
+        "anchors": ("reference date", "agency", "application period", "eligibility", "benefit scope"),
+    },
+    "donggeuriyi-saenggag": {
+        "layout_policy": "hero_only_reflective_context",
+        "roles": ("hero",),
+        "style": "reflective social note with dark library, observation scene, notebook, cultural context, and unresolved question",
+        "anchors": ("social event", "personal question", "culture context", "observation scene", "closing question"),
+    },
+    "jusigyi-heureum": {
+        "layout_policy": "hero_only_stock_market",
+        "roles": ("hero",),
+        "style": "stock market visual; 12-panel cartoon only for stock-cartoon-summary, otherwise financial report board",
+        "anchors": ("reference date", "stock/sector", "price or index zone", "event schedule", "risk"),
+    },
+    "keuribtoyi-heureum": {
+        "layout_policy": "hero_only_crypto_market",
+        "roles": ("hero",),
+        "style": "crypto visual; cyber 12-panel cartoon only for crypto-cartoon-summary, otherwise on-chain/protocol/regulatory analysis board",
+        "anchors": ("reference date", "coin/protocol", "price zone", "on-chain signal", "regulatory risk"),
+    },
+    "naseudagyi-heureum": {
+        "layout_policy": "hero_only_nasdaq_infographic",
+        "roles": ("hero",),
+        "style": "Nasdaq infographic or market analysis board with AI, semiconductors, earnings, macro rates, and risk scenarios; no cartoon style",
+        "anchors": ("reference date", "company/sector", "earnings/guidance", "AI or semiconductor context", "risk scenario"),
+    },
+    "cugjewa-hyeonjang": {
+        "layout_policy": "hero_plus_two_inline_event",
+        "roles": ("hero", "inline_1", "inline_2"),
+        "style": "festival/event field guide; hero for atmosphere, inline_1 for access/queue/route, inline_2 for time/risk/booth-stage context",
+        "anchors": ("official site", "venue", "event period", "operating hours", "recommended visit time", "access route", "field risk"),
+    },
+    "munhwawa-gonggan": {
+        "layout_policy": "hero_plus_two_inline_culture",
+        "roles": ("hero", "inline_1", "inline_2"),
+        "style": "culture/space guide; hero for venue atmosphere, inline_1 for viewing/access route, inline_2 for artwork or space highlight",
+        "anchors": ("official site", "venue", "period/permanent status", "operating hours", "reservation/admission", "viewing route", "space risk"),
+    },
 }
 
 RECOVERY_SUBDIRS = [
@@ -118,9 +179,40 @@ def category_policy_path(category_slug: str) -> Path:
     return ROOL_ROOT / "categories" / leaf / "image-prompt-policy.md"
 
 
-def r2_key_for(row: dict[str, str]) -> str:
-    category = row.get("category_slug") or ""
-    leaf = CATEGORY_LEAF_MAP.get(category, category)
+def category_leaf_for(row_or_category: dict[str, str] | str) -> str:
+    category = row_or_category if isinstance(row_or_category, str) else row_or_category.get("category_slug") or ""
+    return CATEGORY_LEAF_MAP.get(str(category), str(category))
+
+
+def policy_for(row_or_category: dict[str, str] | str) -> dict[str, Any]:
+    leaf = category_leaf_for(row_or_category)
+    fallback_category = str(row_or_category) if isinstance(row_or_category, str) else str(row_or_category.get("category_slug") or "")
+    return dict(
+        IMAGEGEN_POLICY_BY_LEAF.get(leaf)
+        or {
+            "layout_policy": "hero_only_generic",
+            "roles": ("hero",),
+            "style": CATEGORY_IMAGE_BRIEFS.get(fallback_category, "category-specific editorial hero image"),
+            "anchors": ("topic", "category", "reader task"),
+        }
+    )
+
+
+def roles_for(row_or_category: dict[str, str] | str) -> tuple[str, ...]:
+    return tuple(str(role) for role in policy_for(row_or_category).get("roles", ("hero",)))
+
+
+def slot_index_for(image_role: str) -> int:
+    if image_role == "hero":
+        return 0
+    try:
+        return int(image_role.rsplit("_", 1)[-1])
+    except (IndexError, ValueError):
+        return 0
+
+
+def r2_key_for(row: dict[str, str], *, image_role: str = "hero") -> str:
+    leaf = category_leaf_for(row)
     slug = row.get("slug") or ""
     published_hint = "2026/04"
     thumbnail = row.get("thumbnail_url") or ""
@@ -129,36 +221,76 @@ def r2_key_for(row: dict[str, str]) -> str:
         tail = thumbnail.split(marker, 1)[1].split("/")
         if len(tail) >= 4 and tail[1].isdigit() and tail[2].isdigit():
             published_hint = f"{tail[1]}/{tail[2]}"
-    return f"assets/media/cloudflare/dongri-archive/{leaf}/{published_hint}/{slug}/{slug}.webp"
+    filename = f"{slug}.webp" if image_role == "hero" else f"{slug}-{image_role.replace('_', '-')}.webp"
+    return f"assets/media/cloudflare/dongri-archive/{leaf}/{published_hint}/{slug}/{filename}"
 
 
-def public_url_for(row: dict[str, str]) -> str:
-    return f"https://api.dongriarchive.com/{r2_key_for(row)}"
+def public_url_for(row: dict[str, str], *, image_role: str = "hero") -> str:
+    return f"https://api.dongriarchive.com/{r2_key_for(row, image_role=image_role)}"
 
 
-def local_png_for(row: dict[str, str]) -> str:
-    return str(RECOVERY_ROOT / "03-generated-png" / (row.get("category_slug") or "unknown") / f"{row.get('slug')}.png")
+def local_png_for(row: dict[str, str], *, image_role: str = "hero") -> str:
+    suffix = "" if image_role == "hero" else f"-{image_role.replace('_', '-')}"
+    return str(RECOVERY_ROOT / "03-generated-png" / (row.get("category_slug") or "unknown") / image_role / f"{row.get('slug')}{suffix}.png")
 
 
-def local_webp_for(row: dict[str, str]) -> str:
-    return str(RECOVERY_ROOT / "04-webp" / (row.get("category_slug") or "unknown") / f"{row.get('slug')}.webp")
+def local_webp_for(row: dict[str, str], *, image_role: str = "hero") -> str:
+    suffix = "" if image_role == "hero" else f"-{image_role.replace('_', '-')}"
+    return str(RECOVERY_ROOT / "04-webp" / (row.get("category_slug") or "unknown") / image_role / f"{row.get('slug')}{suffix}.webp")
 
 
-def build_image_prompt(row: dict[str, str]) -> str:
+def policy_snapshot_for(row: dict[str, str], *, image_role: str) -> dict[str, Any]:
+    policy = policy_for(row)
+    return {
+        "category_slug": row.get("category_slug") or "",
+        "category_leaf": category_leaf_for(row),
+        "article_pattern_id": row.get("article_pattern_id") or "",
+        "image_role": image_role,
+        "slot_index": slot_index_for(image_role),
+        "layout_policy": policy.get("layout_policy"),
+        "allowed_roles": list(roles_for(row)),
+        "style": policy.get("style"),
+        "anchors": list(policy.get("anchors") or ()),
+        "live_apply_status_default": "blocked",
+    }
+
+
+def build_prompt_payload(row: dict[str, str], *, image_role: str) -> dict[str, Any]:
+    return {
+        "remote_post_id": row.get("remote_post_id", ""),
+        "category_slug": row.get("category_slug", ""),
+        "slug": row.get("slug", ""),
+        "title": row.get("title", ""),
+        "article_pattern_id": row.get("article_pattern_id", ""),
+        "image_role": image_role,
+        "reasons": sorted(reason_set(row)),
+    }
+
+
+def build_image_prompt(row: dict[str, str], *, image_role: str = "hero") -> str:
     category = row.get("category_slug") or ""
     title = row.get("title") or row.get("slug") or ""
-    style_brief = CATEGORY_IMAGE_BRIEFS.get(category, "글의 핵심 주제가 한눈에 읽히는 3x3 hero collage")
+    policy = policy_for(row)
+    role_purpose = {
+        "hero": "represent the overall post topic as one premium editorial hero image",
+        "inline_1": "support the first inline slot with route, access, viewing flow, or queue context",
+        "inline_2": "support the second inline slot with highlight, risk, time-of-day, booth, artwork, or space context",
+    }.get(image_role, "represent the requested image role")
     return "\n".join(
         [
-            "Use case: editorial blog hero image",
-            "Asset type: Cloudflare blog canonical hero image",
+            "Use case: editorial blog image",
+            "Asset type: Cloudflare blog canonical ImageGen asset",
             f"Post title: {title}",
             f"Category: {category}",
-            f"Visual policy: {style_brief}",
-            "Composition: one single Web hero image, 16:9, polished editorial style, 3x3 collage feeling in one image.",
+            f"Image role: {image_role}",
+            f"Role purpose: {role_purpose}",
+            f"Layout policy: {policy.get('layout_policy')}",
+            f"Visual policy: {policy.get('style')}",
+            f"Required anchors: {', '.join(str(item) for item in policy.get('anchors') or [])}",
+            "Composition: one single 16:9 polished editorial image. Do not force a universal 3x3 collage.",
             "Requirements: no text overlays, no logos, no watermarks, no UI brand marks, no unrelated category imagery.",
             "Mood: premium Korean editorial archive, clear subject hierarchy, high readability at thumbnail size.",
-            "Output intent: PNG backup first, then WebP conversion and R2 upload by BloggerGent.",
+            "Output intent: PNG backup first, then WebP conversion and R2 upload by BloggerGent. Do not update live directly from generation.",
         ]
     )
 
@@ -188,18 +320,30 @@ def build_outputs(*, stamp: str, execute: bool) -> dict[str, Any]:
             "reasons": ";".join(sorted(reasons)),
         }
         if {"fallback_placeholder", "actual_broken_image"} & reasons:
-            image_targets.append(
-                {
-                    **base,
-                    "imagegen_prompt": build_image_prompt(row),
-                    "policy_path": str(category_policy_path(row.get("category_slug", ""))),
-                    "png_path": local_png_for(row),
-                    "webp_path": local_webp_for(row),
-                    "r2_key": r2_key_for(row),
-                    "public_url": public_url_for(row),
-                    "generation_status": "queued",
-                }
-            )
+            for image_role in roles_for(row):
+                prompt_payload = build_prompt_payload(row, image_role=image_role)
+                policy_snapshot = policy_snapshot_for(row, image_role=image_role)
+                image_targets.append(
+                    {
+                        **base,
+                        "job_id": f"{row.get('remote_post_id') or row.get('slug')}::{image_role}",
+                        "article_pattern_id": row.get("article_pattern_id", ""),
+                        "image_role": image_role,
+                        "slot_index": str(slot_index_for(image_role)),
+                        "prompt_payload_json": json.dumps(prompt_payload, ensure_ascii=False, separators=(",", ":")),
+                        "policy_snapshot_json": json.dumps(policy_snapshot, ensure_ascii=False, separators=(",", ":")),
+                        "imagegen_prompt": build_image_prompt(row, image_role=image_role),
+                        "policy_path": str(category_policy_path(row.get("category_slug", ""))),
+                        "png_path": local_png_for(row, image_role=image_role),
+                        "webp_path": local_webp_for(row, image_role=image_role),
+                        "r2_key": r2_key_for(row, image_role=image_role),
+                        "public_url": public_url_for(row, image_role=image_role),
+                        "generation_status": "queued",
+                        "r2_upload_status": "blocked",
+                        "verify_status": "blocked",
+                        "live_apply_status": "blocked",
+                    }
+                )
         if "title_identity_mismatch" in reasons:
             content_review.append({**base, "review_type": "title_identity_mismatch", "review_status": "queued"})
         if "legacy_media_posts_url" in reasons:
@@ -232,6 +376,7 @@ def build_outputs(*, stamp: str, execute: bool) -> dict[str, Any]:
     still_active_old_rows = [{**row, "active_status": "active_in_latest_non_mysteria_image_queue"} for row in old_rows if row.get("remote_post_id") in active_ids]
 
     image_fields = [
+        "job_id",
         "remote_post_id",
         "category_slug",
         "slug",
@@ -239,6 +384,11 @@ def build_outputs(*, stamp: str, execute: bool) -> dict[str, Any]:
         "post_url",
         "thumbnail_url",
         "reasons",
+        "article_pattern_id",
+        "image_role",
+        "slot_index",
+        "prompt_payload_json",
+        "policy_snapshot_json",
         "imagegen_prompt",
         "policy_path",
         "png_path",
@@ -246,6 +396,9 @@ def build_outputs(*, stamp: str, execute: bool) -> dict[str, Any]:
         "r2_key",
         "public_url",
         "generation_status",
+        "r2_upload_status",
+        "verify_status",
+        "live_apply_status",
     ]
     review_fields = ["remote_post_id", "category_slug", "slug", "title", "post_url", "thumbnail_url", "reasons", "review_type", "review_status"]
     legacy_fields = ["remote_post_id", "category_slug", "slug", "title", "post_url", "thumbnail_url", "reasons", "migration_type", "migration_status"]
@@ -270,6 +423,7 @@ def build_outputs(*, stamp: str, execute: bool) -> dict[str, Any]:
         "published_rows_in_audit": len(audit_rows),
         "non_mysteria_rows": len(active_rows),
         "image_generation_targets": len(image_targets),
+        "image_generation_target_posts": len({row.get("remote_post_id") or row.get("slug") for row in image_targets}),
         "content_review_targets": len(content_review),
         "legacy_image_migration_candidates": len(legacy_candidates),
         "unsupported_skipped": len(skipped),
@@ -312,12 +466,14 @@ def write_rule_docs() -> None:
 ## 고정 규칙
 - Antigravity는 사용하지 않는다.
 - `미스테리아-스토리`는 이번 복구 범위에서 제외한다.
-- 한 게시글당 대표 이미지 1장만 생성한다.
-- PNG 원본은 `03-generated-png/<category>/<slug>.png`에 둔다.
-- WebP 변환본은 `04-webp/<category>/<slug>.webp`에 둔다.
-- R2 key는 `assets/media/cloudflare/dongri-archive/<category-leaf>/YYYY/MM/<slug>/<slug>.webp`만 허용한다.
+- 기본은 한 게시글당 `hero` 1장만 생성한다.
+- `문화와-공간`, `축제와-현장`만 `hero`, `inline_1`, `inline_2`를 생성할 수 있다.
+- PNG 원본은 `03-generated-png/<category>/<image_role>/<slug>.png`에 둔다.
+- WebP 변환본은 `04-webp/<category>/<image_role>/<slug>.webp`에 둔다.
+- R2 key는 `assets/media/cloudflare/dongri-archive/<category-leaf>/YYYY/MM/<slug>/<slug>[-inline-1|-inline-2].webp`만 허용한다.
 - 공개 URL은 `https://api.dongriarchive.com/assets/media/cloudflare/dongri-archive/...`만 허용한다.
 - live 반영은 `HEAD/GET 200`과 `Content-Type image/*` 확인 후에만 한다.
+- 큐 생성 단계의 기본 `live_apply_status`는 `blocked`다.
 
 ## 실행 순서
 1. `02-generation-queue/codex-imagegen-queue.csv`를 확인한다.
@@ -337,11 +493,12 @@ def write_rule_docs() -> None:
 
 ## 입력
 - `codex-imagegen-queue.csv`
-- 필수 컬럼: `remote_post_id`, `category_slug`, `slug`, `title`, `imagegen_prompt`, `png_path`, `webp_path`, `r2_key`, `public_url`
+- 필수 컬럼: `job_id`, `remote_post_id`, `category_slug`, `slug`, `title`, `article_pattern_id`, `image_role`, `slot_index`, `prompt_payload_json`, `policy_snapshot_json`, `imagegen_prompt`, `png_path`, `webp_path`, `r2_key`, `public_url`, `generation_status`, `r2_upload_status`, `verify_status`, `live_apply_status`
 
 ## 생성
 - 내장 `image_gen` 스킬을 사용한다.
 - 별도 CLI fallback은 쓰지 않는다.
+- `image_role`은 `hero`, `inline_1`, `inline_2` 중 하나여야 한다.
 - 이미지에는 텍스트, 로고, 워터마크를 넣지 않는다.
 - 카테고리 정책은 `policy_path`를 기준으로 한다.
 
@@ -351,6 +508,7 @@ def write_rule_docs() -> None:
 
 ## 반영
 - WebP 변환과 R2 업로드 후 `public_url`이 이미지로 열릴 때만 live 반영한다.
+- `verify_status=ok` 전에는 `live_apply_status=blocked`를 유지한다.
 - 실패하면 기존 게시글 URL을 유지하고 `09-skipped`에 사유를 남긴다.
 """,
         encoding="utf-8",

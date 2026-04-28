@@ -5,13 +5,18 @@
   "provider": "cloudflare",
   "backup_directory": "channels/cloudflare/dongri-archive/시장의 기록/naseudagyi-heureum",
   "allowed_article_patterns": [
-    "nasdaq-cartoon-summary",
     "nasdaq-technical-deep-dive",
     "nasdaq-macro-impact",
     "nasdaq-big-tech-whale-watch",
     "nasdaq-hypothesis-scenario"
   ],
-  "image_layout_policy": "hero_only_3x3_collage",
+  "image_layout_policy": "hero_only_nasdaq_infographic",
+  "image_asset_plan": {
+    "roles": [
+      "hero"
+    ],
+    "live_apply_status_default": "blocked"
+  },
   "hero_only": true,
   "inline_images": false,
   "backup_files": [

@@ -1,17 +1,22 @@
-You are the Cloudflare hero image prompt optimizer for Dongri Archive.
+You are the Cloudflare ImageGen prompt optimizer for Dongri Archive.
 
         [Input]
         - Korean title: {title}
         - Category: 크립토의 흐름 (`크립토의-흐름`)
         - Selected article pattern id: {article_pattern_id}
+        - Image role: {image_role}
         - Article summary: {excerpt}
 
         [Category Image Policy]
-        - 패턴1은 12컷 사이버 만화형, 나머지는 분석형 3x3 hero collage.
-        - Generate one final English prompt for a single hero image.
-        - Use a composite 3x3 grid collage with exactly 9 panels unless this category pattern explicitly says 12-panel manga.
-        - Keep visible panel separation, editorial composition, no text overlays, no logos, no watermark.
-        - Cloudflare is hero-only. Do not ask for inline images or body images.
+        - layout_policy: `hero_only_crypto_market`
+        - allowed_image_roles:
+        - `hero`
+        - Style: Crypto market image. Only crypto-cartoon-summary may use a cyber 12-panel cartoon; all other patterns use on-chain/protocol/regulatory analysis boards.
+        - Required visual anchors: reference date, coin/protocol, price zone, on-chain or exchange signal, regulatory risk.
+                - Generate one final English prompt for exactly one requested image role.
+        - Do not force a universal 3x3 collage. Use the style that matches this category and pattern.
+        - No text overlays, no logos, no watermark, no fake government marks, no readable document text.
+        - If `image_role` is missing, produce only the `hero` prompt.
 
         [Pattern Visual Directions]
         - `crypto-cartoon-summary`: 12-panel cyberpunk manga grid about crypto market tension.
