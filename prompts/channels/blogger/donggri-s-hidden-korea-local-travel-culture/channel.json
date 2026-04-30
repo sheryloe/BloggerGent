@@ -91,15 +91,15 @@
       "structure_segments": null,
       "locked_image_model": null,
       "image_policy_version": null,
-      "image_layout_policy": "travel_editorial_20panel_5x4_apr2026",
+      "image_layout_policy": "travel_editorial_12panel_4x3",
       "text_generation_route": "codex_cli",
       "policy_config": {
         "text_generation_route": "codex_cli",
         "provider_hint": "codex_cli",
         "provider_model": "gpt-5.4-mini",
-        "image_layout_policy": "travel_editorial_20panel_5x4_apr2026",
+        "image_layout_policy": "travel_editorial_12panel_4x3",
         "hero_only": true,
-        "panel_count": 20
+        "panel_count": 12
       }
     },
     {
@@ -149,14 +149,14 @@
       "structure_mode": null,
       "structure_segments": null,
       "locked_image_model": "gpt-image-1",
-      "image_policy_version": "2026-04-27",
-      "image_layout_policy": "travel_editorial_20panel_5x4_apr2026",
+      "image_policy_version": "2026-04-29",
+      "image_layout_policy": "travel_editorial_12panel_4x3",
       "text_generation_route": null,
       "policy_config": {
         "locked_image_model": "gpt-image-1",
-        "image_policy_version": "2026-04-27",
-        "image_layout_policy": "travel_editorial_20panel_5x4_apr2026",
-        "panel_count": 20,
+        "image_policy_version": "2026-04-29",
+        "image_layout_policy": "travel_editorial_12panel_4x3",
+        "panel_count": 12,
         "hero_only": true,
         "inline_disabled": true,
         "image_size": "1024x1024"

@@ -20,7 +20,10 @@ from app.services.content.topic_guard_service import rebuild_topic_memories_for_
 
 BLOGGER_POSTS_URL = "https://www.googleapis.com/blogger/v3/blogs/{blog_id}/posts"
 BLOGGER_PUBLIC_FEED_PATH = "/feeds/posts/default"
-BLOGGER_PUBLIC_FEED_MAX_RESULTS = 500
+# Blogger public feeds may cap responses at 100 even when a larger max-results
+# value is requested. Keep the requested page size aligned with the real cap so
+# pagination does not stop after the first 100 posts.
+BLOGGER_PUBLIC_FEED_MAX_RESULTS = 100
 
 logger = logging.getLogger(__name__)
 IMAGE_SRC_PATTERN = re.compile(r"<img\b[^>]*\bsrc=['\"]([^'\"]+)['\"]", re.IGNORECASE)
@@ -257,9 +260,9 @@ def fetch_public_blogger_posts(blog_url: str) -> list[dict]:
                 if normalized["remote_post_id"]:
                     posts.append(normalized)
             start_index += len(entries)
-            if len(entries) < BLOGGER_PUBLIC_FEED_MAX_RESULTS:
-                break
             if total_results is not None and start_index > total_results:
+                break
+            if len(entries) < BLOGGER_PUBLIC_FEED_MAX_RESULTS:
                 break
 
     return posts
@@ -384,9 +387,18 @@ def sync_blogger_posts_for_blog(db: Session, blog: Blog) -> dict:
 
         db.commit()
         rebuild_topic_memories_for_blog(db, blog)
-        from app.services.ops.analytics_service import sync_synced_post_facts_for_blog
+        from app.services.ops.analytics_service import (
+            collect_blogger_sync_score_rows,
+            summarize_publish_score_rows,
+            sync_synced_post_facts_for_blog,
+        )
 
         sync_synced_post_facts_for_blog(db, blog.id)
+        score_rows = collect_blogger_sync_score_rows(
+            db,
+            blog_id=blog.id,
+            remote_post_ids=remote_ids,
+        )
         if get_travel_blog_policy(blog=blog) is not None:
             refresh_travel_translation_state(
                 db,
@@ -398,6 +410,8 @@ def sync_blogger_posts_for_blog(db: Session, blog: Blog) -> dict:
             "count": len(remote_posts),
             "last_synced_at": now,
             "source": "public_feed" if used_public_feed else "blogger_api",
+            "score_summary": summarize_publish_score_rows(score_rows),
+            "score_rows": score_rows,
         }
     except Exception:
         db.rollback()

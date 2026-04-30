@@ -15,6 +15,8 @@ from app.services.ops.lighthouse_service import (
     apply_lighthouse_audit_to_cloudflare_post,
     parse_lighthouse_report,
     resolve_lighthouse_report_root,
+    run_lighthouse_audit,
+    run_required_article_lighthouse_audit,
 )
 
 
@@ -144,3 +146,67 @@ def test_resolve_lighthouse_report_root_uses_runtime_storage(monkeypatch):
     root = resolve_lighthouse_report_root(provider="manual")
 
     assert str(root).endswith(r"storage\_common\analysis\lighthouse\manual")
+
+
+def test_run_lighthouse_audit_uses_google_pagespeed_not_local_cli(monkeypatch):
+    calls = []
+
+    def fake_pagespeed(url: str, *, strategy: str = "mobile", **kwargs):
+        calls.append({"url": url, "strategy": strategy, **kwargs})
+        return {
+            "url": url,
+            "form_factor": strategy,
+            "measurement_source": "google_pagespeed_insights_lighthouse",
+            "scores": {"lighthouse_score": 91.0},
+            "raw_report": {},
+        }
+
+    monkeypatch.setattr(
+        "app.services.ops.lighthouse_service.run_pagespeed_insights_audit",
+        fake_pagespeed,
+    )
+
+    result = run_lighthouse_audit("https://example.com/post", form_factor="desktop")
+
+    assert calls == [{"url": "https://example.com/post", "strategy": "desktop"}]
+    assert result["measurement_source"] == "google_pagespeed_insights_lighthouse"
+    assert result["scores"]["lighthouse_score"] == 91.0
+
+
+def test_optional_article_lighthouse_measurement_does_not_block(monkeypatch):
+    class DummyDb:
+        def __init__(self):
+            self.added = []
+            self.flushed = False
+
+        def add(self, value):
+            self.added.append(value)
+
+        def flush(self):
+            self.flushed = True
+
+    def fail_pagespeed(*args, **kwargs):
+        from app.services.ops.lighthouse_service import LighthouseAuditError
+
+        raise LighthouseAuditError("PageSpeed unavailable")
+
+    monkeypatch.setattr(
+        "app.services.ops.lighthouse_service.run_pagespeed_insights_audit",
+        fail_pagespeed,
+    )
+    article = SimpleNamespace()
+    db = DummyDb()
+
+    payload = run_required_article_lighthouse_audit(
+        db,
+        article,
+        url="https://example.com/post",
+        commit=False,
+        required=False,
+    )
+
+    assert payload["status"] == "unmeasured"
+    assert payload["measurement_source"] == "google_pagespeed_insights_lighthouse"
+    assert article.quality_lighthouse_payload == payload
+    assert db.added == [article]
+    assert db.flushed is True

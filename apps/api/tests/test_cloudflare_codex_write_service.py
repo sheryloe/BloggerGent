@@ -286,14 +286,18 @@ def test_publish_updates_existing_post_when_slug_unchanged(db: Session, tmp_path
     assert result["updated_count"] == 1
     assert captured[0][0] == "PUT"
     assert captured[0][1] == "/api/integrations/posts/remote-1"
-    assert "<h2>자주 묻는 질문</h2>" in captured[0][2]["content"]
-    assert "<img src=\"https://img.example.com/inline.webp\"" in captured[0][2]["content"]
+    assert not captured[0][2]["content"].startswith("# ")
+    assert "style=" not in captured[0][2]["content"]
+    assert "## 자주 묻는 질문" in captured[0][2]["content"]
+    assert '<img src="https://img.example.com/inline.webp"' in captured[0][2]["content"]
+    assert 'width="100%"' in captured[0][2]["content"]
+    assert "<h2" not in captured[0][2]["content"]
     saved = json.loads(package_path.read_text(encoding="utf-8"))
     assert saved["publish_state"]["status"] == "published"
     assert saved["publish_state"]["publish_mode"] == "put_existing"
 
 
-def test_publish_falls_back_to_create_delete_when_slug_change_not_reflected(db: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_publish_fails_without_create_delete_when_slug_change_not_reflected(db: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _create_channel_with_post(db, category_slug="여행과-기록", slug="dongrimokpan-fake", remote_post_id="remote-old")
     base_dir = tmp_path / "codex_write" / "cloudflare"
     package_dir = base_dir / "동그리의 기록" / "yeohaenggwa-girog"
@@ -304,6 +308,7 @@ def test_publish_falls_back_to_create_delete_when_slug_change_not_reflected(db: 
         slug="dongrimokpan-fake",
         target_slug="gangneung-sacheon-beach-day-route-2026",
     )
+    payload["remote_post_id"] = "remote-old"
     payload["title"] = "강릉 사천해변 반나절 동선 2026 | 사천진항부터 바다 카페까지 걷는 순서"
     payload["excerpt"] = "강릉 사천해변 반나절 동선을 실제 순서대로 정리한다. 사천진항과 바다 카페를 한 흐름으로 묶는다."
     payload["meta_description"] = "강릉 사천해변 반나절 동선을 실제 순서대로 정리한다. 사천진항과 바다 카페를 한 흐름으로 묶어 살핀다."
@@ -330,10 +335,6 @@ def test_publish_falls_back_to_create_delete_when_slug_change_not_reflected(db: 
         calls.append((method, path, json_payload))
         if method == "PUT":
             return {"data": {"id": "remote-old", "publicUrl": "https://dongriarchive.com/ko/post/dongrimokpan-fake", "slug": "dongrimokpan-fake"}}
-        if method == "POST":
-            return {"data": {"id": "remote-new", "publicUrl": "https://dongriarchive.com/ko/post/gangneung-sacheon-beach-day-route-2026", "slug": "gangneung-sacheon-beach-day-route-2026"}}
-        if method == "DELETE":
-            return {"data": {"ok": True}}
         raise AssertionError(method)
 
     monkeypatch.setattr(cloudflare_codex_write_service, "_integration_request", _fake_request)
@@ -348,12 +349,15 @@ def test_publish_falls_back_to_create_delete_when_slug_change_not_reflected(db: 
         base_dir=base_dir,
     )
 
-    assert result["updated_count"] == 1
-    assert [call[0] for call in calls] == ["PUT", "POST", "DELETE"]
+    assert result["updated_count"] == 0
+    assert result["failed_count"] == 1
+    assert [call[0] for call in calls] == ["PUT"]
     saved = json.loads(package_path.read_text(encoding="utf-8"))
-    assert saved["remote_post_id"] == "remote-new"
-    assert saved["published_url"].endswith("/gangneung-sacheon-beach-day-route-2026")
-    assert saved["publish_state"]["publish_mode"] == "create_delete_fallback"
+    assert saved["remote_post_id"] == "remote-old"
+    assert saved["published_url"].endswith("/dongrimokpan-fake")
+    assert saved["publish_state"]["status"] == "failed"
+    assert saved["publish_state"]["publish_mode"] is None
+    assert "slug_update_failed" in saved["publish_state"]["last_error"]
 
 
 def test_canonical_content_body_keeps_faq_inside_section_until_closing_record() -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from collections import Counter
 from dataclasses import dataclass
 from typing import Mapping, Sequence
@@ -62,6 +63,36 @@ ARTICLE_PATTERNS: dict[str, ArticlePatternDefinition] = {
         label="Spot Card Grid",
         summary="A comparison-led structure that breaks places or tools into clear cards.",
         html_hint="div.card-grid, div.fact-box, table.comparison-table",
+    ),
+    "travel-01-hidden-path-route": ArticlePatternDefinition(
+        pattern_id="travel-01-hidden-path-route",
+        label="Hidden Path Route",
+        summary="Route-first travel structure focused on entrances, alleys, transfers, timing, and final viewpoint decisions.",
+        html_hint="section.route-steps, div.timing-box, aside.local-tip-box",
+    ),
+    "travel-02-cultural-insider": ArticlePatternDefinition(
+        pattern_id="travel-02-cultural-insider",
+        label="Cultural Insider",
+        summary="Culture-first travel structure focused on venue context, ticketing, etiquette, crowd rhythm, and details to notice.",
+        html_hint="section.event-checklist, div.curator-note, table.timing-table",
+    ),
+    "travel-03-local-flavor-guide": ArticlePatternDefinition(
+        pattern_id="travel-03-local-flavor-guide",
+        label="Local Flavor Guide",
+        summary="Food and neighborhood structure focused on storefronts, queues, order strategy, signature choices, budget, and nearby route pairing.",
+        html_hint="div.local-tip-box, table.comparison-table, section.route-steps",
+    ),
+    "travel-04-seasonal-secret": ArticlePatternDefinition(
+        pattern_id="travel-04-seasonal-secret",
+        label="Seasonal Secret",
+        summary="Seasonal travel structure focused on light, weather, bloom or foliage timing, crowd avoidance, and backup route choices.",
+        html_hint="section.viewing-order-box, div.timing-box, aside.caution-box",
+    ),
+    "travel-05-smart-traveler-log": ArticlePatternDefinition(
+        pattern_id="travel-05-smart-traveler-log",
+        label="Smart Traveler Log",
+        summary="Decision-log travel structure focused on reservations, waits, budget, transit choices, and failure-avoidance checkpoints.",
+        html_hint="div.checkpoint-box, table.friction-table, section.route-steps",
     ),
     "case-timeline": ArticlePatternDefinition(
         pattern_id="case-timeline",
@@ -438,6 +469,15 @@ ARTICLE_PATTERNS: dict[str, ArticlePatternDefinition] = {
 }
 
 
+_TRAVEL_BLOGGER_PATTERN_IDS: tuple[str, ...] = (
+    "travel-01-hidden-path-route",
+    "travel-02-cultural-insider",
+    "travel-03-local-flavor-guide",
+    "travel-04-seasonal-secret",
+    "travel-05-smart-traveler-log",
+)
+
+
 _MYSTERY_ALLOWED_PATTERN_IDS: tuple[str, ...] = (
     "case-timeline",
     "evidence-breakdown",
@@ -448,112 +488,115 @@ _MYSTERY_ALLOWED_PATTERN_IDS: tuple[str, ...] = (
 
 
 _BLOGGER_PATTERN_MAP: dict[tuple[str, str], tuple[str, ...]] = {
-    ("korea_travel", "travel"): ("experience-diary", "route-timeline", "spot-card-grid"),
-    ("korea_travel", "culture"): ("experience-diary", "route-timeline", "exhibition-field-guide"),
-    ("korea_travel", "food"): ("experience-diary", "spot-card-grid", "route-timeline"),
+    ("korea_travel", "travel"): _TRAVEL_BLOGGER_PATTERN_IDS,
+    ("korea_travel", "culture"): _TRAVEL_BLOGGER_PATTERN_IDS,
+    ("korea_travel", "food"): _TRAVEL_BLOGGER_PATTERN_IDS,
     ("world_mystery", "case-files"): _MYSTERY_ALLOWED_PATTERN_IDS,
     ("world_mystery", "legends-lore"): _MYSTERY_ALLOWED_PATTERN_IDS,
     ("world_mystery", "mystery-archives"): _MYSTERY_ALLOWED_PATTERN_IDS,
 }
 
-_CLOUDFLARE_PATTERN_MAP: dict[str, tuple[str, ...]] = {
-    "개발과-프로그래밍": ("dev-info-deep-dive", "dev-curation-top-points", "dev-insider-field-guide", "dev-expert-perspective", "dev-experience-synthesis",),
-    "일상과-메모": ("daily-01-reflective-monologue", "daily-02-insight-memo", "daily-03-habit-tracker", "daily-04-emotional-reflection",),
-    "여행과-기록": ("route-first-story", "spot-focus-review", "seasonal-special", "logistics-budget", "hidden-gem-discovery",),
-    "삶을-유용하게": ("life-hack-tutorial", "benefit-audit-report", "efficiency-tool-review", "comparison-verdict",),
-    "삶의-기름칠": ("life-hack-tutorial", "benefit-audit-report", "efficiency-tool-review", "comparison-verdict",),
-    "동그리의-생각": ("thought-social-context", "thought-tech-culture", "thought-generation-note", "thought-personal-question",),
-    "미스테리아-스토리": ("case-timeline", "evidence-breakdown", "legend-context", "scene-investigation", "scp-dossier",),
-    "주식의-흐름": ("stock-cartoon-summary", "stock-technical-analysis", "stock-macro-intelligence", "stock-corporate-event-watch", "stock-risk-timing",),
-    "크립토의-흐름": ("crypto-cartoon-summary", "crypto-on-chain-analysis", "crypto-protocol-deep-dive", "crypto-regulatory-macro", "crypto-market-sentiment",),
-    "나스닥의-흐름": ("nasdaq-cartoon-summary", "nasdaq-technical-deep-dive", "nasdaq-macro-impact", "nasdaq-big-tech-whale-watch", "nasdaq-hypothesis-scenario",),
-    "축제와-현장": ("info-deep-dive", "curation-top-points", "insider-field-guide", "expert-perspective", "experience-synthesis",),
-    "문화와-공간": ("info-deep-dive", "curation-top-points", "insider-field-guide", "expert-perspective", "experience-synthesis",),
+CLOUDFLARE_CATEGORY_SLUG_ALIASES: dict[str, tuple[str, ...]] = {
+    "개발과-프로그래밍": ("gaebalgwa-peurogeuraeming",),
+    "일상과-메모": ("ilsanggwa-memo",),
+    "여행과-기록": ("yeohaenggwa-girog",),
+    "삶을-유용하게": ("salmeul-yuyonghage",),
+    "삶의-기름칠": ("salmyi-gireumcil",),
+    "동그리의-생각": ("donggeuriyi-saenggag",),
+    "미스테리아-스토리": ("miseuteria-seutori", "미스테리아 스토리"),
+    "주식의-흐름": ("jusigyi-heureum",),
+    "크립토의-흐름": ("keuribtoyi-heureum",),
+    "나스닥의-흐름": ("naseudagyi-heureum",),
+    "축제와-현장": ("cugjewa-hyeonjang",),
+    "문화와-공간": ("munhwawa-gonggan",),
 }
 
-_CLOUDFLARE_PATTERN_MAP.update(
-    {
-        "개발과-프로그래밍": (
-            "dev-info-deep-dive",
-            "dev-curation-top-points",
-            "dev-insider-field-guide",
-            "dev-expert-perspective",
-            "dev-experience-synthesis",
-        ),
-        "일상과-메모": (
-            "daily-01-reflective-monologue",
-            "daily-02-insight-memo",
-            "daily-03-habit-tracker",
-            "daily-04-emotional-reflection",
-        ),
-        "여행과-기록": (
-            "route-first-story",
-            "spot-focus-review",
-            "seasonal-special",
-            "logistics-budget",
-            "hidden-gem-discovery",
-        ),
-        "삶을-유용하게": (
-            "life-hack-tutorial",
-            "benefit-audit-report",
-            "efficiency-tool-review",
-            "comparison-verdict",
-        ),
-        "삶의-기름칠": (
-            "life-hack-tutorial",
-            "benefit-audit-report",
-            "efficiency-tool-review",
-            "comparison-verdict",
-        ),
-        "동그리의-생각": (
-            "thought-social-context",
-            "thought-tech-culture",
-            "thought-generation-note",
-            "thought-personal-question",
-        ),
-        "미스테리아-스토리": (
-            "case-timeline",
-            "evidence-breakdown",
-            "legend-context",
-            "scene-investigation",
-            "scp-dossier",
-        ),
-        "주식의-흐름": (
-            "stock-cartoon-summary",
-            "stock-technical-analysis",
-            "stock-macro-intelligence",
-            "stock-corporate-event-watch",
-            "stock-risk-timing",
-        ),
-        "크립토의-흐름": (
-            "crypto-cartoon-summary",
-            "crypto-on-chain-analysis",
-            "crypto-protocol-deep-dive",
-            "crypto-regulatory-macro",
-            "crypto-market-sentiment",
-        ),
-        "나스닥의-흐름": (
-            "nasdaq-technical-deep-dive",
-            "nasdaq-macro-impact",
-            "nasdaq-big-tech-whale-watch",
-            "nasdaq-hypothesis-scenario",
-        ),
-        "축제와-현장": (
-            "info-deep-dive",
-            "curation-top-points",
-            "insider-field-guide",
-            "expert-perspective",
-            "experience-synthesis",
-        ),
-        "문화와-공간": (
-            "info-deep-dive",
-            "curation-top-points",
-            "insider-field-guide",
-            "expert-perspective",
-            "experience-synthesis",
-        ),
-    }
-)
+_CLOUDFLARE_CANONICAL_PATTERN_MAP: dict[str, tuple[str, ...]] = {
+    "개발과-프로그래밍": (
+        "dev-info-deep-dive",
+        "dev-curation-top-points",
+        "dev-insider-field-guide",
+        "dev-expert-perspective",
+        "dev-experience-synthesis",
+    ),
+    "일상과-메모": (
+        "daily-01-reflective-monologue",
+        "daily-02-insight-memo",
+        "daily-03-habit-tracker",
+        "daily-04-emotional-reflection",
+    ),
+    "여행과-기록": (
+        "route-first-story",
+        "spot-focus-review",
+        "seasonal-special",
+        "logistics-budget",
+        "hidden-gem-discovery",
+    ),
+    "삶을-유용하게": (
+        "life-hack-tutorial",
+        "benefit-audit-report",
+        "efficiency-tool-review",
+        "comparison-verdict",
+    ),
+    "삶의-기름칠": (
+        "life-hack-tutorial",
+        "benefit-audit-report",
+        "efficiency-tool-review",
+        "comparison-verdict",
+    ),
+    "동그리의-생각": (
+        "thought-social-context",
+        "thought-tech-culture",
+        "thought-generation-note",
+        "thought-personal-question",
+    ),
+    "미스테리아-스토리": (
+        "case-timeline",
+        "evidence-breakdown",
+        "legend-context",
+        "scene-investigation",
+        "scp-dossier",
+    ),
+    "주식의-흐름": (
+        "stock-cartoon-summary",
+        "stock-technical-analysis",
+        "stock-macro-intelligence",
+        "stock-corporate-event-watch",
+        "stock-risk-timing",
+    ),
+    "크립토의-흐름": (
+        "crypto-cartoon-summary",
+        "crypto-on-chain-analysis",
+        "crypto-protocol-deep-dive",
+        "crypto-regulatory-macro",
+        "crypto-market-sentiment",
+    ),
+    "나스닥의-흐름": (
+        "nasdaq-technical-deep-dive",
+        "nasdaq-macro-impact",
+        "nasdaq-big-tech-whale-watch",
+        "nasdaq-hypothesis-scenario",
+    ),
+    "축제와-현장": (
+        "info-deep-dive",
+        "curation-top-points",
+        "insider-field-guide",
+        "expert-perspective",
+        "experience-synthesis",
+    ),
+    "문화와-공간": (
+        "info-deep-dive",
+        "curation-top-points",
+        "insider-field-guide",
+        "expert-perspective",
+        "experience-synthesis",
+    ),
+}
+
+_CLOUDFLARE_PATTERN_MAP: dict[str, tuple[str, ...]] = dict(_CLOUDFLARE_CANONICAL_PATTERN_MAP)
+for _canonical_slug, _aliases in CLOUDFLARE_CATEGORY_SLUG_ALIASES.items():
+    for _alias in _aliases:
+        _CLOUDFLARE_PATTERN_MAP[_alias] = _CLOUDFLARE_CANONICAL_PATTERN_MAP[_canonical_slug]
 
 _MYSTERIA_PATTERN_WEIGHTS: dict[str, float] = {
     "case-timeline": 30.0,
@@ -614,6 +657,20 @@ def _blocked_threepeat_pattern_id(*, allowed_ids: Sequence[str], recent_ids: Seq
         if _normalize_key(candidate) == blocked_norm:
             return str(candidate)
     return None
+
+
+def _stable_rotation_seed(*parts: object) -> int:
+    seed_text = "|".join(str(part or "").strip() for part in parts)
+    digest = hashlib.sha256(seed_text.encode("utf-8")).hexdigest()
+    return int(digest[:12], 16)
+
+
+def _is_travel_blogger_pattern_set(profile_key: str, allowed_ids: Sequence[str]) -> bool:
+    if str(profile_key or "").strip() != "korea_travel":
+        return False
+    normalized_allowed = {_normalize_key(item) for item in allowed_ids}
+    normalized_travel = {_normalize_key(item) for item in _TRAVEL_BLOGGER_PATTERN_IDS}
+    return normalized_allowed == normalized_travel
 
 
 def _pick_pattern(
@@ -714,6 +771,9 @@ def select_blogger_article_pattern(
     blog_id: int,
     profile_key: str | None,
     editorial_category_key: str | None,
+    preferred_pattern_id: str | None = None,
+    preferred_selection_note: str | None = None,
+    pattern_context_key: str | None = None,
 ) -> ArticlePatternSelection:
     normalized_profile = str(profile_key or "").strip()
     normalized_editorial_key = str(editorial_category_key or "").strip()
@@ -722,24 +782,68 @@ def select_blogger_article_pattern(
         (normalized_profile, normalized_editorial_key),
         ("problem-solution", "spot-card-grid") if normalized_profile == "custom" else ("problem-solution",),
     )
+    is_travel_profile = _is_travel_blogger_pattern_set(normalized_profile, allowed_ids)
+    recent_limit = 8 if is_travel_profile else 3
     recent_ids = _recent_blogger_pattern_ids(
         db,
         blog_id=blog_id,
         editorial_category_key=normalized_editorial_key,
+        limit=recent_limit,
     )
+    normalized_allowed = {_normalize_key(item) for item in allowed_ids}
+    normalized_preferred = str(preferred_pattern_id or "").strip()
+    if (
+        normalized_preferred
+        and _normalize_key(normalized_preferred) in normalized_allowed
+        and not is_travel_profile
+    ):
+        definition = _resolve_pattern_definition(normalized_preferred)
+        return ArticlePatternSelection(
+            pattern_id=definition.pattern_id,
+            pattern_version=ARTICLE_PATTERN_VERSION,
+            label=definition.label,
+            summary=definition.summary,
+            html_hint=definition.html_hint,
+            allowed_pattern_ids=tuple(allowed_ids),
+            recent_pattern_ids=recent_ids,
+            selection_note=str(preferred_selection_note or "preferred_pattern_inherited").strip(),
+        )
+
     blocked_threepeat = (
         _blocked_threepeat_pattern_id(allowed_ids=allowed_ids, recent_ids=recent_ids)
-        if is_mystery_profile
+        if is_mystery_profile or is_travel_profile
         else None
+    )
+    rotation_seed = (
+        _stable_rotation_seed(
+            "travel-blogger-pattern",
+            blog_id,
+            normalized_profile,
+            normalized_editorial_key,
+            pattern_context_key,
+            ",".join(recent_ids[:5]),
+        )
+        if is_travel_profile
+        else len(recent_ids)
     )
     chosen_id = _pick_pattern(
         allowed_ids=allowed_ids,
         recent_ids=recent_ids,
-        rotation_seed=len(recent_ids),
+        rotation_seed=rotation_seed,
         weights=_MYSTERIA_PATTERN_WEIGHTS if is_mystery_profile else None,
-        disallow_threepeat=is_mystery_profile,
+        disallow_threepeat=is_mystery_profile or is_travel_profile,
     )
     definition = _resolve_pattern_definition(chosen_id)
+    if is_travel_profile:
+        selection_note = (
+            "travel_blog_specific_deterministic_random;"
+            f"context={str(pattern_context_key or '').strip() or 'none'};"
+            f"blocked_threepeat={blocked_threepeat or 'none'}"
+        )
+    elif is_mystery_profile:
+        selection_note = f"weighted_5_pattern_rotation;blocked_threepeat={blocked_threepeat or 'none'}"
+    else:
+        selection_note = "default_rotation"
     return ArticlePatternSelection(
         pattern_id=definition.pattern_id,
         pattern_version=ARTICLE_PATTERN_VERSION,
@@ -748,11 +852,7 @@ def select_blogger_article_pattern(
         html_hint=definition.html_hint,
         allowed_pattern_ids=tuple(allowed_ids),
         recent_pattern_ids=recent_ids,
-        selection_note=(
-            f"weighted_5_pattern_rotation;blocked_threepeat={blocked_threepeat or 'none'}"
-            if is_mystery_profile
-            else "default_rotation"
-        ),
+        selection_note=selection_note,
     )
 
 

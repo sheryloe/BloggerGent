@@ -28,6 +28,7 @@ FALLBACK_URL = (
     "https://api.dongriarchive.com/assets/media/cloudflare/dongri-archive/ilsanggwa-memo/2026/04/"
     "morning-5-minute-check-note-routine-2026/morning-5-minute-check-note-routine-2026.webp"
 )
+FALLBACK_OWNER_SLUG = "morning-5-minute-check-note-routine-2026"
 PUBLIC_ORIGIN = "https://dongriarchive.com"
 USER_AGENT = "BloggerGent-Cloudflare-LiveIntegrity/2026.04"
 REQUEST_TIMEOUT = 15
@@ -310,7 +311,10 @@ def audit_posts(db: Session) -> tuple[dict[str, Any], list[dict[str, Any]], dict
             or (post.image_health_status == "broken" and bool(verified_images))
             or post.live_image_count in {None, 0}
         )
-        fallback = post.thumbnail_url == FALLBACK_URL or FALLBACK_URL in verified_images
+        fallback = (
+            slug != FALLBACK_OWNER_SLUG
+            and (post.thumbnail_url == FALLBACK_URL or FALLBACK_URL in verified_images)
+        )
         actual_broken = bool(broken_images) or not verified_images
         text_garbage = text_garbage_score(" ".join([post.title or "", post.excerpt_text or ""])) >= 2 or text_garbage_score(strip_html(html_text)[:20000]) >= 4
         reasons = []

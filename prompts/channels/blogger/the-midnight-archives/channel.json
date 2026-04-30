@@ -1,8 +1,24 @@
-{
+﻿{
   "channel_id": "blogger:35",
   "channel_name": "The Midnight Archives",
   "provider": "blogger",
   "backup_directory": "channels/blogger/the-midnight-archives",
+  "paired_publish_group": "mystery-cloudflare-blogger",
+  "paired_publish_role": "blogger_english",
+  "paired_publish_counterpart": "cloudflare:dongriarchive::miseuteria-seutori",
+  "allowed_article_patterns": [
+    "case-timeline",
+    "evidence-breakdown",
+    "legend-context",
+    "scene-investigation",
+    "scp-dossier"
+  ],
+  "article_pattern_version": 4,
+  "image_slots": ["hero", "closing"],
+  "image_layout_policy": {
+    "hero": "3x4-panel-grid-collage",
+    "closing": "visual-summary"
+  },
   "backup_files": [
     "channels/blogger/the-midnight-archives/mystery_article_generation.md",
     "channels/blogger/the-midnight-archives/mystery_collage_prompt.md",
@@ -13,44 +29,39 @@
       "id": "41",
       "stage_type": "topic_discovery",
       "stage_label": "Topic Discovery",
-      "name": "Mystery Trend Discovery Agent",
+      "name": "Mystery Paired Topic Discovery Agent",
       "role_name": "Global Mystery Research Scout",
-      "objective": "Find high-demand global mystery topics from current search signals.",
+      "objective": "Find high-demand mystery topics that can publish as one Korean Cloudflare article and one English Blogger article.",
       "provider_hint": "codex_cli",
       "provider_model": "gpt-5.4",
       "is_enabled": true,
-      "is_required": false,
+      "is_required": true,
       "prompt_enabled": true,
       "sort_order": 10,
       "backup_relative_path": "channels/blogger/the-midnight-archives/mystery_topic_discovery.md",
       "text_generation_route": "codex_cli",
       "policy_config": {
-        "scope_lock": "blogger:mystery-blog-35-only",
-        "allowed_patterns": [
-          "case-timeline",
-          "evidence-breakdown",
-          "legend-context",
-          "scene-investigation",
-          "scp-dossier"
-        ],
-        "target_plain_text_range": "3200-4200",
-        "title_policy": "ctr_curiosity_not_raw_topic_echo"
+        "scope_lock": "paired:mystery-blogger-35-and-cloudflare-miseuteria-only",
+        "duplicate_gate": "hard_before_article_or_image_generation",
+        "allowed_patterns": ["case-timeline", "evidence-breakdown", "legend-context", "scene-investigation", "scp-dossier"],
+        "article_pattern_version": 4,
+        "paired_publish_required": true
       }
     },
     {
       "id": "42",
       "stage_type": "article_generation",
       "stage_label": "Writing Package",
-      "name": "Mystery Writing Package Agent",
+      "name": "English Mystery Writing Package Agent",
       "role_name": "Investigative documentary storyteller",
-      "objective": "Generate title, search description, tags, article body, FAQ, and one hero image prompt.",
+      "objective": "Generate CTR title, structured HTML body, FAQ, SEO keyword map, hero prompt, and closing visual prompt.",
       "provider_hint": "codex_cli",
       "provider_model": "gpt-5.4-mini-2026-03-17",
       "planner_provider_hint": "codex_cli",
       "planner_provider_model": "gpt-5.4",
       "pass_provider_hint": "codex_cli",
       "pass_provider_model": "gpt-5.4-mini-2026-03-17",
-      "structure_mode": "mystery_planner_pass4",
+      "structure_mode": "mystery_planner_pass4_paired",
       "is_enabled": true,
       "is_required": true,
       "prompt_enabled": true,
@@ -62,82 +73,63 @@
         "plain_text_target_min": 3200,
         "plain_text_target_max": 4200,
         "body_h1_allowed": false,
-        "h2_count_allowed": [
-          4,
-          5
-        ],
+        "h2_count_allowed": [4, 5],
         "faq_count": 3,
-        "hero_only": true,
+        "summary_box_required": true,
+        "comparison_table_required": true,
+        "seo_keyword_map_required": true,
+        "conclusion_max_sentences": 3,
+        "image_slots": ["hero", "closing"],
         "inline_images": false,
-        "allowed_patterns": [
-          "case-timeline",
-          "evidence-breakdown",
-          "legend-context",
-          "scene-investigation",
-          "scp-dossier"
-        ],
-        "success_basis": "live_verified"
+        "allowed_patterns": ["case-timeline", "evidence-breakdown", "legend-context", "scene-investigation", "scp-dossier"],
+        "article_pattern_version": 4,
+        "success_basis": "paired_live_verified"
       }
     },
     {
       "id": "43",
       "stage_type": "image_prompt_generation",
       "stage_label": "Image Prompt Refinement",
-      "name": "Mystery Image Prompt Refinement Agent",
-      "role_name": "Documentary cover prompt designer",
-      "objective": "Refine one documentary collage-style hero image prompt.",
+      "name": "Mystery Two-Image Prompt Refinement Agent",
+      "role_name": "Documentary image prompt designer",
+      "objective": "Refine exactly two image prompts: hero 3x4 collage and closing visual summary.",
       "provider_hint": "codex_cli",
       "provider_model": "gpt-5.4-mini-2026-03-17",
       "is_enabled": true,
-      "is_required": false,
+      "is_required": true,
       "prompt_enabled": true,
       "sort_order": 30,
       "backup_relative_path": "channels/blogger/the-midnight-archives/mystery_collage_prompt.md",
       "text_generation_route": "codex_cli",
-      "image_layout_policy": "5x4-panel-grid-collage",
       "policy_config": {
-        "hero_only": true,
+        "image_slots": ["hero", "closing"],
         "inline_images": false,
-        "layout": "5x4-panel-grid-collage",
-        "size": "1024x1024"
+        "hero_layout": "3x4-panel-grid-collage",
+        "closing_layout": "visual-summary",
+        "size": "1024x1024",
+        "output_format": "webp"
       }
-    },
-    {
-      "id": "44",
-      "stage_type": "related_posts",
-      "stage_label": "Related Posts",
-      "name": "Related Posts System Step",
-      "role_name": "System Related Posts Step",
-      "objective": "Link related mystery posts.",
-      "provider_hint": null,
-      "provider_model": null,
-      "is_enabled": false,
-      "is_required": false,
-      "prompt_enabled": false,
-      "sort_order": 40,
-      "backup_relative_path": null
     },
     {
       "id": "45",
       "stage_type": "image_generation",
       "stage_label": "Image Generation",
-      "name": "Image Generation System Step",
+      "name": "Two-Image Generation System Step",
       "role_name": "System Image Generation Step",
-      "objective": "Generate one main mystery cover image only.",
+      "objective": "Generate hero and closing WEBP images only.",
       "provider_hint": "openai_image",
       "provider_model": "gpt-image-1",
       "locked_image_size": "1024x1024",
-      "hero_only": true,
       "is_enabled": true,
       "is_required": true,
       "prompt_enabled": false,
       "sort_order": 50,
       "backup_relative_path": null,
-      "image_layout_policy": "5x4-panel-grid-collage",
       "policy_config": {
-        "hero_only": true,
+        "image_slots": ["hero", "closing"],
         "inline_images": false,
-        "layout": "5x4-panel-grid-collage",
+        "hero_layout": "3x4-panel-grid-collage",
+        "closing_layout": "visual-summary",
         "size": "1024x1024",
         "output_format": "webp"
       }
@@ -146,9 +138,9 @@
       "id": "46",
       "stage_type": "html_assembly",
       "stage_label": "HTML Assembly",
-      "name": "HTML Assembly System Step",
+      "name": "Two-Image HTML Assembly Step",
       "role_name": "System HTML Assembly Step",
-      "objective": "Assemble the article body and single hero image into the final publish format.",
+      "objective": "Assemble article body with hero image at top and closing image near the end.",
       "provider_hint": null,
       "provider_model": null,
       "is_enabled": true,
@@ -160,10 +152,10 @@
     {
       "id": "47",
       "stage_type": "publishing",
-      "stage_label": "Ready to Publish",
-      "name": "Publish Hold System Step",
+      "stage_label": "Paired Publish",
+      "name": "Paired Mystery Publish Gate",
       "role_name": "System Publishing Step",
-      "objective": "Prepare the final article for publishing and wait for the public publish action.",
+      "objective": "Publish only when the paired Cloudflare and Blogger outputs can both be live-verified.",
       "provider_hint": "blogger",
       "provider_model": "blogger-v3",
       "is_enabled": true,
@@ -172,24 +164,23 @@
       "sort_order": 70,
       "backup_relative_path": null,
       "policy_config": {
-        "success_basis": "live_verified",
-        "required_live_fields": [
-          "published_url",
-          "hero_image_url",
-          "live_verify_ok"
-        ],
-        "required_live_status_code": 200
+        "success_basis": "paired_live_verified",
+        "required_live_fields": ["published_url", "hero_image_url", "closing_image_url", "live_verify_ok"],
+        "required_live_status_code": 200,
+        "required_image_count": 2,
+        "db_finalize_after_live_verify_only": true
       }
     }
   ],
   "generation_gate_policy": {
     "duplicate_gate": "hard",
-    "scope": "blogger:mystery-blog-35-only",
+    "scope": "paired:mystery-blogger-35-and-cloudflare-miseuteria-only",
     "stop_before_article_generation": true,
     "stop_before_image_prompt_generation": true,
     "stop_before_image_generation": true,
     "no_db_write_for_blocked_topic": true,
     "no_publish_payload_for_blocked_topic": true,
-    "body_h1_policy": "article_body_must_not_emit_h1"
+    "body_h1_policy": "article_body_must_not_emit_h1",
+    "success_basis": "paired_live_verified"
   }
 }

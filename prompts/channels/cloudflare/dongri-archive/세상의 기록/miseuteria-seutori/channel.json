@@ -1,161 +1,168 @@
 {
-  "channel_id": "cloudflare:dongriarchive::?????-???",
-  "root_channel_id": "cloudflare:dongriarchive",
-  "channel_name": "Dongri Archive | ??? ?? | ????? ???",
-  "provider": "cloudflare",
-  "backup_directory": "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori",
-  "allowed_article_patterns": [
-    "case-timeline",
-    "evidence-breakdown",
-    "legend-context",
-    "scene-investigation",
-    "scp-dossier"
-  ],
-  "image_layout_policy": "5x4-panel-grid-collage",
-  "hero_only": true,
-  "inline_images": false,
-  "backup_files": [
-    "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori/topic_discovery.md",
-    "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori/article_generation.md",
-    "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori/html_assembly.md",
-    "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori/image_prompt_generation.md",
-    "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori/image_generation.md",
-    "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori/publishing.md",
-    "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori/related_posts.md"
-  ],
-  "steps": [
-    {
-      "id": "mysteria-story:topic_discovery",
-      "stage_type": "topic_discovery",
-      "stage_label": "?? ??",
-      "name": "????? ??? | ?? ??",
-      "role_name": "Cloudflare Mystery Research Agent",
-      "objective": "????? ??? ????? ?? ?? ?? ??? ????.",
-      "provider_hint": "codex_cli",
-      "provider_model": "gpt-5.4",
-      "is_enabled": true,
-      "is_required": false,
-      "prompt_enabled": true,
-      "sort_order": 10,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori/topic_discovery.md",
-      "text_generation_route": "codex_cli"
-    },
-    {
-      "id": "mysteria-story:article_generation",
-      "stage_type": "article_generation",
-      "stage_label": "?? ??",
-      "name": "????? ??? | ?? ??",
-      "role_name": "Cloudflare Mystery Documentary Writer",
-      "objective": "CTR? ??, ??, FAQ, ??? ??? ????? ?????.",
-      "provider_hint": "codex_cli",
-      "provider_model": "gpt-5.4-mini-2026-03-17",
-      "planner_provider_hint": "codex_cli",
-      "planner_provider_model": "gpt-5.4",
-      "pass_provider_hint": "codex_cli",
-      "pass_provider_model": "gpt-5.4-mini-2026-03-17",
-      "structure_mode": "mystery_planner_pass4",
-      "is_enabled": true,
-      "is_required": true,
-      "prompt_enabled": true,
-      "sort_order": 20,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori/article_generation.md",
-      "text_generation_route": "codex_cli",
-      "policy_config": {
-        "plain_text_min": 3000,
-        "plain_text_target_min": 3200,
-        "plain_text_target_max": 4200,
-        "body_h1_allowed": false,
-        "h2_count_allowed": [
-          4,
-          5
-        ],
-        "faq_count": 3,
-        "hero_only": true,
-        "inline_images": false,
-        "allowed_patterns": [
-          "case-timeline",
-          "evidence-breakdown",
-          "legend-context",
-          "scene-investigation",
-          "scp-dossier"
-        ],
-        "success_basis": "live_verified",
-        "source_blog_scope": "blog_id=35-only"
-      }
-    },
-    {
-      "id": "mysteria-story:image_prompt_generation",
-      "stage_type": "image_prompt_generation",
-      "stage_label": "??? ????",
-      "name": "????? ??? | ??? ????",
-      "role_name": "Cloudflare Mystery Image Prompt Optimizer",
-      "objective": "5x4 ?? ??? ??? ????? ??? ?????.",
-      "provider_hint": "codex_cli",
-      "provider_model": "gpt-5.4-mini-2026-03-17",
-      "is_enabled": true,
-      "is_required": false,
-      "prompt_enabled": true,
-      "sort_order": 30,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori/image_prompt_generation.md",
-      "text_generation_route": "codex_cli",
-      "image_layout_policy": "5x4-panel-grid-collage",
-      "policy_config": {
-        "hero_only": true,
-        "inline_images": false,
-        "layout": "5x4-panel-grid-collage",
-        "size": "1024x1024"
-      }
-    },
-    {
-      "id": "mysteria-story:image_generation",
-      "stage_type": "image_generation",
-      "stage_label": "??? ??",
-      "name": "????? ??? | ??? ??",
-      "role_name": "System Image Generation Step",
-      "objective": "?? ??? ???? ?????.",
-      "provider_hint": "openai_image",
-      "provider_model": "gpt-image-1",
-      "is_enabled": true,
-      "is_required": true,
-      "prompt_enabled": false,
-      "sort_order": 40,
-      "backup_relative_path": null,
-      "image_layout_policy": "5x4-panel-grid-collage",
-      "policy_config": {
-        "hero_only": true,
-        "inline_images": false,
-        "layout": "5x4-panel-grid-collage",
-        "size": "1024x1024",
-        "output_format": "webp"
-      }
-    },
-    {
-      "id": "mysteria-story:publishing",
-      "stage_type": "publishing",
-      "stage_label": "??",
-      "name": "????? ??? | ??",
-      "role_name": "Cloudflare Publishing Step",
-      "objective": "??? ??? ?? ??? ???? ?????.",
-      "provider_hint": "cloudflare",
-      "provider_model": "integration-api-v1",
-      "is_enabled": true,
-      "is_required": true,
-      "prompt_enabled": false,
-      "sort_order": 50,
-      "backup_relative_path": "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori/publishing.md",
-      "policy_config": {
-        "success_basis": "live_verified",
-        "required_live_fields": [
-          "published_url",
-          "hero_image_url",
-          "live_verify_ok"
-        ],
-        "required_live_status_code": 200,
-        "required_metadata": [
-          "article_pattern_id",
-          "article_pattern_version"
-        ]
-      }
-    }
-  ]
+    "channel_id":  "cloudflare:dongriarchive::?????-???",
+    "root_channel_id":  "cloudflare:dongriarchive",
+    "channel_name":  "Dongri Archive | ??? ?? | ????? ???",
+    "provider":  "cloudflare",
+    "backup_directory":  "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori",
+    "allowed_article_patterns":  [
+                                     "case-timeline",
+                                     "evidence-breakdown",
+                                     "legend-context",
+                                     "scene-investigation",
+                                     "scp-dossier"
+                                 ],
+    "image_layout_policy":  "hero_only_mysteria_archive",
+    "hero_only":  true,
+    "inline_images":  false,
+    "backup_files":  [
+                         "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori/topic_discovery.md",
+                         "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori/article_generation.md",
+                         "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori/html_assembly.md",
+                         "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori/image_prompt_generation.md",
+                         "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori/image_generation.md",
+                         "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori/publishing.md",
+                         "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori/related_posts.md"
+                     ],
+    "steps":  [
+                  {
+                      "id":  "mysteria-story:topic_discovery",
+                      "stage_type":  "topic_discovery",
+                      "stage_label":  "?? ??",
+                      "name":  "????? ??? | ?? ??",
+                      "role_name":  "Cloudflare Mystery Research Agent",
+                      "objective":  "????? ??? ????? ?? ?? ?? ??? ????.",
+                      "provider_hint":  "codex_cli",
+                      "provider_model":  "gpt-5.4",
+                      "is_enabled":  true,
+                      "is_required":  false,
+                      "prompt_enabled":  true,
+                      "sort_order":  10,
+                      "backup_relative_path":  "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori/topic_discovery.md",
+                      "text_generation_route":  "codex_cli"
+                  },
+                  {
+                      "id":  "mysteria-story:article_generation",
+                      "stage_type":  "article_generation",
+                      "stage_label":  "?? ??",
+                      "name":  "????? ??? | ?? ??",
+                      "role_name":  "Cloudflare Mystery Documentary Writer",
+                      "objective":  "CTR? ??, ??, FAQ, ??? ??? ????? ?????.",
+                      "provider_hint":  "codex_cli",
+                      "provider_model":  "gpt-5.4-mini-2026-03-17",
+                      "planner_provider_hint":  "codex_cli",
+                      "planner_provider_model":  "gpt-5.4",
+                      "pass_provider_hint":  "codex_cli",
+                      "pass_provider_model":  "gpt-5.4-mini-2026-03-17",
+                      "structure_mode":  "mystery_planner_pass4",
+                      "is_enabled":  true,
+                      "is_required":  true,
+                      "prompt_enabled":  true,
+                      "sort_order":  20,
+                      "backup_relative_path":  "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori/article_generation.md",
+                      "text_generation_route":  "codex_cli",
+                      "policy_config":  {
+                                            "plain_text_min":  3000,
+                                            "plain_text_target_min":  3200,
+                                            "plain_text_target_max":  4200,
+                                            "body_h1_allowed":  false,
+                                            "h2_count_allowed":  [
+                                                                     4,
+                                                                     5
+                                                                 ],
+                                            "faq_count":  3,
+                                            "hero_only":  true,
+                                            "inline_images":  false,
+                                            "allowed_patterns":  [
+                                                                     "case-timeline",
+                                                                     "evidence-breakdown",
+                                                                     "legend-context",
+                                                                     "scene-investigation",
+                                                                     "scp-dossier"
+                                                                 ],
+                                            "success_basis":  "live_verified",
+                                            "source_blog_scope":  "blog_id=35-only"
+                                        }
+                  },
+                  {
+                      "id":  "mysteria-story:image_prompt_generation",
+                      "stage_type":  "image_prompt_generation",
+                      "stage_label":  "??? ????",
+                      "name":  "????? ??? | ??? ????",
+                      "role_name":  "Cloudflare Mystery Image Prompt Optimizer",
+                      "objective":  "5x4 ?? ??? ??? ????? ??? ?????.",
+                      "provider_hint":  "codex_cli",
+                      "provider_model":  "gpt-5.4-mini-2026-03-17",
+                      "is_enabled":  true,
+                      "is_required":  false,
+                      "prompt_enabled":  true,
+                      "sort_order":  30,
+                      "backup_relative_path":  "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori/image_prompt_generation.md",
+                      "text_generation_route":  "codex_cli",
+                      "image_layout_policy":  "hero_only_mysteria_archive",
+                      "policy_config":  {
+                                            "hero_only":  true,
+                                            "inline_images":  false,
+                                            "layout":  "hero_only_mysteria_archive",
+                                            "size":  "1024x1024"
+                                        }
+                  },
+                  {
+                      "id":  "mysteria-story:image_generation",
+                      "stage_type":  "image_generation",
+                      "stage_label":  "??? ??",
+                      "name":  "????? ??? | ??? ??",
+                      "role_name":  "System Image Generation Step",
+                      "objective":  "?? ??? ???? ?????.",
+                      "provider_hint":  "openai_image",
+                      "provider_model":  "gpt-image-1",
+                      "is_enabled":  true,
+                      "is_required":  true,
+                      "prompt_enabled":  false,
+                      "sort_order":  40,
+                      "backup_relative_path":  null,
+                      "image_layout_policy":  "hero_only_mysteria_archive",
+                      "policy_config":  {
+                                            "hero_only":  true,
+                                            "inline_images":  false,
+                                            "layout":  "hero_only_mysteria_archive",
+                                            "size":  "1024x1024",
+                                            "output_format":  "webp"
+                                        }
+                  },
+                  {
+                      "id":  "mysteria-story:publishing",
+                      "stage_type":  "publishing",
+                      "stage_label":  "??",
+                      "name":  "????? ??? | ??",
+                      "role_name":  "Cloudflare Publishing Step",
+                      "objective":  "??? ??? ?? ??? ???? ?????.",
+                      "provider_hint":  "cloudflare",
+                      "provider_model":  "integration-api-v1",
+                      "is_enabled":  true,
+                      "is_required":  true,
+                      "prompt_enabled":  false,
+                      "sort_order":  50,
+                      "backup_relative_path":  "channels/cloudflare/dongri-archive/??? ??/miseuteria-seutori/publishing.md",
+                      "policy_config":  {
+                                            "success_basis":  "live_verified",
+                                            "required_live_fields":  [
+                                                                         "published_url",
+                                                                         "hero_image_url",
+                                                                         "live_verify_ok"
+                                                                     ],
+                                            "required_live_status_code":  200,
+                                            "required_metadata":  [
+                                                                      "article_pattern_id",
+                                                                      "article_pattern_version"
+                                                                  ]
+                                        }
+                  }
+              ],
+    "paired_publish_group":  "mystery-cloudflare-blogger",
+    "article_pattern_version":  4,
+    "image_asset_plan":  {
+                             "roles":  [
+                                           "hero"
+                                       ]
+                         }
 }

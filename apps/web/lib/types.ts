@@ -1938,3 +1938,224 @@ export interface CloudflarePerformancePageRead {
   summary: CloudflarePerformanceSummaryRead;
   items: CloudflarePerformanceRowRead[];
 }
+
+export interface QmsCoverageRead {
+  name: string;
+  label: string;
+  total: number;
+  covered: number;
+  missing: number;
+  coverage_percent: number;
+}
+
+export interface QmsCurrentKpiRead {
+  generated_at: string;
+  published_total: number;
+  seo_scored_count: number;
+  geo_scored_count: number;
+  ctr_scored_count: number;
+  lighthouse_scored_count: number;
+  indexed_count: number;
+  not_indexed_count: number;
+  unknown_index_count: number;
+  search_console_ctr_count: number;
+  quality_gate_pass_count: number;
+  rewrite_required_count: number;
+  manual_review_count: number;
+  publish_success_count: number;
+  status_breakdown: Record<string, number>;
+  coverage: QmsCoverageRead[];
+}
+
+export interface QmsDocumentRead {
+  id: number | null;
+  document_key: string;
+  title: string;
+  phase: string;
+  clause: string | null;
+  owner: string | null;
+  status: string;
+  version: string;
+  source_path: string | null;
+  runtime_path: string | null;
+  checksum_sha256: string | null;
+  last_reviewed_at: string | null;
+  next_review_due: string | null;
+}
+
+export interface QmsSummaryRead {
+  total: number;
+  open: number;
+  overdue: number;
+  closed: number;
+  by_status: Record<string, number>;
+}
+
+export interface QmsKpiSnapshotRead {
+  id: number;
+  snapshot_key: string;
+  period_start: string | null;
+  period_end: string | null;
+  published_total: number;
+  seo_scored_count: number;
+  geo_scored_count: number;
+  ctr_scored_count: number;
+  lighthouse_scored_count: number;
+  indexed_count: number;
+  not_indexed_count: number;
+  unknown_index_count: number;
+  search_console_ctr_count: number;
+  quality_gate_pass_count: number;
+  rewrite_required_count: number;
+  manual_review_count: number;
+  publish_success_count: number;
+  status_breakdown: Record<string, number>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface QmsRiskRead {
+  id: number;
+  risk_key: string;
+  title: string;
+  category: string;
+  phase: string;
+  source: string;
+  severity: number;
+  occurrence: number;
+  detection: number;
+  rpn: number;
+  status: string;
+  owner: string | null;
+  mitigation_plan: string | null;
+  due_date: string | null;
+  closed_at: string | null;
+}
+
+export interface QmsCapaRead {
+  id: number;
+  capa_key: string;
+  title: string;
+  source_type: string;
+  source_id: string | null;
+  problem_statement: string;
+  root_cause: string | null;
+  status: string;
+  priority: string;
+  owner: string | null;
+  due_date: string | null;
+  verified_at: string | null;
+  actions: Array<{ id: number; title: string; status: string; action_type: string; owner: string | null; due_date: string | null }>;
+}
+
+export interface QmsChangeRead {
+  id: number;
+  change_key: string;
+  title: string;
+  change_type: string;
+  risk_level: string;
+  status: string;
+  requester: string | null;
+  approver: string | null;
+  planned_at: string | null;
+  approved_at: string | null;
+  implemented_at: string | null;
+  released_at: string | null;
+}
+
+export interface QmsReleaseRead {
+  id: number;
+  release_key: string;
+  title: string;
+  status: string;
+  branch: string | null;
+  commit_hash: string | null;
+  pushed: boolean;
+  alembic_revision: string | null;
+  test_summary: string | null;
+  evidence_path: string | null;
+  released_at: string | null;
+}
+
+export interface QmsSupplierRead {
+  id: number;
+  supplier_key: string;
+  name: string;
+  supplier_type: string;
+  status: string;
+  risk_level: string;
+  service_scope: string | null;
+  data_access_level: string;
+  owner: string | null;
+  review_cycle_days: number;
+  last_reviewed_at: string | null;
+  next_review_due: string | null;
+}
+
+export interface QmsAuditRead {
+  id: number;
+  audit_key: string;
+  title: string;
+  scope: string | null;
+  status: string;
+  auditor: string | null;
+  scheduled_at: string | null;
+  completed_at: string | null;
+  findings: Array<{ id: number; title: string; severity: string; status: string; clause: string | null; owner: string | null; due_date: string | null }>;
+}
+
+export interface QmsManagementReviewRead {
+  id: number;
+  review_key: string;
+  title: string;
+  period_start: string | null;
+  period_end: string | null;
+  status: string;
+  chair: string | null;
+  scheduled_at: string | null;
+  completed_at: string | null;
+}
+
+export interface QmsEvidenceRead {
+  id: number;
+  evidence_key: string;
+  evidence_type: string;
+  title: string;
+  source_path: string | null;
+  runtime_path: string | null;
+  checksum_sha256: string | null;
+  file_size: number | null;
+  modified_at: string | null;
+  status: string;
+  captured_at: string | null;
+}
+
+export interface QmsRuntimeScanRead {
+  id: number;
+  scan_key: string;
+  status: string;
+  runtime_root: string;
+  scanned_paths: string[];
+  file_count: number;
+  evidence_count: number;
+  secrets_masked_count: number;
+  error_message: string | null;
+  started_at: string;
+  completed_at: string | null;
+}
+
+export interface QmsDashboardRead {
+  generated_at: string;
+  documents: QmsDocumentRead[];
+  current_kpi: QmsCurrentKpiRead;
+  latest_snapshot: QmsKpiSnapshotRead | null;
+  risk_summary: QmsSummaryRead;
+  capa_summary: QmsSummaryRead;
+  change_summary: QmsSummaryRead;
+  release_summary: QmsSummaryRead;
+  supplier_summary: QmsSummaryRead;
+  audit_summary: QmsSummaryRead;
+  review_summary: QmsSummaryRead;
+  runtime_summary: Record<string, any>;
+  recent_evidence: QmsEvidenceRead[];
+}

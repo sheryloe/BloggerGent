@@ -2,6 +2,7 @@
 
 import hashlib
 import hmac
+import html as html_lib
 import json
 import os
 import re
@@ -31,7 +32,11 @@ from app.services.cloudflare.cloudflare_channel_service import (
     list_cloudflare_categories,
     validate_no_adsense_tokens_in_body,
 )
-from app.services.cloudflare.cloudflare_sync_service import sync_cloudflare_posts
+from app.services.cloudflare.cloudflare_sync_service import (
+    collect_cloudflare_sync_score_rows,
+    summarize_cloudflare_sync_score_rows,
+    sync_cloudflare_posts,
+)
 from app.services.content.prompt_service import render_prompt_template
 from app.services.integrations.settings_service import get_settings_map
 from app.services.integrations.storage_service import (
@@ -291,7 +296,7 @@ def _package_path(*, base_dir: Path, category_slug: str, slug: str, remote_post_
 
 def _write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -735,8 +740,101 @@ def _strip_all_inline_images(content: str) -> str:
     return body.strip()
 
 
+def _html_fragment_to_publish_markdown(content: str) -> str:
+    body = _strip_leading_title_heading(str(content or "").strip())
+    if not body:
+        return ""
+
+    code_blocks: list[str] = []
+    image_blocks: list[str] = []
+
+    def _stash_code_block(match: re.Match[str]) -> str:
+        raw_code = match.group(1) or ""
+        raw_code = re.sub(r"(?is)<br\s*/?>", "\n", raw_code)
+        raw_code = HTML_TAG_RE.sub("", raw_code)
+        decoded = html_lib.unescape(raw_code).strip("\n")
+        token = f"\n\n@@CODE_BLOCK_{len(code_blocks)}@@\n\n"
+        code_blocks.append(f"```powershell\n{decoded}\n```")
+        return token
+
+    body = re.sub(r"(?is)<pre\b[^>]*>\s*<code\b[^>]*>(.*?)</code>\s*</pre>", _stash_code_block, body)
+    body = re.sub(r"(?is)<pre\b[^>]*>(.*?)</pre>", _stash_code_block, body)
+
+    def _image_to_markdown(match: re.Match[str]) -> str:
+        tag = match.group(0)
+        src_match = re.search(r"""(?is)\bsrc\s*=\s*(['"])(.*?)\1""", tag)
+        alt_match = re.search(r"""(?is)\balt\s*=\s*(['"])(.*?)\1""", tag)
+        src = html_lib.unescape(_normalize_space(src_match.group(2) if src_match else ""))
+        alt = html_lib.unescape(_normalize_space(alt_match.group(2) if alt_match else ""))
+        if not src:
+            return ""
+        token = f"\n\n@@IMAGE_BLOCK_{len(image_blocks)}@@\n\n"
+        image_blocks.append(_render_inline_image_html(url=src, alt=alt))
+        return token
+
+    body = re.sub(r"(?is)<p>\s*(<img\b[^>]*>)\s*</p>", lambda match: _image_to_markdown(match), body)
+    body = re.sub(r"(?is)<img\b[^>]*>", _image_to_markdown, body)
+
+    body = re.sub(
+        r"(?is)<h2\b[^>]*>(.*?)</h2>",
+        lambda match: "\n\n## " + _normalize_space(HTML_TAG_RE.sub(" ", match.group(1))) + "\n\n",
+        body,
+    )
+    body = re.sub(
+        r"(?is)<h3\b[^>]*>(.*?)</h3>",
+        lambda match: "\n\n### " + _normalize_space(HTML_TAG_RE.sub(" ", match.group(1))) + "\n\n",
+        body,
+    )
+    body = re.sub(
+        r"(?is)<li\b[^>]*>(.*?)</li>",
+        lambda match: "\n- " + _normalize_space(HTML_TAG_RE.sub(" ", match.group(1))),
+        body,
+    )
+    body = re.sub(r"(?is)</?(?:ul|ol)\b[^>]*>", "\n", body)
+    body = re.sub(r"(?is)<p\b[^>]*>(.*?)</p>", lambda match: "\n\n" + _normalize_space(match.group(1)) + "\n\n", body)
+    body = re.sub(r"(?is)<br\s*/?>", "\n", body)
+    body = re.sub(r"(?is)</?(?:section|aside|div|tbody|thead)\b[^>]*>", "\n", body)
+    body = re.sub(r"(?is)<tr\b[^>]*>", "\n", body)
+    body = re.sub(r"(?is)</tr>", "\n", body)
+    body = re.sub(r"(?is)</t[hd]>\s*<t[hd]\b[^>]*>", " | ", body)
+    body = re.sub(r"(?is)</?t[hd]\b[^>]*>", "", body)
+    body = re.sub(r"(?is)<strong\b[^>]*>(.*?)</strong>", r"**\1**", body)
+    body = re.sub(r"(?is)<b\b[^>]*>(.*?)</b>", r"**\1**", body)
+    body = re.sub(r"(?is)<em\b[^>]*>(.*?)</em>", r"*\1*", body)
+    body = re.sub(r"(?is)<i\b[^>]*>(.*?)</i>", r"*\1*", body)
+    body = re.sub(r"(?is)<code\b[^>]*>(.*?)</code>", lambda match: "`" + _normalize_space(HTML_TAG_RE.sub("", match.group(1))) + "`", body)
+    body = HTML_TAG_RE.sub(" ", body)
+    body = html_lib.unescape(body)
+    for index, code_block in enumerate(code_blocks):
+        body = body.replace(f"@@CODE_BLOCK_{index}@@", code_block)
+    for index, image_block in enumerate(image_blocks):
+        body = body.replace(f"@@IMAGE_BLOCK_{index}@@", image_block)
+    lines = [_normalize_space(line) if not line.startswith("```") else line for line in body.splitlines()]
+    cleaned = "\n".join(lines)
+    cleaned = re.sub(r"[ \t]+\n", "\n", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
 def _render_inline_image_html(*, url: str, alt: str) -> str:
-    return f'<p><img src="{_normalize_space(url)}" alt="{_normalize_space(alt)}" /></p>'
+    return (
+        f'<img src="{html_lib.escape(_normalize_space(url), quote=True)}" '
+        f'alt="{html_lib.escape(_normalize_space(alt), quote=True)}" '
+        'width="100%" loading="lazy" decoding="async" />'
+    )
+
+
+def _replace_inline_1_slot_with_image(content_body: str, *, inline_url: str, inline_alt: str) -> str:
+    body = str(content_body or "")
+    if not body or not _normalize_space(inline_url):
+        return body
+    image_block = _render_inline_image_html(url=inline_url, alt=inline_alt)
+    return re.sub(
+        r'(?is)<div\b[^>]*\bdata-cf-image-slot\s*=\s*["\']inline_1["\'][^>]*>\s*</div>',
+        image_block,
+        body,
+        count=1,
+    )
 
 
 def _insert_inline_image_before_faq_or_closing(content_body: str, *, inline_url: str, inline_alt: str) -> str:
@@ -807,8 +905,17 @@ def _canonical_content_body(payload: dict[str, Any]) -> str:
     content_body = str(payload.get("content_body") or "").strip()
     if content_body:
         normalized = _strip_leading_title_heading(content_body)
-        normalized = _strip_all_inline_images(normalized)
-        if not is_mysteria:
+        if category_slug == "개발과-프로그래밍":
+            normalized = _replace_inline_1_slot_with_image(
+                normalized,
+                inline_url=inline_url,
+                inline_alt=inline_alt,
+            )
+        existing_inline_image_count = _inline_image_count(normalized)
+        preserve_dev_inline_images = category_slug == "개발과-프로그래밍" and existing_inline_image_count in {1, 2}
+        if not preserve_dev_inline_images:
+            normalized = _strip_all_inline_images(normalized)
+        if not is_mysteria and not preserve_dev_inline_images:
             normalized = _insert_inline_image_before_faq_or_closing(
                 normalized,
                 inline_url=inline_url,
@@ -2160,6 +2267,23 @@ def _contains_banned_token(*parts: Any) -> list[str]:
     return [token for token in PUBLIC_BANNED_TOKENS if token.casefold() in combined]
 
 
+def _has_suspicious_mojibake_text(*parts: Any) -> bool:
+    combined = "\n".join(_normalize_space(part) for part in parts if _normalize_space(part))
+    combined = re.sub(r"https?://\S+", " ", combined, flags=re.IGNORECASE)
+    if "\ufffd" in combined:
+        return True
+    if len(re.findall(r"\?{2,}", combined)) >= 2:
+        return True
+    suspicious_lines = [
+        line.strip()
+        for line in combined.splitlines()
+        if line.strip() and re.search(r"(?:\?{2,}|\*\*\?\?\*\*)", line)
+    ]
+    if len(suspicious_lines) >= 2:
+        return True
+    return any(re.search(r"^\s*(?:\*\*)?\?{2,}(?:\*\*)?\s*$", line) for line in suspicious_lines)
+
+
 def _matches_live_html_contract(content_body: str) -> bool:
     body = str(content_body or "").strip()
     if not body.startswith("# "):
@@ -2228,6 +2352,9 @@ def _validate_codex_write_package(
         if not _normalize_space(payload.get(key)):
             errors.append(f"missing:{key}")
     category_slug = _normalize_space(payload.get("category_slug"))
+    target_slug = _normalize_space(payload.get("target_slug") or payload.get("slug"))
+    if re.search(r"-\d{8,}$", target_slug):
+        errors.append("random_numeric_slug_suffix")
     is_mysteria = _is_mysteria_category_slug(category_slug)
     title = _normalize_space(payload.get("title"))
     content_body = _canonical_content_body(payload)
@@ -2240,13 +2367,21 @@ def _validate_codex_write_package(
     image_uniqueness = _normalize_image_uniqueness(payload)
     backup_resolution = _normalize_backup_image_resolution(payload)
     plain_length = _body_char_length(content_body)
-    max_length = 4500 if category_slug == "나스닥의-흐름" else 4000
-    if plain_length < 3000 or plain_length > max_length:
+    min_length = 5000 if category_slug == "개발과-프로그래밍" else 3000
+    max_length = 7500 if category_slug == "개발과-프로그래밍" else (4500 if category_slug == "나스닥의-흐름" else 4000)
+    if plain_length < min_length or plain_length > max_length:
         errors.append(f"body_length:{plain_length}")
     if not _matches_live_html_contract(content_body):
         errors.append("content_body_not_live_html_contract")
     if not validate_no_adsense_tokens_in_body(content_body):
         errors.append("adsense_body_token_present")
+    if _has_suspicious_mojibake_text(
+        payload.get("title"),
+        payload.get("excerpt"),
+        payload.get("meta_description"),
+        content_body,
+    ):
+        errors.append("mojibake_text_detected")
     headings = _extract_headings(content_body)
     if not headings or headings[-1] != "마무리 기록":
         errors.append("closing_record_missing")
@@ -2276,8 +2411,11 @@ def _validate_codex_write_package(
             errors.append("article_pattern_id_missing")
         if not payload.get("article_pattern_version"):
             errors.append("article_pattern_version_missing")
-    elif _inline_image_count(content_body) != 1:
-        errors.append("inline_image_count_invalid")
+    else:
+        content_image_count = _inline_image_count(content_body)
+        expected_image_count = 2 if category_slug == "개발과-프로그래밍" else 1
+        if content_image_count != expected_image_count:
+            errors.append("inline_image_count_invalid")
     if not _normalize_space(cover_image.get("url")):
         errors.append("cover_image_missing")
     if not is_mysteria and not _normalize_space(inline_image.get("url")):
@@ -2370,10 +2508,14 @@ def _build_publish_payload(payload: dict[str, Any], *, category_meta: dict[str, 
     seo_title = _normalize_space(payload.get("seo_title") or title)
     category_slug_value = _normalize_space(payload.get("category_slug"))
     body = _canonical_content_body(payload)
+    publish_body = _strip_leading_title_heading(body)
+    publish_body = re.sub(r"(?i)\s+style\s*=\s*(['\"]).*?\1", "", publish_body)
+    publish_body = _html_fragment_to_publish_markdown(publish_body)
+    publish_body = _prepare_markdown_body(title, publish_body)
     cover_image = payload.get("cover_image") if isinstance(payload.get("cover_image"), dict) else {}
     update_payload: dict[str, Any] = {
         "title": title,
-        "content": body,
+        "content": publish_body,
         "excerpt": excerpt,
         "seoTitle": seo_title,
         "seoDescription": meta_description,
@@ -2430,23 +2572,66 @@ def _publish_with_slug_strategy(db: Session, *, payload: dict[str, Any], update_
     original_slug = _normalize_space(payload.get("original_slug") or payload.get("slug"))
     target_slug = _normalize_space(payload.get("target_slug") or original_slug)
     old_url = _normalize_space(payload.get("published_url"))
-    category_slug = _normalize_space(payload.get("category_slug"))
     if not target_slug or target_slug == original_slug:
         updated_post = _update_existing_post(db, remote_post_id=remote_post_id, update_payload=update_payload)
         return {"publish_mode": "put_existing", "remote_post_id": remote_post_id, "original_slug": original_slug, "target_slug": target_slug or original_slug, "old_url": old_url, "new_url": _normalize_space(updated_post.get("publicUrl") or old_url), "response": updated_post}
     updated_post = _update_existing_post(db, remote_post_id=remote_post_id, update_payload=update_payload)
     if _slug_matches_response(updated_post, target_slug):
         return {"publish_mode": "put_with_slug", "remote_post_id": remote_post_id, "original_slug": original_slug, "target_slug": target_slug, "old_url": old_url, "new_url": _normalize_space(updated_post.get("publicUrl") or old_url), "response": updated_post}
-    create_payload = dict(update_payload)
-    create_payload.pop("categoryId", None)
-    if category_slug:
-        create_payload["categorySlug"] = category_slug
-    create_response = _integration_request(db, method="POST", path="/api/integrations/posts", json_payload=create_payload, timeout=120.0)
-    created_post = _integration_data_or_raise(create_response)
-    if not isinstance(created_post, dict):
-        raise ValueError("Cloudflare create payload invalid during slug fallback")
-    delete_result = _delete_post_best_effort(db, remote_post_id=remote_post_id)
-    return {"publish_mode": "create_delete_fallback", "remote_post_id": _normalize_space(created_post.get("id") or remote_post_id), "original_slug": original_slug, "target_slug": target_slug, "old_url": old_url, "new_url": _normalize_space(created_post.get("publicUrl") or created_post.get("url")), "response": created_post, "delete_result": delete_result}
+    response_slug = _normalize_space(updated_post.get("slug"))
+    response_url = _normalize_space(updated_post.get("publicUrl") or updated_post.get("url") or old_url)
+    raise RuntimeError(
+        "slug_update_failed:"
+        f"remote_post_id={remote_post_id};"
+        f"target_slug={target_slug};"
+        f"response_slug={response_slug};"
+        f"public_url={response_url}"
+    )
+
+
+def _post_publish_live_contract_errors(
+    db: Session,
+    *,
+    items: Sequence[dict[str, Any]],
+) -> list[str]:
+    published_items = [
+        item for item in items
+        if _normalize_space(item.get("status")) == CODEX_WRITE_STATUS_PUBLISHED
+        and _normalize_space(item.get("remote_post_id"))
+    ]
+    if not published_items:
+        return []
+    remote_ids = [_normalize_space(item.get("remote_post_id")) for item in published_items]
+    rows = (
+        db.execute(
+            select(SyncedCloudflarePost).where(SyncedCloudflarePost.remote_post_id.in_(remote_ids))
+        )
+        .scalars()
+        .all()
+    )
+    rows_by_remote_id = {_normalize_space(row.remote_post_id): row for row in rows}
+    errors: list[str] = []
+    for item in published_items:
+        remote_id = _normalize_space(item.get("remote_post_id"))
+        row = rows_by_remote_id.get(remote_id)
+        expected_slug = _normalize_space(item.get("target_slug"))
+        if row is None:
+            errors.append(f"synced_row_missing:{remote_id}")
+            continue
+        actual_slug = _normalize_space(row.slug)
+        if expected_slug and actual_slug != expected_slug:
+            errors.append(f"slug_mismatch:{remote_id}:{actual_slug}!={expected_slug}")
+        category_slug = _normalize_space(row.canonical_category_slug or row.category_slug or item.get("category_slug"))
+        if category_slug == "개발과-프로그래밍":
+            live_image_count = row.live_image_count
+            live_image_issue = _normalize_space(row.live_image_issue)
+            if live_image_count is None:
+                errors.append(f"live_image_count_missing:{remote_id}")
+            elif live_image_count < 2:
+                errors.append(f"live_image_count_lt_2:{remote_id}:{live_image_count}")
+            if live_image_issue:
+                errors.append(f"live_image_issue:{remote_id}:{live_image_issue}")
+    return errors
 
 
 def publish_codex_write_packages(db: Session, *, category_slugs: Sequence[str] | None = None, slug: str | None = None, path: Path | None = None, limit: int | None = None, dry_run: bool = False, sync_after: bool = True, base_dir: Path | None = None) -> dict[str, Any]:
@@ -2537,7 +2722,32 @@ def publish_codex_write_packages(db: Session, *, category_slugs: Sequence[str] |
             _reserve_payload_images(payload, used_urls=batch_used_urls, used_asset_keys=batch_used_asset_keys)
             items.append({"status": CODEX_WRITE_STATUS_READY, "path": str(package_path), "remote_post_id": remote_post_id, "original_slug": original_slug, "target_slug": target_slug, "old_url": _normalize_space(payload.get("published_url")), "new_url": _normalize_space(payload.get("published_url")), "publish_mode": "dry_run", "validation_errors": [], "category_slug": category_slug_value})
             continue
-        publish_result = _publish_with_slug_strategy(db, payload=payload, update_payload=update_payload)
+        try:
+            publish_result = _publish_with_slug_strategy(db, payload=payload, update_payload=update_payload)
+        except Exception as exc:  # noqa: BLE001
+            failed_count += 1
+            error_message = str(exc)
+            publish_state["status"] = CODEX_WRITE_STATUS_FAILED
+            publish_state["last_error"] = error_message
+            publish_state["publish_mode"] = None
+            _write_json(package_path, payload)
+            items.append(
+                {
+                    "status": CODEX_WRITE_STATUS_FAILED,
+                    "path": str(package_path),
+                    "remote_post_id": remote_post_id,
+                    "original_slug": original_slug,
+                    "target_slug": target_slug,
+                    "old_url": _normalize_space(payload.get("published_url")),
+                    "new_url": _normalize_space(payload.get("published_url")),
+                    "public_url": _normalize_space(payload.get("published_url")),
+                    "publish_mode": None,
+                    "validation_errors": [],
+                    "category_slug": category_slug_value,
+                    "sync_error": error_message,
+                }
+            )
+            continue
         touched = True
         updated_count += 1
         publish_state["status"] = CODEX_WRITE_STATUS_PUBLISHED
@@ -2551,11 +2761,57 @@ def publish_codex_write_packages(db: Session, *, category_slugs: Sequence[str] |
         _reserve_payload_images(payload, used_urls=batch_used_urls, used_asset_keys=batch_used_asset_keys)
         items.append({"status": CODEX_WRITE_STATUS_PUBLISHED, "path": str(package_path), "remote_post_id": payload["remote_post_id"], "original_slug": original_slug, "target_slug": target_slug, "old_url": _normalize_space(publish_result["old_url"]), "new_url": payload["published_url"], "publish_mode": publish_result["publish_mode"], "validation_errors": [], "category_slug": category_slug_value})
     sync_result: dict[str, Any] | None = None
+    db_sync_scores: list[dict[str, Any]] = []
+    post_publish_sync: dict[str, Any] = {
+        "provider": "cloudflare",
+        "status": "skipped",
+        "reason": "no_updated_posts",
+        "synced_count": 0,
+        "score_summary": summarize_cloudflare_sync_score_rows([]),
+        "score_rows": [],
+    }
+    post_publish_sync_failed = False
+    post_publish_sync_error: str | None = None
     if touched and sync_after and not dry_run:
         try:
             sync_result = sync_cloudflare_posts(db, include_non_published=True)
+            if str(sync_result.get("status") or "").strip().lower() == "fetch_failed":
+                raise RuntimeError(str(sync_result.get("error") or "cloudflare_sync_fetch_failed"))
+            updated_remote_ids = [
+                str(item.get("remote_post_id") or "").strip()
+                for item in items
+                if str(item.get("status") or "").strip() == CODEX_WRITE_STATUS_PUBLISHED
+                and str(item.get("remote_post_id") or "").strip()
+            ]
+            db_sync_scores = collect_cloudflare_sync_score_rows(db, remote_post_ids=updated_remote_ids)
+            if updated_remote_ids and not db_sync_scores:
+                raise RuntimeError("post_publish_score_rows_empty")
+            live_contract_errors = _post_publish_live_contract_errors(db, items=items)
+            if live_contract_errors:
+                raise RuntimeError("post_publish_live_contract_failed:" + ";".join(live_contract_errors))
+            score_summary = summarize_cloudflare_sync_score_rows(db_sync_scores)
+            sync_result["score_rows"] = db_sync_scores
+            sync_result["score_summary"] = score_summary
+            post_publish_sync = {
+                "provider": "cloudflare",
+                "status": "ok",
+                "synced_count": len(db_sync_scores),
+                "score_summary": score_summary,
+                "score_rows": db_sync_scores,
+            }
         except Exception as exc:
+            post_publish_sync_failed = True
+            post_publish_sync_error = str(exc)
             sync_result = {"status": "failed", "error": str(exc)}
+            post_publish_sync = {
+                "provider": "cloudflare",
+                "status": "failed",
+                "synced_count": 0,
+                "sync_error": str(exc),
+                "score_summary": summarize_cloudflare_sync_score_rows([]),
+                "score_rows": [],
+            }
     report_path = _report_path(root, "publish")
-    _write_json(report_path, {"generated_at": _utc_now_iso(), "dry_run": bool(dry_run), "category_slugs": list(category_slugs or []), "slug": _normalize_space(slug), "updated_count": updated_count, "failed_count": failed_count, "skipped_count": skipped_count, "sync_result": sync_result, "items": items})
-    return {"status": "ok" if failed_count == 0 else ("partial" if updated_count > 0 else "failed"), "root": str(root), "updated_count": updated_count, "failed_count": failed_count, "skipped_count": skipped_count, "report_path": str(report_path), "sync_result": sync_result, "items": items}
+    status_value = "ok" if failed_count == 0 and not post_publish_sync_failed else ("partial" if updated_count > 0 else "failed")
+    _write_json(report_path, {"generated_at": _utc_now_iso(), "dry_run": bool(dry_run), "category_slugs": list(category_slugs or []), "slug": _normalize_space(slug), "updated_count": updated_count, "failed_count": failed_count, "skipped_count": skipped_count, "sync_result": sync_result, "post_publish_sync": post_publish_sync, "sync_error": post_publish_sync_error, "db_sync_scores": db_sync_scores, "items": items})
+    return {"status": status_value, "root": str(root), "updated_count": updated_count, "failed_count": failed_count, "skipped_count": skipped_count, "report_path": str(report_path), "sync_result": sync_result, "post_publish_sync": post_publish_sync, "sync_error": post_publish_sync_error, "db_sync_scores": db_sync_scores, "items": items}

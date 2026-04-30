@@ -7,6 +7,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from statistics import mean
+from typing import Any
 from sqlalchemy import and_, delete, func, select, tuple_
 from sqlalchemy.orm import Session, selectinload
 
@@ -543,6 +544,8 @@ def _build_merged_fact_context(db: Session, rows: list[MergedAnalyticsFactRow]) 
         if url_identity:
             live_urls_by_blog[post.blog_id].add(url_identity)
             synced_post_by_url.setdefault((post.blog_id, url_identity), post)
+        for key in _fact_lookup_keys(blog_id=post.blog_id, url=post.url):
+            synced_post_by_url.setdefault(key, post)
 
     pairs = {
         key
@@ -694,6 +697,115 @@ def _serialize_fact(
     )
 
 
+def summarize_publish_score_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    def _avg(field_name: str) -> float | None:
+        values = [
+            float(row[field_name])
+            for row in rows
+            if row.get(field_name) is not None
+        ]
+        return round(sum(values) / len(values), 2) if values else None
+
+    return {
+        "count": len(rows),
+        "seo_avg": _avg("seo_score"),
+        "geo_avg": _avg("geo_score"),
+        "ctr_avg": _avg("ctr_score"),
+        "lighthouse_avg": _avg("lighthouse_score"),
+    }
+
+
+def collect_blogger_sync_score_rows(
+    db: Session,
+    *,
+    blog_id: int,
+    remote_post_ids: list[str] | tuple[str, ...] | set[str] | None = None,
+    article_ids: list[int] | tuple[int, ...] | set[int] | None = None,
+    urls: list[str] | tuple[str, ...] | set[str] | None = None,
+) -> list[dict[str, Any]]:
+    remote_id_filter = {str(item or "").strip() for item in (remote_post_ids or []) if str(item or "").strip()}
+    article_id_filter: set[int] = set()
+    for item in article_ids or []:
+        if item is None or not str(item).strip():
+            continue
+        try:
+            article_id_filter.add(int(item))
+        except (TypeError, ValueError):
+            continue
+    url_filter = {str(item or "").strip() for item in (urls or []) if str(item or "").strip()}
+    url_identity_filter = {
+        identity
+        for identity in (_fact_url_identity_key(item) for item in url_filter)
+        if identity
+    }
+    has_filter = bool(remote_id_filter or article_id_filter or url_filter or url_identity_filter)
+
+    facts = db.execute(
+        select(AnalyticsArticleFact)
+        .where(AnalyticsArticleFact.blog_id == blog_id)
+        .order_by(
+            AnalyticsArticleFact.published_at.desc().nullslast(),
+            AnalyticsArticleFact.updated_at.desc().nullslast(),
+            AnalyticsArticleFact.id.desc(),
+        )
+    ).scalars().all()
+    merged_rows = _sort_fact_rows(_merge_fact_rows(facts), sort="published_at", dir="desc")
+    context = _build_merged_fact_context(db, merged_rows)
+
+    rows: list[dict[str, Any]] = []
+    for row in merged_rows:
+        fact = row.fact
+        synced_post = _resolve_row_synced_post(row, context)
+        remote_post_id = str(getattr(synced_post, "remote_post_id", "") or "").strip()
+        article_ids_for_row = {
+            int(source.article_id)
+            for source in row.source_facts
+            if source.article_id is not None
+        }
+        row_url = (
+            str(fact.actual_url or "").strip()
+            or str(row.canonical_url or "").strip()
+            or str(getattr(synced_post, "url", "") or "").strip()
+        )
+        row_url_identity = _fact_url_identity_key(row_url)
+
+        if has_filter:
+            matched = False
+            if remote_id_filter and remote_post_id in remote_id_filter:
+                matched = True
+            if article_id_filter and article_ids_for_row.intersection(article_id_filter):
+                matched = True
+            if url_filter and row_url in url_filter:
+                matched = True
+            if url_identity_filter and row_url_identity in url_identity_filter:
+                matched = True
+            if not matched:
+                continue
+
+        synced_at = getattr(synced_post, "synced_at", None) or getattr(fact, "updated_at", None) or getattr(fact, "created_at", None)
+        rows.append(
+            {
+                "provider": "blogger",
+                "remote_post_id": remote_post_id or None,
+                "url": row_url or None,
+                "title": fact.title,
+                "seo_score": _coerce_score(fact.seo_score),
+                "geo_score": _coerce_score(fact.geo_score),
+                "ctr_score": _resolve_row_ctr_score(row, context),
+                "lighthouse_score": _coerce_score(fact.lighthouse_score),
+                "lighthouse_accessibility_score": _coerce_score(fact.lighthouse_accessibility_score),
+                "lighthouse_best_practices_score": _coerce_score(fact.lighthouse_best_practices_score),
+                "lighthouse_seo_score": _coerce_score(fact.lighthouse_seo_score),
+                "article_id": fact.article_id,
+                "synced_post_id": fact.synced_post_id,
+                "status": _normalize_fact_status(fact.status) or fact.status,
+                "source_type": fact.source_type,
+                "synced_at": synced_at.isoformat() if synced_at else None,
+            }
+        )
+    return rows
+
+
 def _serialize_theme_stat(stat: AnalyticsThemeMonthlyStat) -> AnalyticsThemeMonthlyStatRead:
     return AnalyticsThemeMonthlyStatRead(
         id=stat.id,
@@ -843,6 +955,8 @@ def _apply_article_fact_payload(fact: AnalyticsArticleFact, article: Article, mo
     fact.category = article.editorial_category_label or "Unassigned"
     fact.seo_score = _coerce_score(article.quality_seo_score) if article.quality_seo_score is not None else fact.seo_score
     fact.geo_score = _coerce_score(article.quality_geo_score) if article.quality_geo_score is not None else fact.geo_score
+    if hasattr(fact, "ctr_score") and hasattr(article, "quality_ctr_score") and article.quality_ctr_score is not None:
+        fact.ctr_score = _coerce_score(article.quality_ctr_score)
     fact.lighthouse_score = (
         _coerce_score(article.quality_lighthouse_score) if article.quality_lighthouse_score is not None else fact.lighthouse_score
     )

@@ -21,7 +21,7 @@ DEFAULT_VERIFY_URLS = [
 
 THEME_XML = r'''<?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE html>
-<html b:css='false' b:defaultwidgetversion='2' b:layoutsVersion='3' b:responsive='true' b:templateUrl='custom' b:templateVersion='1.0.1' expr:dir='data:blog.languageDirection' xmlns='http://www.w3.org/1999/xhtml' xmlns:b='http://www.google.com/2005/gml/b' xmlns:data='http://www.google.com/2005/gml/data' xmlns:expr='http://www.google.com/2005/gml/expr'>
+<html b:css='false' b:defaultwidgetversion='2' b:layoutsVersion='3' b:responsive='true' b:templateUrl='custom' b:templateVersion='1.0.1' expr:dir='data:blog.languageDirection' lang='en' xml:lang='en' xmlns='http://www.w3.org/1999/xhtml' xmlns:b='http://www.google.com/2005/gml/b' xmlns:data='http://www.google.com/2005/gml/data' xmlns:expr='http://www.google.com/2005/gml/expr'>
 <head>
   <!-- Google tag (gtag.js) -->
   <script async='async' src='https://www.googletagmanager.com/gtag/js?id=G-5T125DHEDY'/>
@@ -37,26 +37,142 @@ THEME_XML = r'''<?xml version="1.0" encoding="UTF-8" ?>
   <meta content='width=device-width, initial-scale=1.0' name='viewport'/>
   <title><data:view.title.escaped/></title>
   <b:include data='blog' name='all-head-content'/>
+  <b:if cond='data:view.description'>
+    <meta expr:content='data:view.description.escaped' name='description'/>
+  <b:elseif cond='data:blog.metaDescription'/>
+    <meta expr:content='data:blog.metaDescription.escaped' name='description'/>
+  <b:else/>
+    <meta content='Practical Korea travel routes, local timing, culture, food, and itinerary decisions from Donggri Korea.' name='description'/>
+  </b:if>
   <meta content='0e57cc63efae83ad8bebac4098cc6a19ec56aad7' name='naver-site-verification'/>
 
   <link href='https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&amp;family=Be+Vietnam+Pro:wght@300;400;500;600&amp;display=swap' rel='stylesheet'/>
-  <script src='https://cdn.tailwindcss.com?plugins=forms,container-queries'/>
-  <script>
-  //<![CDATA[
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: { "primary": "#1a1a1a", "accent": "#fe932c", "light-brown": "#f7f2ed" },
-          fontFamily: { "headline": ["Plus Jakarta Sans"], "body": ["Be Vietnam Pro"] }
-        }
-      }
-    };
-  //]]>
-  </script>
 
   <b:skin><![CDATA[
-    body { font-family: 'Be Vietnam Pro', sans-serif; background: #f8f9ff; margin:0; padding:0; }
+    :root { --primary:#1a1a1a; --accent:#fe932c; --surface:#ffffff; --muted:#64748b; --border:#e2e8f0; --light-brown:#f7f2ed; }
+    * { box-sizing: border-box; }
+    body { font-family: 'Be Vietnam Pro', sans-serif; background: #f8f9ff; margin:0; padding:0; color:#0f172a; }
+    a { color: inherit; }
+    img { max-width: 100%; display: block; }
+    nav { position: fixed; top: 0; left: 0; width: 100%; z-index: 50; background: rgba(255,255,255,0.86); backdrop-filter: blur(12px); box-shadow: 0 1px 4px rgba(15,23,42,0.08); border-bottom: 1px solid #f1f5f9; }
+    nav > div { display: flex; justify-content: space-between; align-items: center; width: 100%; max-width: 80rem; margin-left: auto; margin-right: auto; padding: 1rem 2rem; }
+    nav a { text-decoration: none; }
+    nav > div > a { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 1.5rem; line-height: 2rem; font-weight: 900; letter-spacing: -0.04em; color: var(--primary); }
+    nav .nav-link { font-family: 'Plus Jakarta Sans', sans-serif; font-size: .875rem; line-height: 1.25rem; font-weight: 600; color: #475569; transition: color .18s ease; }
+    nav .nav-link:hover { color: var(--primary); }
+    main { padding-top: 6rem; max-width: 80rem; margin-left: auto; margin-right: auto; padding-left: 2rem; padding-right: 2rem; padding-bottom: 5rem; }
+    footer { width: 100%; padding: 4rem 0; background: #fff; border-top: 1px solid var(--border); margin-top: 5rem; text-align: center; }
+    footer > div { max-width: 80rem; margin-left: auto; margin-right: auto; padding-left: 2rem; padding-right: 2rem; }
+    footer a { text-decoration: none; }
+    .font-headline { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .font-body { font-family: 'Be Vietnam Pro', sans-serif; }
+    .text-primary { color: var(--primary); }
+    .text-accent { color: var(--accent); }
+    .text-slate-900 { color:#0f172a; }
+    .text-slate-700 { color:#334155; }
+    .text-slate-500 { color:#475569; }
+    .text-slate-400 { color:#64748b; }
+    .text-slate-300 { color:#94a3b8; }
+    .text-white { color:#fff; }
+    .text-white\/20 { color:rgba(255,255,255,.2); }
+    .bg-white { background:#fff; }
+    .bg-slate-900 { background:#0f172a; }
+    .bg-slate-200 { background:#e2e8f0; }
+    .bg-slate-100 { background:#f1f5f9; }
+    .relative { position: relative; }
+    .absolute { position: absolute; }
+    .inset-0 { inset: 0; }
+    .hidden { display: none !important; }
+    .flex { display:flex; }
+    .grid { display:grid; }
+    .block { display:block; }
+    .items-center { align-items:center; }
+    .justify-between { justify-content:space-between; }
+    .justify-center { justify-content:center; }
+    .flex-col { flex-direction:column; }
+    .gap-2 { gap:.5rem; }
+    .gap-4 { gap:1rem; }
+    .gap-8 { gap:2rem; }
+    .space-y-3 > * + * { margin-top:.75rem; }
+    .space-y-6 > * + * { margin-top:1.5rem; }
+    .space-y-10 > * + * { margin-top:2.5rem; }
+    .p-3 { padding:.75rem; }
+    .p-4 { padding:1rem; }
+    .p-10 { padding:2.5rem; }
+    .px-8 { padding-left:2rem; padding-right:2rem; }
+    .py-4 { padding-top:1rem; padding-bottom:1rem; }
+    .py-16 { padding-top:4rem; padding-bottom:4rem; }
+    .pt-6 { padding-top:1.5rem; }
+    .pt-10 { padding-top:2.5rem; }
+    .pt-24 { padding-top:6rem; }
+    .pb-20 { padding-bottom:5rem; }
+    .mt-10 { margin-top:2.5rem; }
+    .mt-20 { margin-top:5rem; }
+    .mb-2 { margin-bottom:.5rem; }
+    .mb-4 { margin-bottom:1rem; }
+    .mx-auto { margin-left:auto; margin-right:auto; }
+    .max-w-7xl { max-width:80rem; }
+    .max-w-none { max-width:none; }
+    .w-full { width:100%; }
+    .h-full { height:100%; }
+    .h-\[450px\] { height:450px; }
+    .aspect-\[4\/5\] { aspect-ratio:4/5; }
+    .aspect-\[4\/3\] { aspect-ratio:4/3; }
+    .overflow-hidden { overflow:hidden; }
+    .rounded-xl { border-radius:.75rem; }
+    .rounded-2xl { border-radius:1rem; }
+    .border { border:1px solid var(--border); }
+    .border-t { border-top:1px solid var(--border); }
+    .border-b { border-bottom:1px solid var(--border); }
+    .border-slate-100 { border-color:#f1f5f9; }
+    .border-slate-200 { border-color:#e2e8f0; }
+    .shadow-sm { box-shadow:0 1px 3px rgba(15,23,42,.08); }
+    .shadow-xl { box-shadow:0 20px 45px rgba(15,23,42,.18); }
+    .sticky { position:sticky; }
+    .top-32 { top:8rem; }
+    .h-fit { height:fit-content; }
+    .object-cover { object-fit:cover; }
+    .opacity-60 { opacity:.6; }
+    .leading-tight { line-height:1.15; }
+    .leading-snug { line-height:1.35; }
+    .leading-relaxed { line-height:1.75; }
+    .tracking-tighter { letter-spacing:-.04em; }
+    .tracking-widest { letter-spacing:.14em; }
+    .tracking-\[0\.25em\] { letter-spacing:.25em; }
+    .uppercase { text-transform:uppercase; }
+    .font-medium { font-weight:500; }
+    .font-bold { font-weight:700; }
+    .font-black { font-weight:900; }
+    .text-\[10px\] { font-size:10px; }
+    .text-\[11px\] { font-size:11px; }
+    .text-\[12px\] { font-size:12px; }
+    .text-sm { font-size:.875rem; }
+    .text-lg { font-size:1.125rem; }
+    .text-2xl { font-size:1.5rem; line-height:2rem; }
+    .text-3xl { font-size:1.875rem; line-height:2.25rem; }
+    .transition-colors { transition: color .18s ease, border-color .18s ease; }
+    .transition-shadow { transition: box-shadow .18s ease; }
+    .transition-transform { transition: transform .5s ease; }
+    .transition-all { transition: all .5s ease; }
+    .duration-500 { transition-duration:.5s; }
+    .duration-700 { transition-duration:.7s; }
+    .hover\:shadow-md:hover { box-shadow:0 8px 20px rgba(15,23,42,.12); }
+    .hover\:text-accent:hover { color:var(--accent); }
+    .hover\:text-primary:hover { color:var(--primary); }
+    .group:hover .group-hover\:scale-105 { transform:scale(1.05); }
+    .group:hover .group-hover\:scale-110 { transform:scale(1.10); }
+    .group:hover .group-hover\:text-accent { color:var(--accent); }
+    .bg-gradient-to-t { background:linear-gradient(to top, rgba(0,0,0,.90), rgba(0,0,0,0)); }
+    .from-black\/90, .via-transparent, .to-transparent { }
+    .prose { color:#334155; }
+    .prose-lg { font-size:1.06rem; }
+    .animate-pulse { animation:pulse 1.6s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:.45} 50%{opacity:1} }
     .editorial-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 2.25rem; align-items: start; }
+    .grid-cols-1 { grid-template-columns:repeat(1,minmax(0,1fr)); }
+    .grid-cols-3 { grid-template-columns:repeat(3,minmax(0,1fr)); }
+    @media (min-width: 768px) { .md\:flex { display:flex !important; } .md\:grid-cols-2 { grid-template-columns:repeat(2,minmax(0,1fr)); } .md\:h-\[550px\] { height:550px; } .md\:text-5xl { font-size:3rem; line-height:1.05; } }
+    @media (min-width: 1024px) { .lg\:grid-cols-3 { grid-template-columns:repeat(3,minmax(0,1fr)); } .lg\:flex { display:flex !important; } }
     @media (max-width: 1024px) { .editorial-grid { grid-template-columns: 1fr; gap: 2rem; } }
     .line-clamp-1 { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
     .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -68,7 +184,7 @@ THEME_XML = r'''<?xml version="1.0" encoding="UTF-8" ?>
     .sidebar-box { padding: 16px; border-radius: 0.75rem; border: 1px solid rgba(0,0,0,0.06); margin-bottom: 8px !important; }
     .box-white { background: #ffffff; }
     .box-brown { background: #f7f2ed; }
-    .sidebar-title { font-size: 10px !important; font-weight: 900; text-transform: uppercase; letter-spacing: 0.15em; color: #94a3b8; margin-bottom: 12px; border-bottom: 1px solid rgba(0,0,0,0.05); padding-bottom: 8px; }
+    .sidebar-title { font-size: 10px !important; font-weight: 900; text-transform: uppercase; letter-spacing: 0.15em; color: #475569; margin-bottom: 12px; border-bottom: 1px solid rgba(0,0,0,0.08); padding-bottom: 8px; }
     .sidebar-item { display: flex; gap: 12px; margin-bottom: 10px; align-items: center; justify-content: space-between; }
     .sidebar-item .text-side { flex: 1; min-width: 0; }
     .sidebar-item img { width: 100px; height: 60px; border-radius: 0.35rem; object-fit: cover; background: #eee; flex-shrink: 0; }
@@ -202,11 +318,11 @@ THEME_XML = r'''<?xml version="1.0" encoding="UTF-8" ?>
             <b:includable id='postItem' var='post'>
               <div class='group js-post-card' expr:data-post-url='data:post.url'>
                 <div class='post-card-thumb relative aspect-[4/5] rounded-xl overflow-hidden bg-slate-200 mb-4 shadow-sm'>
-                  <a expr:href='data:post.url'>
+                    <a expr:aria-label='data:post.title' expr:href='data:post.url'>
                     <b:if cond='data:post.featuredImage'>
-                      <img class='w-full h-full object-cover group-hover:scale-110 transition-all duration-500' data-thumb-state='loading' expr:src='data:post.featuredImage'/>
+                      <img class='w-full h-full object-cover group-hover:scale-110 transition-all duration-500' data-thumb-state='loading' decoding='async' expr:alt='data:post.title' expr:src='data:post.featuredImage' loading='lazy'/>
                     <b:else/>
-                      <img class='w-full h-full object-cover group-hover:scale-110 transition-all duration-500' data-thumb-state='fallback' src='https://images.unsplash.com/photo-1517154421773-0529f29ea451?q=80&amp;w=900'/>
+                      <img class='w-full h-full object-cover group-hover:scale-110 transition-all duration-500' data-thumb-state='fallback' decoding='async' expr:alt='data:post.title' loading='lazy' src='https://images.unsplash.com/photo-1517154421773-0529f29ea451?q=80&amp;w=900'/>
                     </b:if>
                   </a>
                 </div>
@@ -247,7 +363,7 @@ THEME_XML = r'''<?xml version="1.0" encoding="UTF-8" ?>
                 <b:loop values='data:posts' var='post'>
                   <div class='sidebar-item' data-thumb-state='loading'>
                     <div class='text-side'><a class='line-clamp-2' expr:href='data:post.url'><data:post.title/></a></div>
-                    <a expr:href='data:post.url'><img data-thumb-state='loading' expr:src='data:post.featuredImage'/></a>
+                    <a expr:aria-label='data:post.title' expr:href='data:post.url'><img data-thumb-state='loading' decoding='async' expr:alt='data:post.title' expr:src='data:post.featuredImage' loading='lazy'/></a>
                   </div>
                 </b:loop>
               </b:includable>
@@ -407,11 +523,15 @@ THEME_XML = r'''<?xml version="1.0" encoding="UTF-8" ?>
           hero.innerHTML = "";
           var anchor = document.createElement("a");
           anchor.href = link;
+          anchor.setAttribute("aria-label", title);
 
           var image = document.createElement("img");
           image.className = "absolute inset-0 w-full h-full object-cover opacity-60 transition-transform duration-700 group-hover:scale-105";
           image.src = img;
-          image.alt = "";
+          image.alt = title;
+          image.decoding = "async";
+          image.loading = "eager";
+          image.setAttribute("fetchpriority", "high");
           image.setAttribute("data-thumb-state", img ? "r2" : "fallback");
           image.onerror = function() { setImage(image, FALLBACK_IMAGE, "fallback"); };
 
@@ -455,6 +575,7 @@ THEME_XML = r'''<?xml version="1.0" encoding="UTF-8" ?>
       var anchor = document.createElement("a");
       anchor.href = link;
       anchor.className = "block";
+      anchor.setAttribute("aria-label", title);
 
       var imageWrap = document.createElement("div");
       imageWrap.className = "aspect-[4/3] bg-slate-100 overflow-hidden";
@@ -462,7 +583,9 @@ THEME_XML = r'''<?xml version="1.0" encoding="UTF-8" ?>
       var img = document.createElement("img");
       img.className = "w-full h-full object-cover transition-transform duration-500 group-hover:scale-105";
       img.src = imageUrl;
-      img.alt = "";
+      img.alt = title;
+      img.loading = "lazy";
+      img.decoding = "async";
       img.setAttribute("data-thumb-state", imageUrl && imageUrl.indexOf("api.dongriarchive.com/assets/travel-blogger/") === 0 ? "r2" : "fallback");
       img.onerror = function() { setImage(img, fallback || FALLBACK_IMAGE, "fallback"); };
 
@@ -536,14 +659,16 @@ THEME_XML = r'''<?xml version="1.0" encoding="UTF-8" ?>
         textLink.className = "line-clamp-2";
         textLink.href = item.href;
         textLink.textContent = item.title || "Untitled";
+        textLink.setAttribute("aria-label", item.title || "Related travel read");
         textSide.appendChild(textLink);
 
         var imageLink = document.createElement("a");
         imageLink.href = item.href;
+        imageLink.setAttribute("aria-label", item.title || "Related travel read");
         var img = document.createElement("img");
         img.loading = "lazy";
         img.decoding = "async";
-        img.alt = "";
+        img.alt = item.title || "Related travel read";
         setImage(img, r2 || FALLBACK_IMAGE, r2 ? "r2" : "fallback");
         imageLink.appendChild(img);
 
@@ -704,6 +829,7 @@ def validate_theme(xml: str) -> dict[str, object]:
         "theme_h1_removed": "text-4xl font-black font-headline tracking-tighter mb-8 text-primary font-headline" not in xml,
         "all_head_content_present": "<b:include data='blog' name='all-head-content'/>" in xml,
         "gtag_present": "G-5T125DHEDY" in xml,
+        "tailwind_cdn_removed": "cdn.tailwindcss.com" not in xml,
         "nav_active_static_removed": "text-primary border-b-2 border-primary" not in xml,
         "blogger_proxy_in_script": "blogger_img_proxy" in xml,
         "required_sections": {

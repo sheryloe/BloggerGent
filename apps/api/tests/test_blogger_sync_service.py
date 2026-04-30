@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -8,7 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings as app_settings
 from app.db.base import Base
-from app.models.entities import Blog, SyncedBloggerPost
+from app.models.entities import AnalyticsArticleFact, Blog, SyncedBloggerPost
 from app.services import analytics_service, blogger_sync_service
 from app.services.blogger.blogger_live_audit_service import BloggerLiveImageAuditResult
 from app.services.blogger.blogger_oauth_service import BloggerOAuthError
@@ -180,6 +181,82 @@ def test_sync_blogger_posts_falls_back_to_public_feed_when_api_project_is_delete
     assert synced.remote_post_id == "999"
     assert synced.url == "https://example.blogspot.com/2026/04/recovered-post.html"
     assert synced.live_image_count == 2
+
+
+def test_sync_blogger_posts_returns_db_score_rows(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    blog = Blog(
+        id=51,
+        name="Score Blog",
+        slug="score-blog",
+        content_category="tech",
+        primary_language="ko",
+        profile_key="custom",
+        is_active=True,
+        blogger_blog_id="remote-51",
+        blogger_url="https://score.blogspot.com",
+    )
+    db.add(blog)
+    db.commit()
+
+    monkeypatch.setattr(
+        blogger_sync_service,
+        "fetch_all_live_blogger_posts",
+        lambda _db, _remote_blog_id: [
+            {
+                "remote_post_id": "post-51",
+                "title": "Codex 5.5 Workflow Checklist 2026",
+                "url": "https://score.blogspot.com/2026/04/codex-55-workflow.html",
+                "status": "live",
+                "published_at": datetime(2026, 4, 29, tzinfo=timezone.utc),
+                "updated_at_remote": datetime(2026, 4, 29, 1, tzinfo=timezone.utc),
+                "labels": ["Development"],
+                "author_display_name": "Donggri",
+                "replies_total_items": 0,
+                "content_html": (
+                    "<h2>Workflow</h2><p>Codex 5.5 guide checklist timeline route "
+                    "automation workflow setup command review testing publish sync.</p>"
+                ),
+                "thumbnail_url": "https://img.test/codex.webp",
+                "excerpt_text": "Codex 5.5 workflow checklist for setup, testing, publish, and sync.",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        blogger_sync_service,
+        "fetch_and_audit_blogger_post",
+        lambda _url, client=None: BloggerLiveImageAuditResult(
+            live_image_count=1,
+            live_unique_image_count=1,
+            live_duplicate_image_count=0,
+            live_webp_count=1,
+            live_png_count=0,
+            live_other_image_count=0,
+            live_cover_present=True,
+            live_inline_present=False,
+            live_image_issue="",
+            source_fragment="",
+            raw_image_count=1,
+            empty_figure_count=0,
+            raw_figure_count=1,
+            renderable_image_urls=[],
+        ),
+    )
+    monkeypatch.setattr(blogger_sync_service, "rebuild_topic_memories_for_blog", lambda *_args, **_kwargs: None)
+
+    result = blogger_sync_service.sync_blogger_posts_for_blog(db, blog)
+    fact = db.execute(select(AnalyticsArticleFact).where(AnalyticsArticleFact.blog_id == blog.id)).scalar_one()
+
+    assert result["score_summary"]["count"] == 1
+    assert result["score_summary"]["seo_avg"] is not None
+    assert result["score_rows"][0]["provider"] == "blogger"
+    assert result["score_rows"][0]["remote_post_id"] == "post-51"
+    assert result["score_rows"][0]["url"] == "https://score.blogspot.com/2026/04/codex-55-workflow.html"
+    assert result["score_rows"][0]["seo_score"] == fact.seo_score
+    assert result["score_rows"][0]["geo_score"] == fact.geo_score
+    assert result["score_rows"][0]["ctr_score"] is not None
 
 
 def test_sync_connected_blogger_posts_returns_actual_refreshed_ids(

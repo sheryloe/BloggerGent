@@ -50,14 +50,14 @@ CATEGORIES: tuple[Category, ...] = (
         "gaebalgwa-peurogeuraeming",
         "개발 도구, AI 에이전트, 자동화, 배포, 관측성, 비용 통제, 실무 워크플로를 다룬다.",
         "실무 메모 + 개발자 해설. 과장된 생산성 찬양이나 입문 튜토리얼은 금지한다.",
-        "Markdown only. 첫 제목은 ##. ## 핵심 요약 포함. 마지막은 ## 마무리 기록.",
-        "기술 문서, 개발 도구, 워크플로, 아키텍처 보드, 운영 대시보드 중심의 3x3 hero collage.",
+        "HTML body only. No body-level H1. Required flow: intro hook paragraphs -> table-of-contents box -> 핵심 요약 -> 배경과 문제 -> 실전 사용법 -> inline_1 infographic slot -> copy-paste <pre><code> examples -> 실패 패턴과 해결법 -> 실전 워크플로우 -> 마무리 기록.",
+        "Hero plus one inline developer infographic: official docs, IDE/CLI, runtime/version cues, logs, workflow labels, and architecture artifacts.",
         (
-            Pattern("dev-info-deep-dive", "Dev Info Deep Dive", "기술의 역사, 공식 문서 기반 정보, 전체 컨텍스트를 다루는 포괄적 가이드.", "## 핵심 요약 -> ## 배경과 변화 -> ## 공식 문서로 보는 핵심 -> ## 실무 적용 기준 -> ## 마무리 기록", "공식 문서, 코드 에디터, 아키텍처 보드, 릴리스 노트가 함께 놓인 개발자 데스크.", "none"),
-            Pattern("dev-curation-top-points", "Dev Curation Top Points", "핵심 하이라이트 5가지를 선정해 실무 영향 중심으로 분석한다.", "## 핵심 요약 -> ## 지금 볼 5가지 포인트 -> ## 팀 워크플로 영향 -> ## 적용 우선순위 -> ## 마무리 기록", "5개 기술 포인트 카드, 체크리스트, 워크플로 보드가 보이는 편집형 기술 콜라주.", "none"),
-            Pattern("dev-insider-field-guide", "Dev Insider Field Guide", "최적 설정, 타이밍, 트러블슈팅, 운영 팁을 담은 실전 마스터 가이드.", "## 핵심 요약 -> ## 실제 설정 기준 -> ## 자주 막히는 지점 -> ## 트러블슈팅 순서 -> ## 마무리 기록", "터미널, 설정 파일, 로그 패널, 문제 해결 체크포인트가 보이는 실전 개발 장면.", "none"),
-            Pattern("dev-expert-perspective", "Dev Expert Perspective", "개발자 관점에서 기술적, 사회적 영향과 아키텍처 선택을 비평한다.", "## 핵심 요약 -> ## 기술적 의미 -> ## 아키텍처 관점 -> ## 팀 운영 관점 -> ## 마무리 기록", "시스템 다이어그램, 팀 리뷰 보드, 코드 구조와 의사결정 메모가 결합된 장면.", "none"),
-            Pattern("dev-experience-synthesis", "Dev Experience Synthesis", "실제 삽질 경험과 감정적 서사가 결합된 기술 리뷰.", "## 핵심 요약 -> ## 직접 부딪힌 장면 -> ## 해결 과정 -> ## 남은 불편과 장점 -> ## 마무리 기록", "밤의 개발 책상, 에러 로그, 수정된 코드, 개인 메모가 함께 있는 현실적인 기술 리뷰 장면."),
+            Pattern("dev-info-deep-dive", "Dev Info Deep Dive", "기술의 역사, 공식 문서 기반 정보, 전체 컨텍스트를 다루는 포괄적 가이드.", "핵심 요약 -> 배경과 변화 -> 공식 문서로 보는 핵심 -> 실전 사용법 -> 실패 패턴과 해결법 -> 실전 워크플로우 -> 마무리 기록", "hero: official docs, code editor, architecture board, and release notes; inline_1: compact concept map or version/feature comparison board.", "none"),
+            Pattern("dev-curation-top-points", "Dev Curation Top Points", "핵심 하이라이트 5가지를 선정해 실무 영향 중심으로 분석한다.", "핵심 요약 -> 지금 볼 5가지 포인트 -> 실전 사용법 -> 팀 워크플로 영향 -> 적용 우선순위 -> 마무리 기록", "hero: five technical points as an editorial workflow board; inline_1: five-point checklist infographic with short labels only.", "none"),
+            Pattern("dev-insider-field-guide", "Dev Insider Field Guide", "최적 설정, 타이밍, 트러블슈팅, 운영 팁을 담은 실전 마스터 가이드.", "핵심 요약 -> 실제 설정 기준 -> 실전 사용법 -> 자주 막히는 지점 -> 트러블슈팅 순서 -> 마무리 기록", "hero: terminal, config file, log panel, and troubleshooting checkpoints; inline_1: setup flow or troubleshooting sequence with numbered steps.", "none"),
+            Pattern("dev-expert-perspective", "Dev Expert Perspective", "개발자 관점에서 기술적, 사회적 영향과 아키텍처 선택을 비평한다.", "핵심 요약 -> 기술적 의미 -> 실전 사용법 -> 아키텍처 관점 -> 팀 운영 관점 -> 마무리 기록", "hero: system diagram, team review board, code structure, and decision notes; inline_1: architecture tradeoff map or decision matrix.", "none"),
+            Pattern("dev-experience-synthesis", "Dev Experience Synthesis", "실제 삽질 경험과 감정적 서사가 결합된 기술 리뷰.", "핵심 요약 -> 직접 부딪힌 장면 -> 실전 사용법 -> 해결 과정 -> 남은 불편과 장점 -> 마무리 기록", "hero: realistic developer desk, error logs, fixed code, and personal notes; inline_1: before/after workflow or problem-solution path."),
         ),
     ),
     Category(
@@ -217,7 +217,7 @@ CATEGORIES: tuple[Category, ...] = (
     ),
 )
 
-INLINE_IMAGE_FOLDERS = {"cugjewa-hyeonjang", "munhwawa-gonggan"}
+INLINE_IMAGE_FOLDERS = {"gaebalgwa-peurogeuraeming", "cugjewa-hyeonjang", "munhwawa-gonggan"}
 SOURCE_WRITE_EXCLUDED_FOLDERS = {"miseuteria-seutori"}
 DEPRECATED_PATTERN_IDS_BY_FOLDER: dict[str, set[str]] = {
     "naseudagyi-heureum": {"nasdaq-cartoon-summary"},
@@ -225,10 +225,10 @@ DEPRECATED_PATTERN_IDS_BY_FOLDER: dict[str, set[str]] = {
 
 IMAGE_POLICY_BY_FOLDER: dict[str, dict[str, object]] = {
     "gaebalgwa-peurogeuraeming": {
-        "layout": "hero_only_developer_workflow",
-        "roles": ("hero",),
-        "style": "Developer workflow board: official docs, release notes, IDE/CLI, runtime/version cues, logs, and architecture artifacts. No universal collage requirement.",
-        "anchors": ("reference date", "tool or product version", "language/runtime", "IDE or CLI", "official documentation"),
+        "layout": "hero_plus_one_inline_dev_infographic",
+        "roles": ("hero", "inline_1"),
+        "style": "Hero cover plus one inline developer infographic: workflow, comparison, checklist, architecture flow, troubleshooting sequence, or decision path. Inline text must be short labels only.",
+        "anchors": ("reference date", "tool or product version", "language/runtime", "IDE or CLI", "official documentation", "workflow/decision path"),
     },
     "ilsanggwa-memo": {
         "layout": "hero_only_daily_record",
@@ -349,7 +349,17 @@ def image_asset_plan(cat: Category) -> str:
         f"- allowed_image_roles: {', '.join(f'`{role}`' for role in roles)}",
         "- `hero` is the representative image for every Cloudflare category.",
     ]
-    if inline_enabled(cat):
+    if cat.folder == "gaebalgwa-peurogeuraeming":
+        lines.extend(
+            [
+                "- `hero` is the representative cover image.",
+                "- `inline_1` is the single body infographic image.",
+                "- `inline_2` is not allowed for this category.",
+                "- Use exactly one `<div class=\"cf-image-slot\" data-cf-image-slot=\"inline_1\"></div>` placeholder in `html_article`.",
+                "- `image_asset_plan` must be exactly `{\"roles\":[\"hero\",\"inline_1\"],\"live_apply_status\":\"blocked\"}`.",
+            ]
+        )
+    elif inline_enabled(cat):
         lines.extend(
             [
                 "- `inline_1` and `inline_2` are allowed only through inert DOM slot placeholders.",
@@ -370,6 +380,34 @@ def image_asset_plan(cat: Category) -> str:
 
 
 def article_prompt(cat: Category) -> str:
+    dev_inline_policy = (
+        """
+
+        [inline_infographic_policy]
+        - `html_article` must contain exactly one inert inline infographic slot:
+          `<div class="cf-image-slot" data-cf-image-slot="inline_1"></div>`
+        - Place the slot immediately after the `<h2>실전 사용법</h2>` section's first explanatory paragraph and before the first copy-paste `<pre><code>` block.
+        - Do not output `inline_2`, `<!--CF_IMAGE_SLOT:*-->`, `<img>`, `<figure>`, markdown images, or external image widgets.
+        - The inline infographic represents the workflow/comparison/checklist/architecture flow described in the article.
+        """
+        if cat.folder == "gaebalgwa-peurogeuraeming"
+        else ""
+    )
+    dev_copy_paste_rule = (
+        "\n        - Use copy-paste-ready examples. Use `<pre><code>...</code></pre>` for CLI commands, PowerShell snippets, configs, prompt templates, JSON, YAML, or pseudocode."
+        if cat.folder == "gaebalgwa-peurogeuraeming"
+        else ""
+    )
+    dev_image_rule = (
+        "\n        - Inline infographic text policy: 짧은 라벨(short labels) only. Allow step numbers, 1-3 word Korean/English labels, and compact keywords. No long sentences."
+        if cat.folder == "gaebalgwa-peurogeuraeming"
+        else ""
+    )
+    image_asset_plan_field = (
+        "        - image_asset_plan\n"
+        if cat.folder == "gaebalgwa-peurogeuraeming"
+        else ""
+    )
     return dedent(
         f"""
         [Input]
@@ -411,10 +449,12 @@ def article_prompt(cat: Category) -> str:
         [category_focus]
         - {cat.focus}
         - Tone: {cat.tone}
+        {dev_copy_paste_rule}
 
         [body_structure]
         - {cat.body}
         {structure_list(cat)}
+        {dev_inline_policy}
 
         [faq_policy]
         - Category default: {cat.faq_policy}.
@@ -429,6 +469,7 @@ def article_prompt(cat: Category) -> str:
         - Required visual anchors: {", ".join(str(item) for item in image_policy(cat)["anchors"])}.
         - `image_collage_prompt` must be English and must describe the `hero` role only.
         - Do not request logos, readable text, watermarks, unrelated category imagery, or fake official emblems.
+        {dev_image_rule}
 
         [forbidden_outputs]
         - No body-level H1.
@@ -446,7 +487,7 @@ def article_prompt(cat: Category) -> str:
         - html_article
         - faq_section
         - image_collage_prompt
-        - inline_collage_prompt: return an empty string
+{image_asset_plan_field}        - inline_collage_prompt: return an empty string
         - article_pattern_id
         - article_pattern_version
         """
@@ -458,8 +499,13 @@ def image_prompt(cat: Category) -> str:
     role_lines = "\n".join(f"- `{role}`" for role in image_roles(cat))
     time_place_line = (
         "- Time/place facts are mandatory for this category: 기간, 장소, 운영 시간, 접근 동선.\n"
-        if inline_enabled(cat)
+        if cat.folder in {"cugjewa-hyeonjang", "munhwawa-gonggan"}
         else ""
+    )
+    image_text_rule = (
+        "- No text overlays except short labels for `inline_1`. Short labels may be step numbers, 1-3 word Korean/English labels, and compact keywords. No long readable sentences, no logos, no watermark, no fake branded UI."
+        if cat.folder == "gaebalgwa-peurogeuraeming"
+        else "- No text overlays, no logos, no watermark, no fake government marks, no readable document text."
     )
     return dedent(
         f"""
@@ -481,7 +527,7 @@ def image_prompt(cat: Category) -> str:
         {time_place_line}\
         - Generate one final English prompt for exactly one requested image role.
         - Do not force a universal 3x3 collage. Use the style that matches this category and pattern.
-        - No text overlays, no logos, no watermark, no fake government marks, no readable document text.
+        {image_text_rule}
         - If `image_role` is missing, produce only the `hero` prompt.
 
         [Pattern Visual Directions]
@@ -514,7 +560,9 @@ def topic_prompt(cat: Category) -> str:
 
 def stage_prompt(cat: Category, stage: str) -> str:
     if stage == "html_assembly":
-        if inline_enabled(cat):
+        if cat.folder == "gaebalgwa-peurogeuraeming":
+            body = "Preserve meaning and category structure. No body-level H1, direct image tags, `<figure>`, scripts, iframes, or external widgets. Preserve exactly one inert inline infographic slot `<div class=\"cf-image-slot\" data-cf-image-slot=\"inline_1\"></div>`. Do not add `inline_2`. Preserve table-of-contents blocks, `<pre><code>` copy-paste examples, tables, and safe class presets."
+        elif inline_enabled(cat):
             body = "Preserve meaning and category structure. No body-level H1, scripts, iframes, external widgets, `<img>`, `<figure>`, or markdown images. Only inert DOM placeholders `<div class=\"cf-image-slot\" data-cf-image-slot=\"inline_1\"></div>` and `<div class=\"cf-image-slot\" data-cf-image-slot=\"inline_2\"></div>` are allowed."
         else:
             body = "Preserve meaning and category structure. No body-level H1, images, image slot placeholders, `data-cf-image-slot`, scripts, iframes, or external widgets."
@@ -765,7 +813,7 @@ def write_reports() -> None:
             - Operational prompt source is `{PROMPT_ROOT}`.
             - `apps/api/prompts/channels/cloudflare/dongri-archive` is treated as Antigravity reference material, not runtime source.
             - Category `channel.json` files must be Cloudflare-only and must not reference `blogger:35` or `The Midnight Archives`.
-            - Cloudflare image generation is role-based: most categories use `hero`, while `문화와-공간` and `축제와-현장` may use `hero`, `inline_1`, and `inline_2`.
+            - Cloudflare image generation is role-based: most categories use `hero`; `개발과-프로그래밍` may use `hero` and `inline_1`; `문화와-공간` and `축제와-현장` may use `hero`, `inline_1`, and `inline_2`.
 
             ## Main Conflicts Fixed
             - Development patterns were split between Rool `dev-01..dev-07`, backend dev patterns, and Antigravity prompt prose. Final development IDs now use `dev-*` prefixed five-pattern taxonomy.

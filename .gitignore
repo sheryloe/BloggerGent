@@ -47,6 +47,7 @@ docs/assets/images/
 docs/reports/
 
 # repo-local storage is placeholder-only; runtime data belongs under D:\Donggri_Runtime\BloggerGent.
+apps/api/runtime/
 
 # one-off local scripts / dumps
 scripts/fix_cloudflare_ctr_images.py
@@ -69,6 +70,7 @@ apps/api/bloggent.db
 # local browser/debug scratch files
 .tmp_pw_eval*.js
 cloudflare_full_inspection_report.json
+cloudflare_prompts_analysis_temp.json
 
 # refactoring workspace artifacts
 refactoring/

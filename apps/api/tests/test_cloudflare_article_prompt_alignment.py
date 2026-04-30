@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -71,6 +72,12 @@ def test_cloudflare_article_prompts_follow_prn_contract(category_dir: str) -> No
     assert "<script" in text
     assert "No body-level H1." in text
     assert "Do not insert `<img>`" in text
+    if category_dir == "gaebalgwa-peurogeuraeming":
+        assert "hero_only_developer_workflow" in text
+        assert "hero_plus_one_inline_dev_infographic" not in text
+        assert 'data-cf-image-slot="inline_1"' not in text
+        assert "Hero image only" in text
+        assert "<pre><code>" in text
 
 
 @pytest.mark.parametrize("category_dir", sorted(PRN_CATEGORY_PATHS))
@@ -117,9 +124,34 @@ def test_cloudflare_image_prompt_generation_prompts_are_category_specific(catego
         assert "cyber" in text.lower() or "on-chain" in text.lower()
     if category_dir in {"cugjewa-hyeonjang", "munhwawa-gonggan"}:
         assert "time/place" in text or "기간" in text or "장소" in text
+    if category_dir == "gaebalgwa-peurogeuraeming":
+        assert "hero_only_developer_workflow" in text
+        assert "hero_plus_one_inline_dev_infographic" not in text
+        assert "Hero image only" in text
 
 
 def test_cloudflare_mysteria_prompt_is_excluded_from_prn_alignment() -> None:
     path = PROMPT_ROOT / "세상의 기록" / "miseuteria-seutori" / "article_generation.md"
     assert path.exists()
     assert "miseuteria-seutori" not in PRN_CATEGORY_PATHS
+
+
+def test_cloudflare_root_dev_image_policy_matches_category_policy() -> None:
+    root_config = json.loads((PROMPT_ROOT / "channel.json").read_text(encoding="utf-8"))
+    category_path = next(PROMPT_ROOT.glob("*/gaebalgwa-peurogeuraeming/channel.json"))
+    category_config = json.loads(
+        category_path.read_text(encoding="utf-8")
+    )
+
+    root_policy = root_config["image_asset_plan"]["개발과-프로그래밍"]
+    category_policy = {
+        "image_layout_policy": category_config["image_layout_policy"],
+        "roles": category_config["image_asset_plan"]["roles"],
+    }
+
+    assert root_policy["image_layout_policy"] == "hero_only_developer_workflow"
+    assert root_policy["roles"] == ["hero"]
+    assert category_policy["image_layout_policy"] == root_policy["image_layout_policy"]
+    assert category_policy["roles"] == root_policy["roles"]
+    assert '개발과-프로그래밍' not in root_config["inline_allowed_category_slugs"]
+    assert set(root_config["inline_allowed_category_slugs"]) == {'문화와-공간', '축제와-현장'}

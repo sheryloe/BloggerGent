@@ -105,7 +105,7 @@ def _expected_stage_model(path: Path, stage: str, step: dict[str, Any] | None = 
 
 
 def _extract_stage_models(path: Path) -> list[tuple[str, str, dict[str, Any]]]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
     pairs: list[tuple[str, str, dict[str, Any]]] = []
     for raw_step in payload.get("steps", []):
         if not isinstance(raw_step, dict):

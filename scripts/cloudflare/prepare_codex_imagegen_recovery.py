@@ -32,7 +32,7 @@ CATEGORY_LEAF_MAP = {
 }
 
 CATEGORY_IMAGE_BRIEFS = {
-    "개발과-프로그래밍": "Developer workflow hero with official docs, tool version, IDE/CLI, logs, and architecture board.",
+    "개발과-프로그래밍": "Developer workflow hero with official docs, tool version, IDE/CLI, logs, architecture board, and workflow anchors.",
     "나스닥의-흐름": "Nasdaq infographic board with AI, semiconductors, earnings, rates, and risk scenarios.",
     "동그리의-생각": "Reflective note hero with social scene, notebook, desk, window light, and closing question.",
     "문화와-공간": "Culture space image with venue, operating period, viewing route, artwork placement, and lighting.",
@@ -50,8 +50,8 @@ IMAGEGEN_POLICY_BY_LEAF = {
     "gaebalgwa-peurogeuraeming": {
         "layout_policy": "hero_only_developer_workflow",
         "roles": ("hero",),
-        "style": "developer workflow board with official docs, version/runtime cues, IDE/CLI, logs, and architecture artifacts",
-        "anchors": ("reference date", "tool/version", "language/runtime", "IDE/CLI", "official docs"),
+        "style": "developer workflow hero with official docs, tool/version, language/runtime, IDE/CLI, logs, architecture board, and operational decision path",
+        "anchors": ("reference date", "tool/version", "language/runtime", "IDE/CLI", "official docs", "workflow/decision path"),
     },
     "ilsanggwa-memo": {
         "layout_policy": "hero_only_daily_record",
@@ -273,9 +273,10 @@ def build_image_prompt(row: dict[str, str], *, image_role: str = "hero") -> str:
     policy = policy_for(row)
     role_purpose = {
         "hero": "represent the overall post topic as one premium editorial hero image",
-        "inline_1": "support the first inline slot with route, access, viewing flow, or queue context",
+        "inline_1": "support the first inline slot with route, access, viewing flow, queue context, or viewing sequence",
         "inline_2": "support the second inline slot with highlight, risk, time-of-day, booth, artwork, or space context",
     }.get(image_role, "represent the requested image role")
+    text_requirement = "Requirements: no text overlays, no logos, no watermarks, no UI brand marks, no unrelated category imagery."
     return "\n".join(
         [
             "Use case: editorial blog image",
@@ -288,7 +289,7 @@ def build_image_prompt(row: dict[str, str], *, image_role: str = "hero") -> str:
             f"Visual policy: {policy.get('style')}",
             f"Required anchors: {', '.join(str(item) for item in policy.get('anchors') or [])}",
             "Composition: one single 16:9 polished editorial image. Do not force a universal 3x3 collage.",
-            "Requirements: no text overlays, no logos, no watermarks, no UI brand marks, no unrelated category imagery.",
+            text_requirement,
             "Mood: premium Korean editorial archive, clear subject hierarchy, high readability at thumbnail size.",
             "Output intent: PNG backup first, then WebP conversion and R2 upload by BloggerGent. Do not update live directly from generation.",
         ]
@@ -467,7 +468,8 @@ def write_rule_docs() -> None:
 - Antigravity는 사용하지 않는다.
 - `미스테리아-스토리`는 이번 복구 범위에서 제외한다.
 - 기본은 한 게시글당 `hero` 1장만 생성한다.
-- `문화와-공간`, `축제와-현장`만 `hero`, `inline_1`, `inline_2`를 생성할 수 있다.
+- `개발과-프로그래밍`은 `hero`, `inline_1`만 생성할 수 있다.
+- `문화와-공간`, `축제와-현장`은 `hero`, `inline_1`, `inline_2`를 생성할 수 있다.
 - PNG 원본은 `03-generated-png/<category>/<image_role>/<slug>.png`에 둔다.
 - WebP 변환본은 `04-webp/<category>/<image_role>/<slug>.webp`에 둔다.
 - R2 key는 `assets/media/cloudflare/dongri-archive/<category-leaf>/YYYY/MM/<slug>/<slug>[-inline-1|-inline-2].webp`만 허용한다.
@@ -499,7 +501,7 @@ def write_rule_docs() -> None:
 - 내장 `image_gen` 스킬을 사용한다.
 - 별도 CLI fallback은 쓰지 않는다.
 - `image_role`은 `hero`, `inline_1`, `inline_2` 중 하나여야 한다.
-- 이미지에는 텍스트, 로고, 워터마크를 넣지 않는다.
+- 이미지는 기본적으로 텍스트, 로고, 워터마크를 넣지 않는다.
 - 카테고리 정책은 `policy_path`를 기준으로 한다.
 
 ## 저장

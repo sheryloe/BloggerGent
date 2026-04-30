@@ -92,7 +92,7 @@ GENERIC_WORDS = {
     "true",
 }
 PATTERN_ID = "evidence-breakdown"
-PATTERN_VERSION = 3
+PATTERN_VERSION = 4
 
 
 @dataclass(slots=True)
@@ -615,9 +615,27 @@ def is_generic_mysteria_title(value: str | None) -> bool:
     return title in {MYSTERIA_CATEGORY_NAME, f"{MYSTERIA_CATEGORY_NAME} |"}
 
 
+def starts_with_mysteria_title_prefix(value: str | None) -> bool:
+    title = normalize_space(value)
+    return title == MYSTERIA_CATEGORY_NAME or title.startswith(f"{MYSTERIA_CATEGORY_NAME} ")
+
+
+def collapse_repeated_title_tokens(value: str) -> str:
+    tokens = normalize_space(value).split()
+    collapsed: list[str] = []
+    for token in tokens:
+        if collapsed and collapsed[-1].casefold() == token.casefold():
+            continue
+        collapsed.append(token)
+    text = " ".join(collapsed)
+    text = re.sub(r"\b([A-Za-z][A-Za-z0-9'-]*(?:\s+[A-Za-z][A-Za-z0-9'-]*){1,3})\s+\1\b", r"\1", text, flags=re.IGNORECASE)
+    return normalize_space(text)
+
+
 def clean_mysteria_title(value: str | None, slug: str, topic_key: str) -> str:
     title = normalize_space(value)
-    title = re.sub(r"^\s*\ubbf8\uc2a4\ud14c\ub9ac\uc544\s*\uc2a4\ud1a0\ub9ac\s*\|\s*", "", title).strip()
+    title = re.sub(r"^\s*\ubbf8\uc2a4\ud14c\ub9ac\uc544\s*\uc2a4\ud1a0\ub9ac\s*(?:\|\s*)?", "", title).strip()
+    title = collapse_repeated_title_tokens(title)
     if title and not is_generic_mysteria_title(title):
         return title
     base = topic_key.replace("-", " ").strip()
@@ -726,8 +744,10 @@ def build_cloudflare_plan(db, client: httpx.Client) -> list[CloudflareItem]:
         reasons: list[str] = []
         if row.category_slug != MYSTERIA_CATEGORY_SLUG:
             reasons.append("category_fix")
-        if is_generic_mysteria_title(row.title) or normalize_space(row.title).startswith(f"{MYSTERIA_CATEGORY_NAME} |"):
+        if is_generic_mysteria_title(row.title) or starts_with_mysteria_title_prefix(row.title):
             reasons.append("title_fix")
+        if (row.slug or "").endswith("-final"):
+            reasons.append("final_slug")
         if live.image_count == 0:
             reasons.append("image_0")
         if live.image_count > 1:
@@ -1088,7 +1108,11 @@ def apply_cloudflare_plan(db, items: list[CloudflareItem], client: httpx.Client)
             result["blocked"] += 1
             result["items"].append(asdict(item))
             continue
-        if item.action == "repair" and item.plain_text_length < 2000:
+        reasons = {reason.strip() for reason in item.reason.split(",") if reason.strip()}
+        metadata_only_under_2000 = item.plain_text_length < 2000 and bool(
+            reasons & {"category_fix", "title_fix", "final_slug"}
+        ) and not bool(reasons & {"image_0", "raw_html_exposed", "markdown_exposed"})
+        if item.action == "repair" and item.plain_text_length < 2000 and not metadata_only_under_2000:
             item.result = "blocked_needs_codex_rewrite"
             item.error = "plain_text_under_2000_requires_codex_rewrite"
             result["blocked"] += 1
@@ -1118,7 +1142,10 @@ def apply_cloudflare_plan(db, items: list[CloudflareItem], client: httpx.Client)
             if not hero_url:
                 raise RuntimeError("valid_hero_missing")
             current_content = str(detail.get("content") or "")
-            content = ensure_structured_markdown(current_content, title=item.clean_title, hero_url=hero_url)
+            if metadata_only_under_2000:
+                content = current_content or media_block_markdown(hero_url, item.clean_title)
+            else:
+                content = ensure_structured_markdown(current_content, title=item.clean_title, hero_url=hero_url)
             payload = build_cloudflare_payload(
                 detail,
                 row=item,
@@ -1132,7 +1159,7 @@ def apply_cloudflare_plan(db, items: list[CloudflareItem], client: httpx.Client)
                 raise RuntimeError(f"live_after_update_status={after.status}")
             mark_cloudflare_updated_in_db(db, item, hero_url=hero_url)
             db.commit()
-            item.result = "updated"
+            item.result = "updated_metadata_only" if metadata_only_under_2000 else "updated"
             result["updated"] += 1
             result["items"].append(asdict(item))
         except Exception as exc:  # noqa: BLE001
@@ -1165,7 +1192,7 @@ def verify_cloudflare(items: list[CloudflareItem]) -> dict[str, Any]:
     current_pass = all(
         [
             sum(1 for item in current if not item.category_slug) == 0,
-            sum(1 for item in current if is_generic_mysteria_title(item.title)) == 0,
+            sum(1 for item in current if is_generic_mysteria_title(item.title) or starts_with_mysteria_title_prefix(item.title)) == 0,
             sum(1 for item in current if item.markdown_exposed) == 0,
             sum(1 for item in current if item.raw_html_exposed) == 0,
             set(Counter(str(item.image_count) for item in current)) <= {"1"},
@@ -1174,7 +1201,7 @@ def verify_cloudflare(items: list[CloudflareItem]) -> dict[str, Any]:
     planned_pass = all(
         [
             sum(1 for item in planned_active if not item.category_slug) == 0,
-            sum(1 for item in planned_active if is_generic_mysteria_title(item.title)) == 0,
+            sum(1 for item in planned_active if is_generic_mysteria_title(item.title) or starts_with_mysteria_title_prefix(item.title)) == 0,
             sum(1 for item in planned_active if item.markdown_exposed) == 0,
             sum(1 for item in planned_active if item.raw_html_exposed) == 0,
             set(Counter(str(item.image_count) for item in planned_active)) <= {"1"},
@@ -1192,7 +1219,7 @@ def verify_cloudflare(items: list[CloudflareItem]) -> dict[str, Any]:
         # Backward-compatible alias: planned state after candidate deletes.
         "image_distribution": dict(Counter(str(item.image_count) for item in planned_active)),
         "current_null_category": sum(1 for item in current if not item.category_slug),
-        "current_generic_title": sum(1 for item in current if is_generic_mysteria_title(item.title)),
+        "current_generic_title": sum(1 for item in current if is_generic_mysteria_title(item.title) or starts_with_mysteria_title_prefix(item.title)),
         "current_final_slug": sum(1 for item in current if item.slug.endswith("-final")),
         "current_markdown_exposed": sum(1 for item in current if item.markdown_exposed),
         "current_raw_html_exposed": sum(1 for item in current if item.raw_html_exposed),
@@ -1201,7 +1228,7 @@ def verify_cloudflare(items: list[CloudflareItem]) -> dict[str, Any]:
         "current_duplicate_sentence_gte_030": sum(1 for item in current if item.duplicate_sentence_ratio >= 0.30),
         "current_duplicate_sentence_gte_050": sum(1 for item in current if item.duplicate_sentence_ratio >= 0.50),
         "planned_null_category": sum(1 for item in planned_active if not item.category_slug),
-        "planned_generic_title": sum(1 for item in planned_active if is_generic_mysteria_title(item.title)),
+        "planned_generic_title": sum(1 for item in planned_active if is_generic_mysteria_title(item.title) or starts_with_mysteria_title_prefix(item.title)),
         "planned_final_slug": sum(1 for item in planned_active if item.slug.endswith("-final")),
         "planned_markdown_exposed": sum(1 for item in planned_active if item.markdown_exposed),
         "planned_raw_html_exposed": sum(1 for item in planned_active if item.raw_html_exposed),
@@ -1211,7 +1238,7 @@ def verify_cloudflare(items: list[CloudflareItem]) -> dict[str, Any]:
         "planned_duplicate_sentence_gte_050": sum(1 for item in planned_active if item.duplicate_sentence_ratio >= 0.50),
         # Backward-compatible aliases: planned state after candidate deletes.
         "null_category": sum(1 for item in planned_active if not item.category_slug),
-        "generic_title": sum(1 for item in planned_active if is_generic_mysteria_title(item.title)),
+        "generic_title": sum(1 for item in planned_active if is_generic_mysteria_title(item.title) or starts_with_mysteria_title_prefix(item.title)),
         "final_slug": sum(1 for item in planned_active if item.slug.endswith("-final")),
         "markdown_exposed": sum(1 for item in planned_active if item.markdown_exposed),
         "raw_html_exposed": sum(1 for item in planned_active if item.raw_html_exposed),

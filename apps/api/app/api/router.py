@@ -16,6 +16,7 @@ from app.api.routes import (
     manual_images,
     planner,
     prompts,
+    qms,
     seo,
     settings,
     telegram,
@@ -41,6 +42,7 @@ api_router.include_router(cloudflare.router, prefix="/cloudflare", tags=["cloudf
 api_router.include_router(google.router, prefix="/google", tags=["google"])
 api_router.include_router(seo.router)
 api_router.include_router(prompts.router, prefix="/prompts", tags=["prompts"])
+api_router.include_router(qms.router)
 api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
 api_router.include_router(settings.blogger_router, prefix="/blogger", tags=["blogger"])
 api_router.include_router(help.router, prefix="/help", tags=["help"])

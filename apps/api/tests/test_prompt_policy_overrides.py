@@ -2,14 +2,18 @@ from types import SimpleNamespace
 
 from app.schemas.ai import ArticleGenerationOutput
 from app.services import article_pattern_service, blog_service, cloudflare_channel_service
+from app.services.content.travel_blog_policy import TRAVEL_ALLOWED_PATTERN_IDS
 from app.services.ops.model_policy_service import CODEX_TEXT_RUNTIME_KIND, CODEX_TEXT_RUNTIME_MODEL
 
 
-def test_select_blogger_article_pattern_avoids_recent_patterns(monkeypatch) -> None:
+def test_select_blogger_article_pattern_uses_current_travel_policy_patterns(monkeypatch) -> None:
     monkeypatch.setattr(
         article_pattern_service,
         "_recent_blogger_pattern_ids",
-        lambda db, blog_id, editorial_category_key, limit=3: ("experience-diary", "route-timeline"),
+        lambda db, blog_id, editorial_category_key, limit=3: (
+            "travel-01-hidden-path-route",
+            "travel-02-cultural-insider",
+        ),
     )
 
     selection = article_pattern_service.select_blogger_article_pattern(
@@ -19,19 +23,19 @@ def test_select_blogger_article_pattern_avoids_recent_patterns(monkeypatch) -> N
         editorial_category_key="travel",
     )
 
-    assert selection.pattern_id == "spot-card-grid"
-    assert selection.allowed_pattern_ids == ("experience-diary", "route-timeline", "spot-card-grid")
+    assert selection.pattern_id in TRAVEL_ALLOWED_PATTERN_IDS
+    assert set(selection.allowed_pattern_ids) == TRAVEL_ALLOWED_PATTERN_IDS
 
 
 def test_render_agent_prompt_injects_pattern_block(monkeypatch) -> None:
     selection = article_pattern_service.ArticlePatternSelection(
-        pattern_id="problem-solution",
+        pattern_id="travel-03-local-flavor-guide",
         pattern_version=1,
-        label="Problem Solution",
+        label="Local Flavor Guide",
         summary="문제에서 해결로 가는 구조",
         html_hint="section.callout",
-        allowed_pattern_ids=("problem-solution", "spot-card-grid"),
-        recent_pattern_ids=("spot-card-grid",),
+        allowed_pattern_ids=tuple(sorted(TRAVEL_ALLOWED_PATTERN_IDS)),
+        recent_pattern_ids=("travel-02-cultural-insider",),
     )
     monkeypatch.setattr(blog_service, "select_blogger_article_pattern", lambda *args, **kwargs: selection)
 
@@ -64,7 +68,7 @@ def test_render_agent_prompt_injects_pattern_block(monkeypatch) -> None:
     )
 
     assert "[Article pattern registry]" in rendered
-    assert "problem-solution" in rendered
+    assert "travel-03-local-flavor-guide" in rendered
     assert "[HTML structure policy]" in rendered
 
 

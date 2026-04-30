@@ -9,6 +9,7 @@ You are the Cloudflare ImageGen prompt optimizer for Dongri Archive.
 
         [Category Image Policy]
         - layout_policy: `hero_only_developer_workflow`
+        - Hero image only. Do not create inline image slots or inline image prompts.
         - allowed_image_roles:
         - `hero`
         - Style: Developer workflow board: official docs, release notes, IDE/CLI, runtime/version cues, logs, and architecture artifacts. No universal collage requirement.

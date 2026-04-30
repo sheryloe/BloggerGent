@@ -31,7 +31,7 @@ def test_travel_channel_models_are_locked_to_planner_pass_and_image_policy() -> 
     violations: list[str] = []
     for folder, channel_id in TRAVEL_CHANNELS.items():
         path = root / "prompts" / "channels" / "blogger" / folder / "channel.json"
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
         if payload.get("channel_id") != channel_id:
             violations.append(f"{path}: channel_id={payload.get('channel_id')}")
         steps = {str(item.get("stage_type") or ""): item for item in payload.get("steps", [])}
@@ -71,12 +71,15 @@ def test_travel_article_prompts_are_hero_only() -> None:
         text = article_prompt.read_text(encoding="utf-8")
         if "inline_collage_prompt" in text and "null or empty" not in text:
             violations.append(str(article_prompt))
-        has_twenty_panel = "20 panel" in text or "20-panel" in text or "20 visible panels" in text
-        has_legacy_eight_panel = "8-panel" in text or "8 panel" in text
-        if not (has_twenty_panel or has_legacy_eight_panel):
-            violations.append(f"{article_prompt}: missing panel rule")
-        if has_twenty_panel and "5x4" not in text and "5 columns x 4 rows" not in text:
-            violations.append(f"{article_prompt}: missing 5x4 rule")
+        has_twelve_panel = "12 panel" in text or "12-panel" in text or "12 visible panels" in text or "Exactly 12" in text
+        has_4x3 = "4x3" in text or "4 columns x 3 rows" in text
+        has_old_panel_rule = any(token in text for token in ("8-panel", "8 panel", "20 panel", "20-panel", "20 visible panels", "5 columns x 4 rows"))
+        if not has_twelve_panel:
+            violations.append(f"{article_prompt}: missing 12-panel rule")
+        if not has_4x3:
+            violations.append(f"{article_prompt}: missing 4x3 rule")
+        if has_old_panel_rule:
+            violations.append(f"{article_prompt}: stale panel rule")
     assert not violations, f"Travel prompt hero-only violations: {violations}"
 
 

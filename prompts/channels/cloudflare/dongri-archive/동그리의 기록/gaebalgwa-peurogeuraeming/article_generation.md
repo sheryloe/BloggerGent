@@ -50,6 +50,8 @@
 - `dev-expert-perspective`: ## 핵심 요약 -> ## 기술적 의미 -> ## 아키텍처 관점 -> ## 팀 운영 관점 -> ## 마무리 기록
 - `dev-experience-synthesis`: ## 핵심 요약 -> ## 직접 부딪힌 장면 -> ## 해결 과정 -> ## 남은 불편과 장점 -> ## 마무리 기록
 
+- For runnable examples, use `<pre><code>...</code></pre>` blocks so copy-paste commands stay intact.
+
         [faq_policy]
         - Category default: optional.
         - Pattern-level FAQ policy must be respected.
@@ -57,6 +59,7 @@
 
         [image_asset_plan]
         - layout_policy: `hero_only_developer_workflow`
+- Hero image only. Do not create inline image slots or inline image prompts.
 - allowed_image_roles: `hero`
 - `hero` is the representative image for every Cloudflare category.
 - `inline_1` and `inline_2` are not allowed.

@@ -206,3 +206,16 @@ def test_cloudflare_mysteria_aliases_do_not_contain_garbage_placeholders() -> No
     assert "?????????????" not in aliases
     assert article_pattern_service.MYSTERIA_CATEGORY_SLUG in aliases
     assert "miseuteria-seutori" in aliases
+
+
+def test_cloudflare_romanized_category_aliases_match_canonical_patterns() -> None:
+    for canonical, aliases in article_pattern_service.CLOUDFLARE_CATEGORY_SLUG_ALIASES.items():
+        assert canonical in article_pattern_service._CLOUDFLARE_PATTERN_MAP
+        for alias in aliases:
+            assert alias in article_pattern_service._CLOUDFLARE_PATTERN_MAP
+            assert (
+                article_pattern_service._CLOUDFLARE_PATTERN_MAP[alias]
+                == article_pattern_service._CLOUDFLARE_PATTERN_MAP[canonical]
+            )
+            if alias != canonical:
+                assert alias in cloudflare_channel_service.CLOUDFLARE_PROMPT_CATEGORY_PATH_MAP

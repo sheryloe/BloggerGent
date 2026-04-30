@@ -13,16 +13,19 @@ from app.services.content.travel_blog_policy import (
 
 def test_travel_prompt_requirements_pass_when_all_keywords_present() -> None:
     prompt = (
-        "Create one single flattened final image with a 5 columns x 4 rows travel collage and exactly 20 visible panels. "
-        "Use thin visible white gutters, do not generate 20 separate images, no text, and no logo."
+        "Create one single flattened final image with a 4 columns x 3 rows travel collage and exactly 12 visible panels. "
+        "Use thin visible white gutters and one dominant anchor panel. "
+        "Use varied camera distances with a wide establishing route scene, medium street scene, and close-up local detail. "
+        "Avoid generic stock-photo tourism. "
+        "Do not generate 12 separate images, do not generate one single hero shot without panel structure, no text, and no logo."
     )
     assert travel_panel_prompt_missing_requirements(prompt) == []
 
 
 def test_travel_prompt_requirements_fail_on_missing_gutters() -> None:
     prompt = (
-        "Create one single flattened final image with a 5 columns x 4 rows travel collage and exactly 20 visible panels, "
-        "do not generate 20 separate images, no text, no logo."
+        "Create one single flattened final image with a 4 columns x 3 rows travel collage and exactly 12 visible panels, "
+        "do not generate 12 separate images, do not generate one single hero shot without panel structure, no text, no logo."
     )
     missing = travel_panel_prompt_missing_requirements(prompt)
     assert "missing_visible_gutters" in missing

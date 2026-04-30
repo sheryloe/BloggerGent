@@ -80,7 +80,7 @@ class MockArticleProvider:
             "slug_basis": slugify(keyword) or "korea-travel-route",
             "labels": ["Travel", "Korea", "Guide", "Route", "Local"],
             "faq_intent": f"What readers should decide before visiting {keyword}.",
-            "image_seed": f"8-panel editorial Korea travel collage for {keyword} with thin white gutters.",
+            "image_seed": f"4x3 editorial Korea travel collage with exactly 12 panels for {keyword} with thin white gutters.",
             "route_place_key_cues": ["arrival", "main route", "timing decision", "local detail"],
             "beats": [
                 {"key": "gi", "label": "기", "goal": "Answer the search intent and set the route context.", "must_include": ["hook", "core promise"], "avoid": ["long intro"]},
@@ -95,7 +95,7 @@ class MockArticleProvider:
         keyword_match = re.search(r"\[Topic\]\s*-\s*(.+)", prompt)
         keyword = keyword_match.group(1).strip() if keyword_match else "Korea travel story"
         final_prompt = (
-            f"A single high-resolution image divided into an 8-panel grid layout (collage style). "
+            f"A single high-resolution image divided into a 4 columns x 3 rows visible editorial collage with exactly 12 distinct panels. "
             f"Each panel shows a different aspect of {keyword}. Panel 1: iconic overview. "
             "Panel 2: seasonal atmosphere. Panel 3: transit arrival moment. Panel 4: local snack close-up. "
             "Panel 5: walking crowd scene. Panel 6: cultural detail. Panel 7: hidden local angle. "

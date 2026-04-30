@@ -55,7 +55,7 @@ CLOUDFLARE_THUMB_OPTIONS: tuple[tuple[str, str], ...] = (
 TRUTHY_VALUES = {"1", "true", "yes", "on", "enabled"}
 MYSTERY_R2_KEY_PREFIX = "assets/the-midnight-archives/"
 MYSTERY_MAIN_SLUG_WEBP_RE = re.compile(
-    r"^assets/the-midnight-archives/[a-z0-9-]+/\d{4}/\d{2}/([a-z0-9-]+)/([a-z0-9-]+)\.webp$",
+    r"^assets/the-midnight-archives/[a-z0-9-]+/\d{4}/\d{2}/([a-z0-9-]+)/([a-z0-9-]+(?:-closing)?)\.webp$",
     re.IGNORECASE,
 )
 FORBIDDEN_R2_TOKENS = (
@@ -143,7 +143,9 @@ def _is_valid_mystery_slug_webp_key(object_key: str) -> bool:
     match = MYSTERY_MAIN_SLUG_WEBP_RE.fullmatch(normalized)
     if match is None:
         return False
-    return match.group(1).strip().lower() == match.group(2).strip().lower()
+    slug = match.group(1).strip().lower()
+    filename_stem = match.group(2).strip().lower()
+    return filename_stem in {slug, f"{slug}-closing"}
 
 
 def _enforce_strict_storage_root(*, destination_path: str, values: dict[str, str], mystery_only: bool) -> None:
@@ -187,8 +189,12 @@ def _enforce_strict_r2_schema(*, object_key: str, values: dict[str, str], myster
         raise ProviderRuntimeError(
             provider="cloudflare_r2",
             status_code=422,
-            message="Mystery R2 key must follow slug.webp contract.",
-            detail=f"object_key={object_key}; expected=assets/the-midnight-archives/<category>/YYYY/MM/<slug>/<slug>.webp",
+            message="Mystery R2 key must follow slug.webp or slug-closing.webp contract.",
+            detail=(
+                f"object_key={object_key}; expected="
+                "assets/the-midnight-archives/<category>/YYYY/MM/<slug>/<slug>.webp "
+                "or assets/the-midnight-archives/<category>/YYYY/MM/<slug>/<slug>-closing.webp"
+            ),
         )
     if travel_key is not None and not is_valid_travel_canonical_object_key(normalized):
         raise ProviderRuntimeError(

@@ -1042,7 +1042,7 @@ def _blogger_image_prompt_policy(blog: Blog) -> str:
     if profile_key == "korea_travel":
         lines.extend(
             [
-                "- The hero prompt must describe one square 1024x1024 8-panel editorial travel collage with thin visible white gutters.",
+                "- The hero prompt must describe ONE single flattened final 1024x1024 image: 4 columns x 3 rows visible editorial collage, exactly 12 distinct visible panels, thin white gutters.",
                 "- Do not request inline collage prompts for travel blogs.",
                 "- Travel visuals must feel like a real place visit and avoid generic stock-photo mood.",
             ]
@@ -1079,10 +1079,18 @@ def render_agent_prompt(db: Session | None, blog: Blog, agent: BlogAgentConfig, 
     editorial_category_key = str(base_context.get("editorial_category_key") or "").strip()
     editorial_category_label = str(base_context.get("editorial_category_label") or "").strip()
     editorial_category_guidance = str(base_context.get("editorial_category_guidance") or "").strip()
+    article_pattern_prompt_block = str(base_context.get("article_pattern_prompt_block") or "").strip()
     if agent.stage_type == WorkflowStageType.TOPIC_DISCOVERY:
         rendered = f"{rendered.rstrip()}\n\n{_blogger_topic_prompt_policy(blog, editorial_category_label=editorial_category_label, editorial_category_guidance=editorial_category_guidance)}"
     if agent.stage_type == WorkflowStageType.ARTICLE_GENERATION:
-        if db is not None:
+        if article_pattern_prompt_block:
+            rendered = (
+                f"{rendered.rstrip()}\n\n"
+                f"{article_pattern_prompt_block}\n"
+                f"{_blogger_article_prompt_policy(blog, editorial_category_label=editorial_category_label, editorial_category_guidance=editorial_category_guidance)}\n"
+                f"{_blogger_html_prompt_policy()}\n"
+            )
+        elif db is not None:
             selection = select_blogger_article_pattern(
                 db,
                 blog_id=blog.id,

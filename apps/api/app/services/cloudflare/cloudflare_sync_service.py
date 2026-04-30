@@ -254,6 +254,95 @@ def _dedupe_synced_cloudflare_rows(db: Session, *, managed_channel_id: int) -> d
     }
 
 
+def _score_row(row: SyncedCloudflarePost) -> dict[str, Any]:
+    return {
+        "provider": "cloudflare",
+        "remote_post_id": row.remote_post_id,
+        "remote_id": row.remote_post_id,
+        "title": row.title,
+        "slug": row.slug,
+        "url": row.url,
+        "status": row.status,
+        "category_slug": row.category_slug,
+        "seo_score": row.seo_score,
+        "geo_score": row.geo_score,
+        "ctr_score": row.ctr,
+        "lighthouse_score": row.lighthouse_score,
+        "lighthouse_accessibility_score": row.lighthouse_accessibility_score,
+        "lighthouse_best_practices_score": row.lighthouse_best_practices_score,
+        "lighthouse_seo_score": row.lighthouse_seo_score,
+        "quality_status": row.quality_status,
+        "persona_fit_score": row.persona_fit_score,
+        "title_final_score": row.title_final_score,
+        "article_pattern_id": row.article_pattern_id,
+        "article_pattern_version": row.article_pattern_version,
+        "synced_at": row.synced_at.isoformat() if row.synced_at else None,
+    }
+
+
+def _average(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return round(sum(values) / len(values), 2)
+
+
+def _score_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    numeric_fields = (
+        "seo_score",
+        "geo_score",
+        "ctr_score",
+        "lighthouse_score",
+        "persona_fit_score",
+        "title_final_score",
+    )
+    averages: dict[str, float | None] = {}
+    for field in numeric_fields:
+        values = [
+            float(row[field])
+            for row in rows
+            if row.get(field) is not None
+        ]
+        averages[field] = _average(values)
+    return {
+        "count": len(rows),
+        "seo_avg": averages["seo_score"],
+        "geo_avg": averages["geo_score"],
+        "ctr_avg": averages["ctr_score"],
+        "lighthouse_avg": averages["lighthouse_score"],
+        "averages": averages,
+    }
+
+
+def summarize_cloudflare_sync_score_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    return _score_summary(rows)
+
+
+def collect_cloudflare_sync_score_rows(
+    db: Session,
+    *,
+    managed_channel_id: int | None = None,
+    remote_post_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    query = select(SyncedCloudflarePost)
+    if managed_channel_id is not None:
+        query = query.where(SyncedCloudflarePost.managed_channel_id == managed_channel_id)
+    normalized_ids = [str(item or "").strip() for item in (remote_post_ids or []) if str(item or "").strip()]
+    if normalized_ids:
+        query = query.where(SyncedCloudflarePost.remote_post_id.in_(normalized_ids))
+    rows = (
+        db.execute(
+            query.order_by(
+                SyncedCloudflarePost.synced_at.desc().nullslast(),
+                SyncedCloudflarePost.updated_at_remote.desc().nullslast(),
+                SyncedCloudflarePost.id.desc(),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [_score_row(row) for row in rows]
+
+
 def sync_cloudflare_posts(db: Session, *, include_non_published: bool = False) -> dict:
     ensure_managed_channels(db)
     channel = db.execute(
@@ -280,6 +369,8 @@ def sync_cloudflare_posts(db: Session, *, include_non_published: bool = False) -
             "dedupe": {},
             "status": "fetch_failed",
             "error": str(exc),
+            "score_summary": _score_summary([]),
+            "score_rows": [],
         }
     existing_by_remote_id = {post.remote_post_id: post for post in existing_posts}
     remote_ids: set[str] = set()
@@ -379,11 +470,18 @@ def sync_cloudflare_posts(db: Session, *, include_non_published: bool = False) -
     db.flush()
     dedupe_report = _dedupe_synced_cloudflare_rows(db, managed_channel_id=channel.id)
     db.commit()
+    score_rows = collect_cloudflare_sync_score_rows(
+        db,
+        managed_channel_id=channel.id,
+        remote_post_ids=sorted(remote_ids),
+    )
     return {
         "channel_id": channel.channel_id,
         "count": len(remote_ids),
         "last_synced_at": now,
         "dedupe": dedupe_report,
+        "score_summary": _score_summary(score_rows),
+        "score_rows": score_rows,
     }
 
 

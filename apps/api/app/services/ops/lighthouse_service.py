@@ -3,9 +3,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
-import subprocess
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -93,6 +90,7 @@ def _lighthouse_payload(
         "status": "ok",
         "url": url,
         "form_factor": form_factor,
+        "measurement_source": audit.get("measurement_source") or "google_pagespeed_insights_lighthouse",
         "weights": dict(audit.get("weights") or {}),
         "scores": dict(audit.get("scores") or {}),
         "report_path": str(report_path),
@@ -164,21 +162,26 @@ def run_required_article_lighthouse_audit(
     form_factor: str = "mobile",
     timeout_seconds: int = 180,
     commit: bool = True,
+    required: bool = True,
 ) -> dict[str, Any]:
     target_url = str(url or "").strip()
     if not target_url:
-        article.quality_lighthouse_payload = {
+        payload = {
             "version": "article-publish-lighthouse-v1",
-            "status": "pending_url",
+            "status": "pending_url" if required else "unmeasured",
             "reason": "public_url_missing",
             "form_factor": form_factor,
             "audited_at": datetime.now(timezone.utc).isoformat(),
+            "measurement_source": "google_pagespeed_insights_lighthouse",
         }
+        article.quality_lighthouse_payload = payload
         db.add(article)
         if commit:
             db.commit()
         else:
             db.flush()
+        if not required:
+            return payload
         raise LighthouseAuditError("lighthouse_pending_url: public URL is required before publish completion.")
 
     try:
@@ -200,34 +203,42 @@ def run_required_article_lighthouse_audit(
             audited_at=audited_at,
         )
     except LighthouseAuditError as exc:
-        article.quality_lighthouse_payload = {
+        payload = {
             "version": "article-publish-lighthouse-v1",
-            "status": "failed",
+            "status": "failed" if required else "unmeasured",
             "reason": str(exc),
             "url": target_url,
             "form_factor": form_factor,
             "audited_at": datetime.now(timezone.utc).isoformat(),
+            "measurement_source": "google_pagespeed_insights_lighthouse",
         }
+        article.quality_lighthouse_payload = payload
         db.add(article)
         if commit:
             db.commit()
         else:
             db.flush()
+        if not required:
+            return payload
         raise
     except Exception as exc:  # noqa: BLE001
-        article.quality_lighthouse_payload = {
+        payload = {
             "version": "article-publish-lighthouse-v1",
-            "status": "failed",
+            "status": "failed" if required else "unmeasured",
             "reason": str(exc),
             "url": target_url,
             "form_factor": form_factor,
             "audited_at": datetime.now(timezone.utc).isoformat(),
+            "measurement_source": "google_pagespeed_insights_lighthouse",
         }
+        article.quality_lighthouse_payload = payload
         db.add(article)
         if commit:
             db.commit()
         else:
             db.flush()
+        if not required:
+            return payload
         raise LighthouseAuditError(f"lighthouse_audit_failed: {exc}") from exc
 
     db.add(article)
@@ -251,21 +262,26 @@ def run_required_cloudflare_lighthouse_audit(
     form_factor: str = "mobile",
     timeout_seconds: int = 180,
     commit: bool = True,
+    required: bool = True,
 ) -> dict[str, Any]:
     target_url = str(url or getattr(post, "url", "") or "").strip()
     if not target_url:
-        post.lighthouse_payload = {
+        payload = {
             "version": "cloudflare-publish-lighthouse-v1",
-            "status": "pending_url",
+            "status": "pending_url" if required else "unmeasured",
             "reason": "public_url_missing",
             "form_factor": form_factor,
             "audited_at": datetime.now(timezone.utc).isoformat(),
+            "measurement_source": "google_pagespeed_insights_lighthouse",
         }
+        post.lighthouse_payload = payload
         db.add(post)
         if commit:
             db.commit()
         else:
             db.flush()
+        if not required:
+            return payload
         raise LighthouseAuditError("lighthouse_pending_url: public URL is required before Cloudflare publish completion.")
 
     try:
@@ -287,34 +303,42 @@ def run_required_cloudflare_lighthouse_audit(
             audited_at=audited_at,
         )
     except LighthouseAuditError as exc:
-        post.lighthouse_payload = {
+        payload = {
             "version": "cloudflare-publish-lighthouse-v1",
-            "status": "failed",
+            "status": "failed" if required else "unmeasured",
             "reason": str(exc),
             "url": target_url,
             "form_factor": form_factor,
             "audited_at": datetime.now(timezone.utc).isoformat(),
+            "measurement_source": "google_pagespeed_insights_lighthouse",
         }
+        post.lighthouse_payload = payload
         db.add(post)
         if commit:
             db.commit()
         else:
             db.flush()
+        if not required:
+            return payload
         raise
     except Exception as exc:  # noqa: BLE001
-        post.lighthouse_payload = {
+        payload = {
             "version": "cloudflare-publish-lighthouse-v1",
-            "status": "failed",
+            "status": "failed" if required else "unmeasured",
             "reason": str(exc),
             "url": target_url,
             "form_factor": form_factor,
             "audited_at": datetime.now(timezone.utc).isoformat(),
+            "measurement_source": "google_pagespeed_insights_lighthouse",
         }
+        post.lighthouse_payload = payload
         db.add(post)
         if commit:
             db.commit()
         else:
             db.flush()
+        if not required:
+            return payload
         raise LighthouseAuditError(f"lighthouse_audit_failed: {exc}") from exc
 
     db.add(post)
@@ -323,22 +347,6 @@ def run_required_cloudflare_lighthouse_audit(
     else:
         db.flush()
     return payload
-
-
-def _resolve_lighthouse_command() -> list[str]:
-    custom = (os.getenv("LIGHTHOUSE_BIN") or "").strip()
-    if custom:
-        return [custom]
-
-    lighthouse_path = shutil.which("lighthouse")
-    if lighthouse_path:
-        return [lighthouse_path]
-
-    npx_path = shutil.which("npx")
-    if npx_path:
-        return [npx_path, "--yes", "lighthouse"]
-
-    raise LighthouseAuditError("Cannot find Lighthouse CLI. Install Node.js + Lighthouse, or set LIGHTHOUSE_BIN.")
 
 
 def _to_percentage(score_value: Any) -> float | None:
@@ -421,57 +429,14 @@ def run_lighthouse_audit(
     chrome_flags: str | None = None,
     locale: str = "ko",
 ) -> dict[str, Any]:
-    target = str(url or "").strip()
-    if not target:
-        raise LighthouseAuditError("URL is required.")
+    """Run Google's PageSpeed Insights Lighthouse audit.
 
-    if form_factor not in {"mobile", "desktop"}:
-        raise LighthouseAuditError("form_factor must be either 'mobile' or 'desktop'.")
-
-    resolved_chrome_flags = (chrome_flags or os.getenv("LIGHTHOUSE_CHROME_FLAGS") or "").strip()
-    if not resolved_chrome_flags:
-        resolved_chrome_flags = "--headless=new --disable-gpu --no-first-run --no-default-browser-check"
-
-    cmd_prefix = _resolve_lighthouse_command()
-    with tempfile.TemporaryDirectory(prefix="lighthouse-") as tmp_dir:
-        output_path = Path(tmp_dir) / "report.json"
-        command = [
-            *cmd_prefix,
-            target,
-            "--output=json",
-            f"--output-path={output_path.as_posix()}",
-            "--quiet",
-            f"--only-categories={','.join(DEFAULT_CATEGORIES)}",
-            f"--locale={locale}",
-            f"--chrome-flags={resolved_chrome_flags}",
-        ]
-        if form_factor == "desktop":
-            command.append("--preset=desktop")
-
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=max(timeout_seconds, 30),
-        )
-
-        if completed.returncode != 0:
-            stderr = (completed.stderr or completed.stdout or "").strip()
-            raise LighthouseAuditError(f"Lighthouse CLI failed: {stderr}")
-
-        if not output_path.exists():
-            raise LighthouseAuditError("Lighthouse report.json was not generated.")
-
-        raw_report = json.loads(output_path.read_text(encoding="utf-8"))
-
-    parsed = parse_lighthouse_report(raw_report)
-    return {
-        "url": target,
-        "form_factor": form_factor,
-        "weights": dict(LIGHTHOUSE_10_PERFORMANCE_METRIC_WEIGHTS),
-        "scores": parsed,
-        "raw_report": raw_report,
-    }
+    This intentionally does not invoke a local measurement process. Chrome DevTools
+    plugin audits can be imported through the same parser/apply functions, while
+    automated DB refreshes use Google's hosted Lighthouse result.
+    """
+    _ = timeout_seconds, chrome_flags, locale
+    return run_pagespeed_insights_audit(url, strategy=form_factor)
 
 
 def run_pagespeed_insights_audit(
@@ -522,6 +487,7 @@ def run_pagespeed_insights_audit(
             return {
                 "url": target,
                 "form_factor": strategy,
+                "measurement_source": "google_pagespeed_insights_lighthouse",
                 "weights": dict(LIGHTHOUSE_10_PERFORMANCE_METRIC_WEIGHTS),
                 "scores": parsed,
                 "raw_report": raw_report,

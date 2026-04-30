@@ -72,7 +72,9 @@ WS_RE = re.compile(r"\s+")
 URL_RE = re.compile(r"https?://[^\s<>\"]+")
 HEADING_RE = re.compile(r"<h([23])[^>]*>(.*?)</h\1>", re.IGNORECASE | re.DOTALL)
 LINK_RE = re.compile(r"""href=["']([^"']+)["']""", re.IGNORECASE)
-WORD_RE = re.compile(r"[A-Za-z0-9가-힣]+")
+MARKDOWN_HEADING_RE = re.compile(r"(?m)^\s*(#{2,3})\s+(.+?)\s*$")
+MARKDOWN_LINK_RE = re.compile(r"!?\[[^\]]+]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
+WORD_RE = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ0-9가-힣]+|[ぁ-ん]+|[ァ-ヶー]+|[一-龯々]+")
 SENTENCE_SPLIT_RE = re.compile(r"[.!?。！？]+\s+")
 
 SAFE_DRAFT_PATCH_KEYS = {"meta_description", "excerpt", "faq_section", "named_entity_drift", "html_diff_ratio"}
@@ -381,6 +383,40 @@ def _split_sentences(value: str) -> list[str]:
     return [segment.strip() for segment in SENTENCE_SPLIT_RE.split(value) if segment.strip()]
 
 
+def extract_faq_section_from_html(html_body: str | None) -> list[dict[str, str]]:
+    """Extract visible FAQ pairs embedded in Cloudflare/body HTML for scoring only."""
+    html_value = html_body or ""
+    if not html_value.strip():
+        return []
+
+    start_match = re.search(r"(?is)<h2[^>]*>\s*(?:FAQ|\uc790\uc8fc \ubb3b\ub294 \uc9c8\ubb38)\s*</h2>", html_value)
+    if start_match:
+        faq_html = html_value[start_match.end() :]
+        next_h2 = re.search(r"(?is)<h2\b", faq_html)
+        if next_h2:
+            faq_html = faq_html[: next_h2.start()]
+        pairs: list[dict[str, str]] = []
+        for match in re.finditer(r"(?is)<h3[^>]*>(.*?)</h3>\s*<p[^>]*>(.*?)</p>", faq_html):
+            question = _plain_text(match.group(1))
+            answer = _plain_text(match.group(2))
+            if len(question) >= 5 and len(answer) >= 10:
+                pairs.append({"question": question, "answer": answer})
+        if pairs:
+            return pairs[:6]
+
+    markdown_match = re.search(r"(?is)(?:^|\n)##\s*(?:FAQ|\uc790\uc8fc \ubb3b\ub294 \uc9c8\ubb38)\s*(.*)$", html_value)
+    if not markdown_match:
+        return []
+    faq_text = markdown_match.group(1)
+    pairs = []
+    for match in re.finditer(r"(?is)(?:^|\n)###\s*(.*?)\n+(.+?)(?=(?:\n###\s*)|\Z)", faq_text):
+        question = _plain_text(match.group(1))
+        answer = _plain_text(match.group(2))
+        if len(question) >= 5 and len(answer) >= 10:
+            pairs.append({"question": question, "answer": answer})
+    return pairs[:6]
+
+
 def _heading_counts(html_value: str) -> tuple[int, int]:
     h2_count = 0
     h3_count = 0
@@ -389,11 +425,18 @@ def _heading_counts(html_value: str) -> tuple[int, int]:
             h2_count += 1
         elif level == "3":
             h3_count += 1
+    for hashes, _text in MARKDOWN_HEADING_RE.findall(html_value or ""):
+        if len(hashes) == 2:
+            h2_count += 1
+        elif len(hashes) == 3:
+            h3_count += 1
     return h2_count, h3_count
 
 
 def _extract_links(html_value: str) -> list[str]:
-    return [match.strip() for match in LINK_RE.findall(html_value or "") if match.strip()]
+    html_links = [match.strip() for match in LINK_RE.findall(html_value or "") if match.strip()]
+    markdown_links = [match.strip() for match in MARKDOWN_LINK_RE.findall(html_value or "") if match.strip()]
+    return [*html_links, *markdown_links]
 
 
 def compute_ctr_score(*, title: str, excerpt: str | None = None, html_body: str | None = None) -> dict[str, Any]:
@@ -432,6 +475,37 @@ def compute_ctr_score(*, title: str, excerpt: str | None = None, html_body: str 
         "festival",
         "museum",
         "travel",
+        "ruta",
+        "gu?a",
+        "viaje",
+        "consejos",
+        "horario",
+        "se?l",
+        "corea",
+        "gu\u00eda",
+        "se\u00fal",
+        "\u30eb\u30fc\u30c8",
+        "\u6563\u6b69",
+        "\u65c5\u884c",
+        "\u97d3\u56fd",
+        "\u30bd\u30a6\u30eb",
+        "\u6df7\u96d1",
+        "\u907f\u3051\u308b",
+        "\u6642\u9593",
+        "\u5224\u65ad",
+        "\u99c5",
+        "\u5915\u65b9",
+        "???",
+        "??",
+        "??",
+        "??",
+        "???",
+        "??",
+        "???",
+        "??",
+        "??",
+        "?",
+        "??",
         "가이드",
         "체크리스트",
         "타임라인",
@@ -473,6 +547,32 @@ def compute_ctr_score(*, title: str, excerpt: str | None = None, html_body: str 
         "timeline",
         "review",
         "how to",
+        "ruta",
+        "gu?a",
+        "consejos",
+        "evitar",
+        "elegir",
+        "cu?ndo",
+        "d?nde",
+        "gu\u00eda",
+        "cu\u00e1ndo",
+        "d\u00f3nde",
+        "\u304a\u3059\u3059\u3081",
+        "\u884c\u304d\u65b9",
+        "\u907f\u3051\u308b",
+        "\u9078\u3076",
+        "\u5224\u65ad",
+        "\u6df7\u96d1",
+        "\u30c1\u30a7\u30c3\u30af",
+        "\u6642\u9593",
+        "????",
+        "???",
+        "???",
+        "??",
+        "??",
+        "??",
+        "????",
+        "??",
         "왜",
         "무엇",
         "어디",
@@ -535,6 +635,8 @@ def compute_seo_geo_scores(
     excerpt: str | None = None,
     faq_section: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    if not faq_section:
+        faq_section = extract_faq_section_from_html(html_body)
     plain_text = _plain_text(html_body)
     plain_text_lower = plain_text.lower()
     intro_text = plain_text[:600].lower()
@@ -650,6 +752,14 @@ def compute_seo_geo_scores(
         "timeline",
         "we cover",
         "in this guide",
+        "esta guía",
+        "esta ruta",
+        "en esta guía",
+        "\u3053\u306e\u8a18\u4e8b",
+        "\u3053\u306e\u30eb\u30fc\u30c8",
+        "\u5224\u65ad",
+        "\u907f\u3051\u308b",
+        "\u9078\u3076",
         "이 글",
         "이 가이드",
         "무엇",
@@ -672,7 +782,7 @@ def compute_seo_geo_scores(
     else:
         intent_score = 6
 
-    year_matches = set(re.findall(r"\b(?:18|19|20)\d{2}\b", plain_text))
+    year_matches = set(re.findall(r"\b(?:18|19|20)\d{2}\b", plain_text)) | set(re.findall(r"(?:18|19|20)\d{2}?", plain_text))
     named_entities = {
         match.strip()
         for match in re.findall(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}\b", plain_text)
@@ -689,7 +799,12 @@ def compute_seo_geo_scores(
     english_location_hits = len(
         [
             token
-            for token in ["seoul", "busan", "korea", "england", "france", "europe", "asia", "island", "tower", "lighthouse"]
+            for token in [
+                "seoul", "busan", "korea", "england", "france", "europe", "asia", "island", "tower", "lighthouse",
+                "se?l", "corea", "isla", "ruta", "???", "??", "??", "????", "??", "??", "???", "??", "??",
+                "se\u00fal", "corea", "\u30bd\u30a6\u30eb", "\u97d3\u56fd", "\u6f22\u6c5f", "\u30ce\u30c9\u30a5\u30eb",
+                "\u4e8c\u6751", "\u65b0\u6797", "\u30dd\u30e9\u30e1", "\u5f18\u5927", "\u6c5f\u5357",
+            ]
             if token in plain_text_lower
         ]
     )
@@ -746,6 +861,24 @@ def compute_seo_geo_scores(
         "official",
         "investigation",
         "evidence",
+        "actualizado",
+        "confirmar",
+        "oficial",
+        "aprox",
+        "\u73fe\u5730",
+        "\u78ba\u8a8d",
+        "\u76ee\u5b89",
+        "\u7d04",
+        "\u66f4\u65b0",
+        "\u5224\u65ad",
+        "\u516c\u5f0f",
+        "??",
+        "??",
+        "??",
+        "?",
+        "??",
+        "??",
+        "??",
         "출처",
         "아카이브",
         "기록",
@@ -782,6 +915,35 @@ def compute_seo_geo_scores(
         "budget",
         "plan",
         "safety",
+        "ruta",
+        "horario",
+        "consejos",
+        "transporte",
+        "presupuesto",
+        "reserva",
+        "evitar",
+        "\u30c1\u30a7\u30c3\u30af",
+        "\u30eb\u30fc\u30c8",
+        "\u6642\u9593",
+        "\u99c5",
+        "\u6df7\u96d1",
+        "\u4e88\u7d04",
+        "\u4ea4\u901a",
+        "\u4e88\u7b97",
+        "\u98df\u4e8b",
+        "\u4f11\u61a9",
+        "\u5224\u65ad",
+        "????",
+        "???",
+        "??",
+        "?",
+        "??",
+        "??",
+        "??",
+        "??",
+        "??",
+        "??",
+        "??",
         "체크리스트",
         "팁",
         "코스",
@@ -798,6 +960,21 @@ def compute_seo_geo_scores(
         "운영시간",
         "입장",
         "위치",
+        "운영",
+        "기준",
+        "검증",
+        "배포",
+        "롤백",
+        "로그",
+        "재시도",
+        "실패",
+        "검수",
+        "점검",
+        "적용",
+        "절차",
+        "흐름",
+        "우선순위",
+        "판단",
     ]
     actionable_hits = len([keyword for keyword in actionable_keywords if keyword in plain_text_lower])
     if actionable_hits >= 6:
@@ -811,8 +988,13 @@ def compute_seo_geo_scores(
 
     month_hits = len(
         re.findall(
-            r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\b",
+            r"\b(january|february|march|april|may|june|july|august|september|october|november|december|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b",
             plain_text_lower,
+        )
+    ) + len(
+        re.findall(
+            "(?:\\d{1,2}\\u6708|\\u6625|\\u590f|\\u79cb|\\u51ac|\\u5915\\u65b9|\\u65e5\\u6ca1|\\u9031\\u672b|\\u5e73\\u65e5|\\u591c)",
+            plain_text,
         )
     )
     korean_time_hits = len(re.findall(r"(?:\d{4}년|\d{1,2}월|봄|여름|가을|겨울)", plain_text))
@@ -1515,6 +1697,7 @@ def persist_article_quality_cache(
     seo_score: int | None,
     geo_score: int | None,
     quality_status: str,
+    ctr_score: float | None = None,
     rewrite_attempts: int | None = None,
     audited_at: datetime | None = None,
 ) -> None:
@@ -1522,6 +1705,7 @@ def persist_article_quality_cache(
     article.quality_most_similar_url = _safe_str(most_similar_url) or None
     article.quality_seo_score = int(seo_score) if seo_score is not None else None
     article.quality_geo_score = int(geo_score) if geo_score is not None else None
+    article.quality_ctr_score = float(ctr_score) if ctr_score is not None else None
     article.quality_status = _safe_str(quality_status) or None
     if rewrite_attempts is not None:
         article.quality_rewrite_attempts = max(0, int(rewrite_attempts))
@@ -1634,6 +1818,7 @@ def refresh_content_overview_cache(
             seo_score=int(seo_geo["seo_score"]),
             geo_score=int(seo_geo["geo_score"]),
             quality_status=quality_status,
+            ctr_score=float(seo_geo.get("ctr_score") or 0),
             rewrite_attempts=article.quality_rewrite_attempts,
             audited_at=audited_at,
         )
@@ -1713,6 +1898,7 @@ def _article_to_content_overview_row(article: Article) -> dict[str, Any] | None:
         "most_similar_url": _safe_str(article.quality_most_similar_url),
         "seo_score": float(article.quality_seo_score) if article.quality_seo_score is not None else None,
         "geo_score": float(article.quality_geo_score) if article.quality_geo_score is not None else None,
+        "ctr_score": float(article.quality_ctr_score) if article.quality_ctr_score is not None else None,
         "lighthouse_score": float(article.quality_lighthouse_score) if article.quality_lighthouse_score is not None else None,
         "quality_status": quality_status,
         "suggested_action": suggested_action,

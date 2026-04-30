@@ -38,7 +38,7 @@ def test_create_manual_image_slot_assigns_serial_and_chat_format(db: Session) ->
         db,
         provider="blogger",
         slot_role="hero",
-        prompt="Create an 8-panel realistic travel collage, no text.",
+        prompt="Create a 4x3 realistic travel collage with exactly 12 panels, no text.",
         remote_post_id="post-123",
         metadata={
             "title": "Seoul Evening Walk",
@@ -55,7 +55,7 @@ def test_create_manual_image_slot_assigns_serial_and_chat_format(db: Session) ->
     assert "provider: blogger" in chat_text
     assert "slot: hero" in chat_text
     assert "title: Seoul Evening Walk" in chat_text
-    assert "prompt:\nCreate an 8-panel realistic travel collage, no text." in chat_text
+    assert "prompt:\nCreate a 4x3 realistic travel collage with exactly 12 panels, no text." in chat_text
 
 
 def test_create_manual_image_slot_is_idempotent_for_pending_remote_slot(db: Session) -> None:

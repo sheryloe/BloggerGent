@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, Bot, ClipboardCheck, Gauge, LayoutGrid, LineChart, Link2, PlaySquare } from "lucide-react";
+import { Activity, Bot, ClipboardCheck, Gauge, LayoutGrid, LineChart, Link2, PlaySquare, ShieldCheck } from "lucide-react";
 
 import { ThemeToggle } from "@/components/dashboard/theme-toggle";
 
@@ -23,14 +23,14 @@ const PRIMARY_ROOMS: WorkspaceCard[] = [
   {
     href: "/dashboard",
     label: "운영 홈",
-    description: "전체 자동화 상태, 실패, 최근 생성/게시 흐름을 봅니다.",
+    description: "전체 자동화 상태, 실패 작업, 최근 생성·게시 흐름을 확인합니다.",
     icon: LayoutGrid,
     accent: "from-[#f97316] via-[#ea580c] to-[#c2410c]",
   },
   {
     href: "/planner",
     label: "생성 운영",
-    description: "Antigravity가 읽을 생성 슬롯과 카테고리 규칙을 관리합니다.",
+    description: "월간 플래너, 채널별 카테고리 규칙, 생성 슬롯을 관리합니다.",
     icon: PlaySquare,
     accent: "from-[#0ea5e9] via-[#0284c7] to-[#0369a1]",
   },
@@ -44,9 +44,16 @@ const PRIMARY_ROOMS: WorkspaceCard[] = [
   {
     href: "/content-ops",
     label: "콘텐츠 검수",
-    description: "게시글 검수, 작업 큐, 생성/동기화 글을 점검합니다.",
+    description: "게시글 검수, 승인, 반려, 재검토 작업을 처리합니다.",
     icon: ClipboardCheck,
     accent: "from-[#10b981] via-[#059669] to-[#047857]",
+  },
+  {
+    href: "/qms",
+    label: "QMS / ISO 9001",
+    description: "KPI, Risk, CAPA, 릴리즈 증적, 내부심사와 경영검토를 관리합니다.",
+    icon: ShieldCheck,
+    accent: "from-[#14b8a6] via-[#0f766e] to-[#134e4a]",
   },
   {
     href: "/settings",
@@ -58,7 +65,7 @@ const PRIMARY_ROOMS: WorkspaceCard[] = [
   {
     href: "/ops-health",
     label: "운영 상태",
-    description: "런타임, 실패 작업, 토큰 사용량, 동기화 상태를 확인합니다.",
+    description: "토큰 사용량, 실패 작업, 동기화 상태와 점검 리포트를 확인합니다.",
     icon: Activity,
     accent: "from-[#06b6d4] via-[#0891b2] to-[#0e7490]",
   },
@@ -72,7 +79,7 @@ export function DashboardShell({ children, nav }: { children: React.ReactNode; n
   const pathname = usePathname();
   const navSet = new Set((nav ?? []).map((item) => item.href));
   const primaryRooms = PRIMARY_ROOMS.filter((item) => navSet.size === 0 || navSet.has(item.href));
-  const compactWorkspace = pathname.startsWith("/planner");
+  const compactWorkspace = pathname.startsWith("/planner") || pathname.startsWith("/qms");
   const shellGridClass = compactWorkspace
     ? "mx-auto grid min-h-[calc(100vh-2rem)] w-full gap-3 xl:grid-cols-[256px_minmax(0,1fr)] 2xl:grid-cols-[256px_minmax(0,1fr)]"
     : "mx-auto grid min-h-[calc(100vh-2rem)] w-full gap-4 xl:grid-cols-[256px_minmax(0,1fr)] 2xl:grid-cols-[256px_minmax(0,1fr)]";
@@ -91,10 +98,10 @@ export function DashboardShell({ children, nav }: { children: React.ReactNode; n
       <div className={shellGridClass}>
         <aside className="rounded-[30px] border border-slate-200 bg-white/95 p-4 shadow-[0_20px_50px_rgba(15,23,42,0.08)] backdrop-blur dark:border-white/10 dark:bg-slate-900/70 dark:shadow-[0_20px_50px_rgba(0,0,0,0.45)] sm:p-5">
           <div className="rounded-[26px] bg-[linear-gradient(135deg,#0f172a_0%,#1e293b_45%,#334155_100%)] p-5 text-white">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-white/70">Antigravity Console</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-white/70">BloggerGent Console</p>
             <h1 className="mt-3 text-[26px] font-semibold leading-tight">자동 블로그 운영</h1>
             <p className="mt-3 text-sm leading-6 text-white/82">
-              자동 생성은 Antigravity가 수행하고, 이 콘솔에서는 검수와 분석, 연동 설정, 프롬프트 규칙을 관리합니다.
+              생성, 게시, 검수, 분석, 설정, 품질경영 증적까지 한 화면에서 관리합니다.
             </p>
           </div>
 
@@ -121,11 +128,7 @@ export function DashboardShell({ children, nav }: { children: React.ReactNode; n
                       <p className={`text-sm font-semibold ${active ? "text-inherit" : "text-slate-900 dark:text-zinc-100"}`}>
                         {item.label}
                       </p>
-                      <p
-                        className={`mt-1 text-xs leading-5 ${
-                          active ? "text-slate-200 dark:text-zinc-700" : "text-slate-600 dark:text-zinc-400"
-                        }`}
-                      >
+                      <p className={`mt-1 text-xs leading-5 ${active ? "text-slate-200 dark:text-zinc-700" : "text-slate-600 dark:text-zinc-400"}`}>
                         {item.description}
                       </p>
                     </div>
@@ -139,23 +142,15 @@ export function DashboardShell({ children, nav }: { children: React.ReactNode; n
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500 dark:text-zinc-400">운영 루프</p>
-                <p className="mt-2 text-sm font-semibold text-slate-950 dark:text-zinc-100">주제/규칙 → 자동 생성 → 검수 → 분석</p>
+                <p className="mt-2 text-sm font-semibold text-slate-950 dark:text-zinc-100">주제 생성 → 게시 → 검수 → 분석 → QMS 증적</p>
               </div>
               <Bot className="h-5 w-5 text-slate-500 dark:text-zinc-400" />
             </div>
             <div className="mt-4 grid gap-2">
-              <span className="rounded-2xl bg-[#fff7ed] px-3 py-2 text-sm font-semibold text-[#9a3412] dark:bg-amber-500/15 dark:text-amber-200">
-                주제/규칙
-              </span>
-              <span className="rounded-2xl bg-[#eff6ff] px-3 py-2 text-sm font-semibold text-[#1d4ed8] dark:bg-sky-500/15 dark:text-sky-200">
-                자동 생성
-              </span>
-              <span className="rounded-2xl bg-[#ecfdf5] px-3 py-2 text-sm font-semibold text-[#047857] dark:bg-emerald-500/15 dark:text-emerald-200">
-                검수
-              </span>
-              <span className="rounded-2xl bg-[#f5f3ff] px-3 py-2 text-sm font-semibold text-[#6d28d9] dark:bg-violet-500/15 dark:text-violet-200">
-                분석
-              </span>
+              <span className="rounded-2xl bg-[#fff7ed] px-3 py-2 text-sm font-semibold text-[#9a3412] dark:bg-amber-500/15 dark:text-amber-200">주제/규칙</span>
+              <span className="rounded-2xl bg-[#eff6ff] px-3 py-2 text-sm font-semibold text-[#1d4ed8] dark:bg-sky-500/15 dark:text-sky-200">자동 생성</span>
+              <span className="rounded-2xl bg-[#ecfdf5] px-3 py-2 text-sm font-semibold text-[#047857] dark:bg-emerald-500/15 dark:text-emerald-200">검수</span>
+              <span className="rounded-2xl bg-[#f5f3ff] px-3 py-2 text-sm font-semibold text-[#6d28d9] dark:bg-violet-500/15 dark:text-violet-200">분석/QMS</span>
             </div>
           </div>
 
@@ -165,7 +160,7 @@ export function DashboardShell({ children, nav }: { children: React.ReactNode; n
               <div>
                 <p className="text-sm font-semibold text-slate-950 dark:text-zinc-100">운영 기준</p>
                 <p className="mt-1 text-xs leading-5 text-slate-600 dark:text-zinc-400">
-                  자동화는 설정에서 제어하고, 문제는 운영 상태와 분석 화면에서 확인합니다.
+                  실행은 설정에서 제어하고, 문제와 증적은 분석·QMS 화면에서 추적합니다.
                 </p>
               </div>
             </div>

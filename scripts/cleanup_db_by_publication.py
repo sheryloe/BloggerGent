@@ -30,7 +30,7 @@ from sqlalchemy import or_, select  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
 from app.db.session import SessionLocal  # noqa: E402
-from app.models.entities import AnalyticsArticleFact, SyncedCloudflarePost  # noqa: E402
+from app.models.entities import AnalyticsArticleFact, SyncedBloggerPost, SyncedCloudflarePost  # noqa: E402
 from app.services.ops.analytics_service import rebuild_blog_month_rollup  # noqa: E402
 from app.services.blogger.blogger_sync_service import sync_connected_blogger_posts  # noqa: E402
 from app.services.cloudflare.cloudflare_sync_service import sync_cloudflare_posts  # noqa: E402
@@ -39,10 +39,14 @@ from app.services.ops.dedupe_utils import (  # noqa: E402
     pick_best_status as pick_best_dedupe_status,
     pick_preferred_url as pick_preferred_dedupe_url,
     status_priority as dedupe_status_priority,
+    url_identity_key,
 )
 
 SOURCE_PRIORITY = {"generated": 2, "synced": 1}
 KEEPER_SELECTION_RULE = "status_priority > source_priority(generated) > latest_updated_at > id"
+LIVE_SYNC_STATUSES = {"live", "published"}
+CANONICAL_ANALYTICS_STATUS = "published"
+SAMPLE_LIMIT = 20
 
 
 @dataclass(slots=True)
@@ -64,6 +68,7 @@ class CleanupResult:
     merged_row_deleted_count: int
     keeper_selection_rule: str
     sample_merged_keys: list[str]
+    canonical_live_audit: dict[str, Any]
     blogger: dict[str, Any]
     cloudflare: dict[str, Any]
     touched_months: list[str]
@@ -138,6 +143,103 @@ def _analytics_row_priority(row: AnalyticsArticleFact) -> tuple[int, int, dateti
     updated_at = _to_utc(row.updated_at) or _to_utc(row.created_at) or _to_utc(row.published_at) or datetime.min.replace(tzinfo=timezone.utc)
     row_id = int(row.id or 0)
     return (status_rank, source_rank, updated_at, row_id)
+
+
+def _status_key(value: str | None) -> str:
+    return str(value or "").strip().lower()
+
+
+def _row_month_key(row: AnalyticsArticleFact) -> tuple[int, str] | None:
+    if not row.blog_id or not row.month:
+        return None
+    return (row.blog_id, row.month)
+
+
+def _collect_live_blogger_url_keys(db: Session) -> tuple[set[tuple[int, str]], int, int]:
+    rows = db.execute(select(SyncedBloggerPost).order_by(SyncedBloggerPost.blog_id.asc())).scalars().all()
+    live_keys: set[tuple[int, str]] = set()
+    live_count = 0
+    non_live_count = 0
+    for row in rows:
+        if _status_key(row.status) not in LIVE_SYNC_STATUSES:
+            non_live_count += 1
+            continue
+        live_count += 1
+        identity = url_identity_key(row.url)
+        if identity:
+            live_keys.add((row.blog_id, identity))
+    return live_keys, live_count, non_live_count
+
+
+def _collect_cloudflare_published_audit(db: Session) -> dict[str, Any]:
+    rows = db.execute(select(SyncedCloudflarePost).order_by(SyncedCloudflarePost.id.asc())).scalars().all()
+    published_rows = [row for row in rows if _status_key(row.status) in LIVE_SYNC_STATUSES]
+    non_published_rows = [row for row in rows if _status_key(row.status) not in LIVE_SYNC_STATUSES]
+    missing_lighthouse = [row for row in published_rows if row.lighthouse_score is None]
+    return {
+        "cloudflare_published_count": len(published_rows),
+        "cloudflare_non_published_count": len(non_published_rows),
+        "score_missing": {
+            "cloudflare_lighthouse_count": len(missing_lighthouse),
+            "cloudflare_lighthouse_sample_remote_ids": [
+                str(row.remote_post_id or "") for row in missing_lighthouse[:SAMPLE_LIMIT]
+            ],
+        },
+    }
+
+
+def _apply_blogger_live_fact_cleanup(db: Session) -> tuple[dict[str, Any], set[tuple[int, str]]]:
+    live_url_keys, blogger_live_count, blogger_non_live_synced_count = _collect_live_blogger_url_keys(db)
+    rows = db.execute(select(AnalyticsArticleFact).order_by(AnalyticsArticleFact.id.asc())).scalars().all()
+
+    normalize_rows: list[AnalyticsArticleFact] = []
+    purge_rows: list[AnalyticsArticleFact] = []
+    kept_rows: list[AnalyticsArticleFact] = []
+    touched_months: set[tuple[int, str]] = set()
+
+    for row in rows:
+        identity = url_identity_key(row.actual_url)
+        is_live_fact = bool(identity and (row.blog_id, identity) in live_url_keys)
+        if is_live_fact:
+            kept_rows.append(row)
+            if _status_key(row.status) != CANONICAL_ANALYTICS_STATUS:
+                normalize_rows.append(row)
+            continue
+        purge_rows.append(row)
+
+    for row in [*normalize_rows, *purge_rows]:
+        month_key = _row_month_key(row)
+        if month_key:
+            touched_months.add(month_key)
+
+    for row in normalize_rows:
+        row.status = CANONICAL_ANALYTICS_STATUS
+
+    for row in purge_rows:
+        db.delete(row)
+
+    missing_seo = [row for row in kept_rows if row.seo_score is None]
+    missing_geo = [row for row in kept_rows if row.geo_score is None]
+    missing_lighthouse = [row for row in kept_rows if row.lighthouse_score is None]
+    return (
+        {
+            "blogger_live_count": blogger_live_count,
+            "blogger_non_live_synced_count": blogger_non_live_synced_count,
+            "analytics_fact_count": len(rows),
+            "facts_kept": len(kept_rows),
+            "facts_to_normalize": len(normalize_rows),
+            "facts_to_purge": len(purge_rows),
+            "sample_normalize_fact_ids": [row.id for row in normalize_rows[:SAMPLE_LIMIT]],
+            "sample_purge_fact_ids": [row.id for row in purge_rows[:SAMPLE_LIMIT]],
+            "score_missing": {
+                "blogger_seo_count": len(missing_seo),
+                "blogger_geo_count": len(missing_geo),
+                "blogger_lighthouse_count": len(missing_lighthouse),
+                "blogger_lighthouse_sample_fact_ids": [row.id for row in missing_lighthouse[:SAMPLE_LIMIT]],
+            },
+        },
+        touched_months,
+    )
 
 
 def _merge_analytics_group(rows: list[AnalyticsArticleFact]) -> AnalyticsArticleFact:
@@ -344,7 +446,7 @@ def _sync_live_sources(db: Session, *, run_live_sync: bool, scope: str) -> dict[
             result["blogger_error"] = str(exc)
     if scope in {"all", "cloudflare"}:
         try:
-            result["cloudflare"] = sync_cloudflare_posts(db, include_non_published=True)
+            result["cloudflare"] = sync_cloudflare_posts(db, include_non_published=False)
         except Exception as exc:  # noqa: BLE001
             db.rollback()
             result["cloudflare_error"] = str(exc)
@@ -366,14 +468,47 @@ def run_cleanup(
         blogger_stats = DedupeStats(0, 0, [])
         cloudflare_stats = DedupeStats(0, 0, [])
         touched_months: set[tuple[int, str]] = set()
+        canonical_live_audit: dict[str, Any] = {
+            "blogger_live_count": 0,
+            "blogger_non_live_synced_count": 0,
+            "analytics_fact_count": 0,
+            "facts_kept": 0,
+            "facts_to_normalize": 0,
+            "facts_to_purge": 0,
+            "sample_normalize_fact_ids": [],
+            "sample_purge_fact_ids": [],
+            "cloudflare_published_count": 0,
+            "cloudflare_non_published_count": 0,
+            "score_missing": {
+                "blogger_seo_count": 0,
+                "blogger_geo_count": 0,
+                "blogger_lighthouse_count": 0,
+                "blogger_lighthouse_sample_fact_ids": [],
+                "cloudflare_lighthouse_count": 0,
+                "cloudflare_lighthouse_sample_remote_ids": [],
+            },
+        }
 
         if scope in {"all", "blogger"}:
-            blogger_stats, touched_months = _dedupe_blogger_analytics(db, cutoff_utc=cutoff_utc)
+            blogger_live_audit, cleanup_touched_months = _apply_blogger_live_fact_cleanup(db)
+            blogger_score_missing = dict(blogger_live_audit.pop("score_missing"))
+            canonical_live_audit.update(blogger_live_audit)
+            canonical_live_audit["score_missing"].update(blogger_score_missing)
+            blogger_stats, dedupe_touched_months = _dedupe_blogger_analytics(db, cutoff_utc=cutoff_utc)
+            touched_months = cleanup_touched_months | dedupe_touched_months
             for blog_id, month in sorted(touched_months):
                 if month:
                     rebuild_blog_month_rollup(db, blog_id, month, commit=False)
 
         if scope in {"all", "cloudflare"}:
+            cloudflare_live_audit = _collect_cloudflare_published_audit(db)
+            canonical_live_audit.update(
+                {
+                    "cloudflare_published_count": cloudflare_live_audit["cloudflare_published_count"],
+                    "cloudflare_non_published_count": cloudflare_live_audit["cloudflare_non_published_count"],
+                }
+            )
+            canonical_live_audit["score_missing"].update(cloudflare_live_audit["score_missing"])
             cloudflare_stats = _dedupe_cloudflare_rows(db, cutoff_utc=cutoff_utc)
 
         if execute:
@@ -395,6 +530,7 @@ def run_cleanup(
         "merged_row_deleted_count": merged_row_deleted_count,
         "keeper_selection_rule": KEEPER_SELECTION_RULE,
         "sample_merged_keys": sample_merged_keys,
+        "canonical_live_audit": canonical_live_audit,
         "blogger": {
             "merged_group_count": blogger_stats.merged_group_count,
             "merged_row_deleted_count": blogger_stats.merged_row_deleted_count,
@@ -419,6 +555,7 @@ def run_cleanup(
         merged_row_deleted_count=payload["merged_row_deleted_count"],
         keeper_selection_rule=payload["keeper_selection_rule"],
         sample_merged_keys=payload["sample_merged_keys"],
+        canonical_live_audit=payload["canonical_live_audit"],
         blogger=payload["blogger"],
         cloudflare=payload["cloudflare"],
         touched_months=payload["touched_months"],
@@ -430,7 +567,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cutoff-date", default="2026-04-10", help="Cutoff date (YYYY-MM-DD) in local timezone.")
     parser.add_argument("--timezone", default="Asia/Seoul", help="Timezone for cutoff date.")
     parser.add_argument("--scope", choices=["all", "blogger", "cloudflare"], default="all", help="Cleanup scope.")
-    parser.add_argument("--skip-live-sync", action="store_true", help="Skip Blogger/Cloudflare live sync before dedupe.")
+    parser.add_argument("--skip-live-sync", action="store_true", help="Skip Blogger/Cloudflare live sync before execute.")
     parser.add_argument("--dry-run", action="store_true", help="Run cleanup logic without committing.")
     parser.add_argument("--execute", action="store_true", help="Execute dedupe and commit changes.")
     args = parser.parse_args()
@@ -448,7 +585,7 @@ def main() -> int:
         cutoff_date=args.cutoff_date,
         timezone_name=args.timezone,
         scope=args.scope,
-        run_live_sync=not args.skip_live_sync,
+        run_live_sync=execute and not args.skip_live_sync,
         execute=execute,
     )
     print(
@@ -463,6 +600,7 @@ def main() -> int:
                 "merged_row_deleted_count": result.merged_row_deleted_count,
                 "keeper_selection_rule": result.keeper_selection_rule,
                 "sample_merged_keys": result.sample_merged_keys,
+                "canonical_live_audit": result.canonical_live_audit,
                 "blogger": result.blogger,
                 "cloudflare": result.cloudflare,
                 "touched_months": result.touched_months,

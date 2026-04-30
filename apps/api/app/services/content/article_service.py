@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import re
+import unicodedata
+from collections import Counter
 from datetime import datetime, timezone
 from html import escape, unescape
 from html.parser import HTMLParser
@@ -21,6 +23,7 @@ from app.services.content.travel_blog_policy import (
     TRAVEL_BLOG_IDS,
     build_travel_asset_object_key,
     build_travel_collage_context,
+    build_travel_image_contract,
     get_travel_blog_policy,
     normalize_travel_pattern_key,
     normalize_travel_pattern_version_key,
@@ -457,9 +460,11 @@ def build_r2_asset_object_key(
     )
     slug_token = _normalize_slug_token(post_slug, fallback="post")
     if normalized_profile == "world_mystery":
+        role_token = _normalize_slug_token(asset_role, fallback="hero")
+        file_stem = f"{slug_token}-closing" if role_token in {"closing", "visual-summary", "summary"} else slug_token
         return (
             f"assets/the-midnight-archives/{category_key}/"
-            f"{resolved_time:%Y}/{resolved_time:%m}/{slug_token}/{slug_token}.webp"
+            f"{resolved_time:%Y}/{resolved_time:%m}/{slug_token}/{file_stem}.webp"
         )
 
     role_token = _normalize_slug_token(asset_role, fallback="asset")
@@ -667,6 +672,119 @@ def _plain_text_length(value: str) -> int:
     raw = TAG_RE.sub(" ", str(value or ""))
     normalized = MULTISPACE_RE.sub("", unescape(raw))
     return len(normalized.strip())
+
+
+def _plain_text_for_quality(value: str) -> str:
+    raw = TAG_RE.sub(" ", str(value or ""))
+    normalized = unicodedata.normalize("NFKC", unescape(raw))
+    return MULTISPACE_RE.sub(" ", normalized).strip()
+
+
+def _quality_key(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    normalized = re.sub(r"https?://\S+", "", normalized)
+    normalized = re.sub(r"[\W_]+", "", normalized, flags=re.UNICODE)
+    return normalized.strip()
+
+
+def _extract_quality_paragraphs(html_fragment: str) -> list[str]:
+    matches = re.findall(r"(?is)<p\b[^>]*>(.*?)</p>", str(html_fragment or ""))
+    paragraphs = [_plain_text_for_quality(item) for item in matches]
+    return [item for item in paragraphs if item]
+
+
+def _split_quality_sentences(text: str) -> list[str]:
+    parts = re.split(r"(?<=[.!?。！？])\s+|(?<=[.!?。！？])", str(text or ""))
+    sentences = [MULTISPACE_RE.sub(" ", part).strip() for part in parts]
+    return [item for item in sentences if len(_quality_key(item)) >= 10]
+
+
+def _travel_content_quality_check(
+    *,
+    title: str,
+    meta_description: str,
+    excerpt: str,
+    html_article: str,
+) -> dict[str, Any]:
+    plain_text = _plain_text_for_quality(html_article)
+    paragraphs = _extract_quality_paragraphs(html_article)
+    sentences = _split_quality_sentences(plain_text)
+    sentence_counter = Counter(_quality_key(sentence) for sentence in sentences)
+    paragraph_counter = Counter(_quality_key(paragraph) for paragraph in paragraphs if len(_quality_key(paragraph)) >= 60)
+    issues: list[str] = []
+
+    repeated_sentences = [
+        key for key, count in sentence_counter.items()
+        if key and count >= 2
+    ]
+    if repeated_sentences:
+        issues.append("duplicate_sentence")
+
+    repeated_paragraphs = [
+        key for key, count in paragraph_counter.items()
+        if key and count >= 2
+    ]
+    if repeated_paragraphs:
+        issues.append("duplicate_paragraph")
+
+    first_paragraph_key = _quality_key(paragraphs[0]) if paragraphs else ""
+    for source_name, source_value in (
+        ("meta_description", meta_description),
+        ("excerpt", excerpt),
+        ("title", title),
+    ):
+        source_key = _quality_key(source_value)
+        if len(source_key) < 30 or not first_paragraph_key:
+            continue
+        shorter = min(len(source_key), len(first_paragraph_key))
+        if source_key == first_paragraph_key or first_paragraph_key.startswith(source_key[:shorter]) or source_key.startswith(first_paragraph_key[:shorter]):
+            issues.append(f"intro_duplicates_{source_name}")
+
+    lower_plain = plain_text.casefold()
+    water_terms = (
+        "river",
+        "riverside",
+        "stream",
+        "川沿い",
+        "川辺",
+        "河川",
+        "río",
+        "ribera",
+        "arroyo",
+    )
+    water_context_terms = (
+        "hangang",
+        "han river",
+        "nodeul",
+        "ichon",
+        "anyangcheon",
+        "cheonggyecheon",
+        "seokchon",
+        "lake",
+        "한강",
+        "노들",
+        "이촌",
+        "안양천",
+        "청계천",
+        "石村湖",
+        "漢江",
+        "ノドゥル",
+        "二村",
+        "río han",
+        "cheonggyecheon",
+    )
+    if any(term in lower_plain for term in water_terms) and not any(term in lower_plain for term in water_context_terms):
+        issues.append("route_irrelevant_water_template")
+
+    return {
+        "passed": not issues,
+        "issues": issues,
+        "sentence_count": len(sentences),
+        "paragraph_count": len(paragraphs),
+        "duplicate_sentence_count": len(repeated_sentences),
+        "duplicate_paragraph_count": len(repeated_paragraphs),
+        "body_chars": _plain_text_length(html_article),
+    }
 
 
 def _legacy_travel_pattern_version(value: int | str | None) -> int | None:
@@ -940,6 +1058,23 @@ def save_article(
     sanitized_html = sanitize_blog_html(output.html_article)
     sanitized_faq_section = [item.model_dump() for item in output.faq_section]
     slug_candidate = slugify(output.slug or sanitized_title) or "post"
+    if int(job.blog_id or 0) == 37 and get_travel_blog_policy(blog_id=job.blog_id) is not None:
+        travel_sync_payload = {}
+        if isinstance(job.raw_prompts, dict):
+            candidate = job.raw_prompts.get("travel_sync")
+            if isinstance(candidate, dict):
+                travel_sync_payload = dict(candidate)
+        try:
+            explicit_source_id = int(travel_sync_payload.get("source_article_id") or 0)
+        except (TypeError, ValueError):
+            explicit_source_id = 0
+        if explicit_source_id > 0:
+            source_slug = db.execute(
+                select(Article.slug).where(Article.id == explicit_source_id)
+            ).scalar_one_or_none()
+            source_slug_candidate = slugify(source_slug or "", separator="-")
+            if source_slug_candidate:
+                slug_candidate = source_slug_candidate
     assert_article_not_duplicate(
         db,
         blog_id=job.blog_id,
@@ -986,8 +1121,9 @@ def save_article(
     resolved_article_pattern_version = _legacy_travel_pattern_version(output.article_pattern_version)
     if resolved_article_pattern_version is None and resolved_article_pattern_version_key:
         resolved_article_pattern_version = TRAVEL_PATTERN_VERSION
+    travel_quality_check_payload: dict[str, Any] | None = None
     if travel_policy is not None:
-        if _plain_text_length(sanitized_html) < 2500:
+        if _plain_text_length(sanitized_html) < 3000:
             raise ValueError("travel_article_plain_text_too_short")
         if _body_h1_count(sanitized_html) > 0:
             raise ValueError("travel_article_body_h1_forbidden")
@@ -1003,6 +1139,15 @@ def save_article(
             )
         if "<img" in str(output.html_article or "").lower():
             raise ValueError("travel_article_inline_image_forbidden")
+        travel_quality_check_payload = _travel_content_quality_check(
+            title=sanitized_title,
+            meta_description=sanitized_meta_description,
+            excerpt=sanitized_excerpt,
+            html_article=sanitized_html,
+        )
+        if not bool(travel_quality_check_payload.get("passed")):
+            issues = [str(item) for item in travel_quality_check_payload.get("issues") or []]
+            raise ValueError("travel_article_quality_invalid:" + ",".join(issues))
     resolved_editorial_key, resolved_editorial_label, resolved_labels = canonicalize_editorial_labels(
         profile_key=profile_key,
         primary_language=primary_language,
@@ -1012,6 +1157,39 @@ def save_article(
         title=sanitized_title,
         summary=sanitized_excerpt,
     )
+    render_metadata = _build_render_metadata_from_output(output)
+    if travel_quality_check_payload is not None:
+        render_metadata = {
+            **render_metadata,
+            "travel_quality_checks": travel_quality_check_payload,
+        }
+    travel_score_payload: dict[str, Any] | None = None
+    if travel_policy is not None:
+        try:
+            from app.services.content.content_ops_service import compute_seo_geo_scores
+
+            travel_score_payload = compute_seo_geo_scores(
+                title=sanitized_title,
+                html_body=sanitized_html,
+                excerpt=sanitized_excerpt,
+                faq_section=sanitized_faq_section,
+            )
+            quality_scores = dict(render_metadata.get("travel_quality_scores") or {})
+            quality_scores.update(
+                {
+                    "seo_score": int(travel_score_payload.get("seo_score") or 0),
+                    "geo_score": int(travel_score_payload.get("geo_score") or 0),
+                    "ctr_title_score": int(travel_score_payload.get("ctr_score") or 0),
+                    "ctr_breakdown": dict(travel_score_payload.get("ctr_breakdown") or {}),
+                }
+            )
+            render_metadata = {
+                **render_metadata,
+                "travel_quality_scores": quality_scores,
+            }
+        except Exception:
+            travel_score_payload = None
+
     payload = {
         "blog_id": job.blog_id,
         "topic_id": topic.id if topic else None,
@@ -1027,11 +1205,15 @@ def save_article(
         "article_pattern_version": resolved_article_pattern_version,
         "article_pattern_key": resolved_article_pattern_key,
         "article_pattern_version_key": resolved_article_pattern_version_key,
-        "render_metadata": _build_render_metadata_from_output(output),
+        "render_metadata": render_metadata,
         "editorial_category_key": resolved_editorial_key,
         "editorial_category_label": resolved_editorial_label,
         "reading_time_minutes": estimate_reading_time(sanitized_html),
     }
+    if travel_score_payload is not None:
+        payload["quality_seo_score"] = int(travel_score_payload.get("seo_score") or 0)
+        payload["quality_geo_score"] = int(travel_score_payload.get("geo_score") or 0)
+        payload["quality_ctr_score"] = float(travel_score_payload.get("ctr_score") or 0)
     if article:
         for key, value in payload.items():
             setattr(article, key, value)
@@ -1112,6 +1294,10 @@ def build_collage_article_context(article: Article) -> str:
             labels=list(article.labels or []),
             image_seed=article.image_collage_prompt,
             planner_summary=planner_summary,
+            category_key=article.editorial_category_key,
+            pattern_key=getattr(article, "article_pattern_key", None),
+            pattern_id=getattr(article, "article_pattern_id", None),
+            policy=travel_policy,
         )
 
     labels = ", ".join(article.labels or [])
@@ -1136,16 +1322,13 @@ def build_collage_prompt(article: Article, prompt_template: str | None = None) -
     prefix = f"{base_prompt}. " if base_prompt else ""
     travel_policy = get_travel_blog_policy(blog=article.blog)
     if travel_policy is not None:
-        return (
-            f"{prefix}"
-            "Create one single flattened final editorial travel image. "
-            "Make it a 5 columns x 4 rows collage with exactly 20 distinct visible panels inside one composition. "
-            "Use thin visible white gutters between panels. "
-            "Do not generate 20 separate images. "
-            "Do not generate one single hero shot without panel structure. "
-            "Do not describe a sprite sheet, contact sheet, or separate assets. "
-            "Realistic Korea travel photography only, no text, no logos."
+        contract = build_travel_image_contract(
+            category_key=article.editorial_category_key,
+            pattern_key=getattr(article, "article_pattern_key", None),
+            pattern_id=getattr(article, "article_pattern_id", None),
+            policy=travel_policy,
         )
+        return f"{prefix}{contract}".strip()
     is_mystery = (
         getattr(article.blog, "profile_key", "") == "world_mystery"
         or str(getattr(article.blog, "content_category", "") or "").strip().lower() == "mystery"
@@ -1153,9 +1336,9 @@ def build_collage_prompt(article: Article, prompt_template: str | None = None) -
     if is_mystery:
         return (
             f"{prefix}"
-            'Rewrite into one "5x4 panel grid collage" hero prompt with visible white gutters, '
+            'Rewrite into one clear editorial panel-grid collage hero prompt with visible white gutters, '
             "clean grid layout, one balanced single-image composition, 2-4 grouped visual categories, realistic "
-            "documentary mood, no text/logo/watermark, no gore, do not request 20 separate images, under 60 words."
+            "documentary mood, no text/logo/watermark, no gore, do not request separate image files, under 60 words."
         )
     return (
         f"{prefix}"

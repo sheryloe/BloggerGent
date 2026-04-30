@@ -290,6 +290,7 @@ class Article(TimestampMixin, Base):
     quality_most_similar_url: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
     quality_seo_score: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
     quality_geo_score: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    quality_ctr_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
     quality_lighthouse_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
     quality_lighthouse_accessibility_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
     quality_lighthouse_best_practices_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
@@ -1494,3 +1495,306 @@ class AgentRun(TimestampMixin, Base):
     managed_channel: Mapped[ManagedChannel | None] = relationship(back_populates="agent_runs")
     content_item: Mapped[ContentItem | None] = relationship(back_populates="agent_runs")
     worker: Mapped[AgentWorker | None] = relationship(back_populates="runs")
+
+
+class QmsArchiveMixin:
+    archived_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
+    archived_reason: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+
+
+class QmsDocument(TimestampMixin, QmsArchiveMixin, Base):
+    __tablename__ = "qms_documents"
+    __table_args__ = (sa.UniqueConstraint("document_key", name="uq_qms_documents_document_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    document_key: Mapped[str] = mapped_column(sa.String(120), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    phase: Mapped[str] = mapped_column(sa.String(30), nullable=False, index=True)
+    clause: Mapped[str | None] = mapped_column(sa.String(120), nullable=True, index=True)
+    owner: Mapped[str | None] = mapped_column(sa.String(120), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="draft", index=True)
+    version: Mapped[str] = mapped_column(sa.String(40), nullable=False, default="1.0")
+    source_path: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    runtime_path: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    checksum_sha256: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    last_reviewed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    next_review_due: Mapped[date | None] = mapped_column(sa.Date, nullable=True, index=True)
+    document_payload: Mapped[dict] = mapped_column("payload", sa.JSON, nullable=False, default=dict)
+
+
+class QmsKpiSnapshot(TimestampMixin, QmsArchiveMixin, Base):
+    __tablename__ = "qms_kpi_snapshots"
+    __table_args__ = (sa.UniqueConstraint("snapshot_key", name="uq_qms_kpi_snapshots_snapshot_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    snapshot_key: Mapped[str] = mapped_column(sa.String(160), nullable=False, index=True)
+    period_start: Mapped[date | None] = mapped_column(sa.Date, nullable=True, index=True)
+    period_end: Mapped[date | None] = mapped_column(sa.Date, nullable=True, index=True)
+    published_total: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    seo_scored_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    geo_scored_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    ctr_scored_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    lighthouse_scored_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    indexed_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    not_indexed_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    unknown_index_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    search_console_ctr_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    quality_gate_pass_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    rewrite_required_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    manual_review_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    publish_success_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    status_breakdown: Mapped[dict] = mapped_column(sa.JSON, nullable=False, default=dict)
+    snapshot_payload: Mapped[dict] = mapped_column("payload", sa.JSON, nullable=False, default=dict)
+
+
+class QmsRisk(TimestampMixin, QmsArchiveMixin, Base):
+    __tablename__ = "qms_risks"
+    __table_args__ = (sa.UniqueConstraint("risk_key", name="uq_qms_risks_risk_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    risk_key: Mapped[str] = mapped_column(sa.String(160), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(sa.String(500), nullable=False)
+    category: Mapped[str] = mapped_column(sa.String(80), nullable=False, default="operation", index=True)
+    phase: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="phase-2", index=True)
+    source: Mapped[str] = mapped_column(sa.String(80), nullable=False, default="manual", index=True)
+    severity: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=3)
+    occurrence: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=3)
+    detection: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=3)
+    rpn: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=27, index=True)
+    status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="open", index=True)
+    owner: Mapped[str | None] = mapped_column(sa.String(120), nullable=True, index=True)
+    mitigation_plan: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    due_date: Mapped[date | None] = mapped_column(sa.Date, nullable=True, index=True)
+    closed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    risk_payload: Mapped[dict] = mapped_column("payload", sa.JSON, nullable=False, default=dict)
+
+
+class QmsCapaCase(TimestampMixin, QmsArchiveMixin, Base):
+    __tablename__ = "qms_capa_cases"
+    __table_args__ = (sa.UniqueConstraint("capa_key", name="uq_qms_capa_cases_capa_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    capa_key: Mapped[str] = mapped_column(sa.String(160), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(sa.String(500), nullable=False)
+    source_type: Mapped[str] = mapped_column(sa.String(80), nullable=False, default="manual", index=True)
+    source_id: Mapped[str | None] = mapped_column(sa.String(255), nullable=True, index=True)
+    problem_statement: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    root_cause: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    containment_action: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    corrective_action: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    preventive_action: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="open", index=True)
+    priority: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="medium", index=True)
+    owner: Mapped[str | None] = mapped_column(sa.String(120), nullable=True, index=True)
+    due_date: Mapped[date | None] = mapped_column(sa.Date, nullable=True, index=True)
+    verified_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    effectiveness_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    capa_payload: Mapped[dict] = mapped_column("payload", sa.JSON, nullable=False, default=dict)
+
+    actions: Mapped[list["QmsCapaAction"]] = relationship(back_populates="capa", cascade="all, delete-orphan")
+
+
+class QmsCapaAction(TimestampMixin, Base):
+    __tablename__ = "qms_capa_actions"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    capa_id: Mapped[int] = mapped_column(sa.ForeignKey("qms_capa_cases.id", ondelete="CASCADE"), nullable=False, index=True)
+    action_type: Mapped[str] = mapped_column(sa.String(50), nullable=False, default="corrective", index=True)
+    title: Mapped[str] = mapped_column(sa.String(500), nullable=False)
+    owner: Mapped[str | None] = mapped_column(sa.String(120), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="open", index=True)
+    due_date: Mapped[date | None] = mapped_column(sa.Date, nullable=True, index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    result_payload: Mapped[dict] = mapped_column(sa.JSON, nullable=False, default=dict)
+
+    capa: Mapped[QmsCapaCase] = relationship(back_populates="actions")
+
+
+class QmsChangeRequest(TimestampMixin, QmsArchiveMixin, Base):
+    __tablename__ = "qms_change_requests"
+    __table_args__ = (sa.UniqueConstraint("change_key", name="uq_qms_change_requests_change_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    change_key: Mapped[str] = mapped_column(sa.String(160), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(sa.String(500), nullable=False)
+    change_type: Mapped[str] = mapped_column(sa.String(80), nullable=False, default="process", index=True)
+    risk_level: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="medium", index=True)
+    status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="draft", index=True)
+    requester: Mapped[str | None] = mapped_column(sa.String(120), nullable=True)
+    approver: Mapped[str | None] = mapped_column(sa.String(120), nullable=True)
+    description: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    impact_summary: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    rollback_plan: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    planned_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    implemented_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    released_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    change_payload: Mapped[dict] = mapped_column("payload", sa.JSON, nullable=False, default=dict)
+
+
+class QmsReleaseRecord(TimestampMixin, QmsArchiveMixin, Base):
+    __tablename__ = "qms_release_records"
+    __table_args__ = (sa.UniqueConstraint("release_key", name="uq_qms_release_records_release_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    release_key: Mapped[str] = mapped_column(sa.String(160), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(sa.String(500), nullable=False)
+    status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="planned", index=True)
+    branch: Mapped[str | None] = mapped_column(sa.String(160), nullable=True, index=True)
+    commit_hash: Mapped[str | None] = mapped_column(sa.String(80), nullable=True, index=True)
+    pushed: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False)
+    alembic_revision: Mapped[str | None] = mapped_column(sa.String(120), nullable=True)
+    test_summary: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    evidence_path: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    released_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    release_payload: Mapped[dict] = mapped_column("payload", sa.JSON, nullable=False, default=dict)
+
+
+class QmsSupplier(TimestampMixin, QmsArchiveMixin, Base):
+    __tablename__ = "qms_suppliers"
+    __table_args__ = (sa.UniqueConstraint("supplier_key", name="uq_qms_suppliers_supplier_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    supplier_key: Mapped[str] = mapped_column(sa.String(120), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    supplier_type: Mapped[str] = mapped_column(sa.String(80), nullable=False, default="api", index=True)
+    status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="active", index=True)
+    risk_level: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="medium", index=True)
+    service_scope: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    data_access_level: Mapped[str] = mapped_column(sa.String(80), nullable=False, default="operational")
+    owner: Mapped[str | None] = mapped_column(sa.String(120), nullable=True, index=True)
+    review_cycle_days: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=90)
+    last_reviewed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    next_review_due: Mapped[date | None] = mapped_column(sa.Date, nullable=True, index=True)
+    supplier_payload: Mapped[dict] = mapped_column("payload", sa.JSON, nullable=False, default=dict)
+
+    reviews: Mapped[list["QmsSupplierReview"]] = relationship(back_populates="supplier", cascade="all, delete-orphan")
+
+
+class QmsSupplierReview(TimestampMixin, Base):
+    __tablename__ = "qms_supplier_reviews"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    supplier_id: Mapped[int] = mapped_column(sa.ForeignKey("qms_suppliers.id", ondelete="CASCADE"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="accepted", index=True)
+    reviewed_by: Mapped[str | None] = mapped_column(sa.String(120), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    findings: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    action_required: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False)
+    review_payload: Mapped[dict] = mapped_column("payload", sa.JSON, nullable=False, default=dict)
+
+    supplier: Mapped[QmsSupplier] = relationship(back_populates="reviews")
+
+
+class QmsInternalAudit(TimestampMixin, QmsArchiveMixin, Base):
+    __tablename__ = "qms_internal_audits"
+    __table_args__ = (sa.UniqueConstraint("audit_key", name="uq_qms_internal_audits_audit_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    audit_key: Mapped[str] = mapped_column(sa.String(160), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(sa.String(500), nullable=False)
+    scope: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="planned", index=True)
+    auditor: Mapped[str | None] = mapped_column(sa.String(120), nullable=True)
+    scheduled_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    summary: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    audit_payload: Mapped[dict] = mapped_column("payload", sa.JSON, nullable=False, default=dict)
+
+    findings: Mapped[list["QmsAuditFinding"]] = relationship(back_populates="audit", cascade="all, delete-orphan")
+
+
+class QmsAuditFinding(TimestampMixin, Base):
+    __tablename__ = "qms_audit_findings"
+    __table_args__ = (sa.UniqueConstraint("finding_key", name="uq_qms_audit_findings_finding_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    audit_id: Mapped[int] = mapped_column(sa.ForeignKey("qms_internal_audits.id", ondelete="CASCADE"), nullable=False, index=True)
+    finding_key: Mapped[str] = mapped_column(sa.String(160), nullable=False, index=True)
+    severity: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="minor", index=True)
+    clause: Mapped[str | None] = mapped_column(sa.String(120), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(sa.String(500), nullable=False)
+    description: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="open", index=True)
+    owner: Mapped[str | None] = mapped_column(sa.String(120), nullable=True, index=True)
+    due_date: Mapped[date | None] = mapped_column(sa.Date, nullable=True, index=True)
+    closed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    capa_id: Mapped[int | None] = mapped_column(sa.ForeignKey("qms_capa_cases.id", ondelete="SET NULL"), nullable=True, index=True)
+    finding_payload: Mapped[dict] = mapped_column("payload", sa.JSON, nullable=False, default=dict)
+
+    audit: Mapped[QmsInternalAudit] = relationship(back_populates="findings")
+
+
+class QmsManagementReview(TimestampMixin, QmsArchiveMixin, Base):
+    __tablename__ = "qms_management_reviews"
+    __table_args__ = (sa.UniqueConstraint("review_key", name="uq_qms_management_reviews_review_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    review_key: Mapped[str] = mapped_column(sa.String(160), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(sa.String(500), nullable=False)
+    period_start: Mapped[date | None] = mapped_column(sa.Date, nullable=True, index=True)
+    period_end: Mapped[date | None] = mapped_column(sa.Date, nullable=True, index=True)
+    status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="planned", index=True)
+    chair: Mapped[str | None] = mapped_column(sa.String(120), nullable=True)
+    scheduled_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    inputs_summary: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    decisions_summary: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    review_payload: Mapped[dict] = mapped_column("payload", sa.JSON, nullable=False, default=dict)
+
+    actions: Mapped[list["QmsManagementReviewAction"]] = relationship(back_populates="review", cascade="all, delete-orphan")
+
+
+class QmsManagementReviewAction(TimestampMixin, Base):
+    __tablename__ = "qms_management_review_actions"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    review_id: Mapped[int] = mapped_column(sa.ForeignKey("qms_management_reviews.id", ondelete="CASCADE"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(sa.String(500), nullable=False)
+    owner: Mapped[str | None] = mapped_column(sa.String(120), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="open", index=True)
+    due_date: Mapped[date | None] = mapped_column(sa.Date, nullable=True, index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    action_payload: Mapped[dict] = mapped_column("payload", sa.JSON, nullable=False, default=dict)
+
+    review: Mapped[QmsManagementReview] = relationship(back_populates="actions")
+
+
+class QmsEvidenceItem(TimestampMixin, QmsArchiveMixin, Base):
+    __tablename__ = "qms_evidence_items"
+    __table_args__ = (sa.UniqueConstraint("evidence_key", name="uq_qms_evidence_items_evidence_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    evidence_key: Mapped[str] = mapped_column(sa.String(180), nullable=False, index=True)
+    evidence_type: Mapped[str] = mapped_column(sa.String(80), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(sa.String(500), nullable=False)
+    source_path: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    runtime_path: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    checksum_sha256: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, index=True)
+    file_size: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    modified_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
+    linked_record_type: Mapped[str | None] = mapped_column(sa.String(80), nullable=True, index=True)
+    linked_record_id: Mapped[int | None] = mapped_column(sa.Integer, nullable=True, index=True)
+    status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="captured", index=True)
+    captured_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
+    evidence_payload: Mapped[dict] = mapped_column("payload", sa.JSON, nullable=False, default=dict)
+
+
+class QmsRuntimeScan(TimestampMixin, Base):
+    __tablename__ = "qms_runtime_scans"
+    __table_args__ = (sa.UniqueConstraint("scan_key", name="uq_qms_runtime_scans_scan_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    scan_key: Mapped[str] = mapped_column(sa.String(180), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="pending", index=True)
+    runtime_root: Mapped[str] = mapped_column(sa.String(1000), nullable=False)
+    scanned_paths: Mapped[list] = mapped_column(sa.JSON, nullable=False, default=list)
+    file_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    evidence_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    secrets_masked_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    error_message: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True, index=True)
+    scan_payload: Mapped[dict] = mapped_column("payload", sa.JSON, nullable=False, default=dict)

@@ -90,6 +90,18 @@ import {
   Topic,
   WorkspaceIntegrationOverviewRead,
   WorkspaceRuntimeUsageRead,
+  QmsAuditRead,
+  QmsCapaRead,
+  QmsChangeRead,
+  QmsDashboardRead,
+  QmsDocumentRead,
+  QmsEvidenceRead,
+  QmsKpiSnapshotRead,
+  QmsManagementReviewRead,
+  QmsReleaseRead,
+  QmsRiskRead,
+  QmsRuntimeScanRead,
+  QmsSupplierRead,
 } from "@/lib/types";
 
 function resolveBaseUrl() {
@@ -99,21 +111,120 @@ function resolveBaseUrl() {
   return process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:7002/api/v1";
 }
 
+const ADMIN_AUTH_STORAGE_KEY = "bloggent.adminAuth.v1";
+
 type ApiFetchOptions = RequestInit & {
   revalidate?: number | false;
   timeoutMs?: number;
 };
 
+type AdminAuthCredential = {
+  username: string;
+  password: string;
+};
+
+export class ApiRequestError extends Error {
+  status: number;
+  path: string;
+  detail: string;
+
+  constructor(path: string, status: number, detail: string) {
+    super(`API request failed for ${path}: ${status}${detail ? ` (${detail})` : ""}`);
+    this.name = "ApiRequestError";
+    this.path = path;
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+export function saveAdminAuthCredential(username: string, password: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const credential: AdminAuthCredential = { username, password };
+  window.sessionStorage.setItem(ADMIN_AUTH_STORAGE_KEY, JSON.stringify(credential));
+}
+
+export function clearAdminAuthCredential() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.sessionStorage.removeItem(ADMIN_AUTH_STORAGE_KEY);
+}
+
+function readClientAdminAuthCredential(): AdminAuthCredential | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const raw = window.sessionStorage.getItem(ADMIN_AUTH_STORAGE_KEY);
+  if (!raw) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw) as Partial<AdminAuthCredential>;
+    const username = String(parsed.username || "").trim();
+    const password = String(parsed.password || "");
+    if (!username || !password) {
+      return null;
+    }
+    return { username, password };
+  } catch {
+    window.sessionStorage.removeItem(ADMIN_AUTH_STORAGE_KEY);
+    return null;
+  }
+}
+
+function readServerAdminAuthCredential(): AdminAuthCredential | null {
+  if (typeof window !== "undefined") {
+    return null;
+  }
+  const username = String(process.env.API_ADMIN_AUTH_USERNAME || process.env.ADMIN_AUTH_USERNAME || "").trim();
+  const password = String(process.env.API_ADMIN_AUTH_PASSWORD || process.env.ADMIN_AUTH_PASSWORD || "");
+  if (!username || !password) {
+    return null;
+  }
+  return { username, password };
+}
+
+function resolveAdminAuthCredential() {
+  return readServerAdminAuthCredential() ?? readClientAdminAuthCredential();
+}
+
+async function readErrorDetail(response: Response) {
+  try {
+    const payload = (await response.clone().json()) as { detail?: unknown };
+    if (typeof payload.detail === "string") {
+      return payload.detail;
+    }
+    if (payload.detail) {
+      return JSON.stringify(payload.detail);
+    }
+  } catch {
+    // Fall through to text payload below.
+  }
+  try {
+    return (await response.clone().text()).slice(0, 300);
+  } catch {
+    return "";
+  }
+}
+
 async function apiFetch<T>(path: string, init?: ApiFetchOptions): Promise<T> {
   const method = (init?.method ?? "GET").toUpperCase();
   const revalidate = init?.revalidate;
   const timeoutMs = init?.timeoutMs ?? (method === "GET" ? 8000 : 15000);
+  const headers = new Headers(init?.headers);
+  if (!headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  const adminCredential = resolveAdminAuthCredential();
+  if (adminCredential && !headers.has("x-admin-user") && !headers.has("x-admin-password") && !headers.has("Authorization")) {
+    headers.set("x-admin-user", adminCredential.username);
+    headers.set("x-admin-password", adminCredential.password);
+  }
   const fetchInit: RequestInit & { next?: { revalidate?: number | false } } = {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
+    headers,
   };
 
   if (!init?.cache) {
@@ -138,7 +249,7 @@ async function apiFetch<T>(path: string, init?: ApiFetchOptions): Promise<T> {
   try {
     const response = await fetch(`${resolveBaseUrl()}${path}`, fetchInit);
     if (!response.ok) {
-      throw new Error(`API request failed for ${path}: ${response.status}`);
+      throw new ApiRequestError(path, response.status, await readErrorDetail(response));
     }
     return response.json() as Promise<T>;
   } catch (error) {
@@ -1884,3 +1995,119 @@ export const fetchBlogs = getBlogs;
 export const fetchChannels = getChannels;
 export const fetchSettings = getSettings;
 export const fetchBloggerConfig = getBloggerConfig;
+
+export async function getQmsDashboard() {
+  return apiFetch<QmsDashboardRead>("/qms/dashboard", { revalidate: false, timeoutMs: 15000 });
+}
+
+export async function getQmsDocuments() {
+  return apiFetch<QmsDocumentRead[]>("/qms/documents", { revalidate: false });
+}
+
+export async function createQmsKpiSnapshot() {
+  return apiFetch<QmsKpiSnapshotRead>("/qms/kpis/snapshot", { method: "POST", body: JSON.stringify({}) });
+}
+
+export async function getQmsRisks() {
+  return apiFetch<QmsRiskRead[]>("/qms/risks", { revalidate: false });
+}
+
+export async function createQmsRisk(payload: Record<string, unknown>) {
+  return apiFetch<QmsRiskRead>("/qms/risks", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export async function updateQmsRisk(riskId: number, payload: Record<string, unknown>) {
+  return apiFetch<QmsRiskRead>(`/qms/risks/${riskId}`, { method: "PATCH", body: JSON.stringify(payload) });
+}
+
+export async function getQmsCapa() {
+  return apiFetch<QmsCapaRead[]>("/qms/capa", { revalidate: false });
+}
+
+export async function createQmsCapa(payload: Record<string, unknown>) {
+  return apiFetch<QmsCapaRead>("/qms/capa", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export async function updateQmsCapa(capaId: number, payload: Record<string, unknown>) {
+  return apiFetch<QmsCapaRead>(`/qms/capa/${capaId}`, { method: "PATCH", body: JSON.stringify(payload) });
+}
+
+export async function getQmsChanges() {
+  return apiFetch<QmsChangeRead[]>("/qms/changes", { revalidate: false });
+}
+
+export async function createQmsChange(payload: Record<string, unknown>) {
+  return apiFetch<QmsChangeRead>("/qms/changes", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export async function getQmsReleases() {
+  return apiFetch<QmsReleaseRead[]>("/qms/releases", { revalidate: false });
+}
+
+export async function createQmsRelease(payload: Record<string, unknown>) {
+  return apiFetch<QmsReleaseRead>("/qms/releases", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export async function getQmsSuppliers() {
+  return apiFetch<QmsSupplierRead[]>("/qms/suppliers", { revalidate: false });
+}
+
+export async function createQmsSupplier(payload: Record<string, unknown>) {
+  return apiFetch<QmsSupplierRead>("/qms/suppliers", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export async function getQmsAudits() {
+  return apiFetch<QmsAuditRead[]>("/qms/audits", { revalidate: false });
+}
+
+export async function createQmsAudit(payload: Record<string, unknown>) {
+  return apiFetch<QmsAuditRead>("/qms/audits", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export async function getQmsManagementReviews() {
+  return apiFetch<QmsManagementReviewRead[]>("/qms/management-reviews", { revalidate: false });
+}
+
+export async function createQmsManagementReview(payload: Record<string, unknown>) {
+  return apiFetch<QmsManagementReviewRead>("/qms/management-reviews", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export async function getQmsEvidence() {
+  return apiFetch<QmsEvidenceRead[]>("/qms/evidence", { revalidate: false, timeoutMs: 15000 });
+}
+
+export async function scanQmsRuntime(maxFilesPerRoot = 500) {
+  return apiFetch<QmsRuntimeScanRead>("/qms/evidence/scan-runtime", {
+    method: "POST",
+    body: JSON.stringify({ max_files_per_root: maxFilesPerRoot }),
+    timeoutMs: 60000,
+  });
+}
+
+export async function exportQmsReport(title = "BloggerGent QMS Evidence Report") {
+  return apiFetch<{ status: string; json_path: string; markdown_path: string; evidence: QmsEvidenceRead }>("/qms/evidence/export-report", {
+    method: "POST",
+    body: JSON.stringify({ title, include_runtime: true }),
+    timeoutMs: 30000,
+  });
+}
+
+export async function updateQmsChange(changeId: number, payload: Record<string, unknown>) {
+  return apiFetch<QmsChangeRead>(`/qms/changes/${changeId}`, { method: "PATCH", body: JSON.stringify(payload) });
+}
+
+export async function updateQmsRelease(releaseId: number, payload: Record<string, unknown>) {
+  return apiFetch<QmsReleaseRead>(`/qms/releases/${releaseId}`, { method: "PATCH", body: JSON.stringify(payload) });
+}
+
+export async function updateQmsSupplier(supplierId: number, payload: Record<string, unknown>) {
+  return apiFetch<QmsSupplierRead>(`/qms/suppliers/${supplierId}`, { method: "PATCH", body: JSON.stringify(payload) });
+}
+
+export async function updateQmsAudit(auditId: number, payload: Record<string, unknown>) {
+  return apiFetch<QmsAuditRead>(`/qms/audits/${auditId}`, { method: "PATCH", body: JSON.stringify(payload) });
+}
+
+export async function updateQmsManagementReview(reviewId: number, payload: Record<string, unknown>) {
+  return apiFetch<QmsManagementReviewRead>(`/qms/management-reviews/${reviewId}`, { method: "PATCH", body: JSON.stringify(payload) });
+}

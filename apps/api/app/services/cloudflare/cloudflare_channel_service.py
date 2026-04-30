@@ -48,6 +48,7 @@ from app.services.content.article_pattern_service import (
 from app.services.content.article_three_pass_service import generate_three_step_article
 from app.services.content.image_prompt_policy import (
     is_valid_collage_prompt,
+    is_valid_visual_prompt,
     normalize_visual_prompt,
     should_reuse_article_collage_prompts,
 )
@@ -100,6 +101,18 @@ CLOUDFLARE_PROMPT_CATEGORY_PATH_MAP: dict[str, str] = {
     "축제와-현장": "정보의 기록/cugjewa-hyeonjang",
     "문화와-공간": "정보의 기록/munhwawa-gonggan",
 }
+
+for _cloudflare_prompt_path in tuple(CLOUDFLARE_PROMPT_CATEGORY_PATH_MAP.values()):
+    _cloudflare_prompt_leaf = _cloudflare_prompt_path.rsplit("/", 1)[-1]
+    CLOUDFLARE_PROMPT_CATEGORY_PATH_MAP.setdefault(_cloudflare_prompt_leaf, _cloudflare_prompt_path)
+
+for _cloudflare_prompt_key, _cloudflare_prompt_path in tuple(CLOUDFLARE_PROMPT_CATEGORY_PATH_MAP.items()):
+    if "-" in _cloudflare_prompt_key and not _cloudflare_prompt_key.isascii():
+        CLOUDFLARE_PROMPT_CATEGORY_PATH_MAP.setdefault(
+            _cloudflare_prompt_key.replace("-", " "),
+            _cloudflare_prompt_path,
+        )
+
 CLOUDFLARE_ADSENSE_FORBIDDEN_BODY_TOKENS: tuple[str, ...] = (
     "<script",
     '<ins class="adsbygoogle"',
@@ -136,11 +149,15 @@ CLOUDFLARE_BODY_ADS_TWO_SLOT_MIN_H2 = 5
 CLOUDFLARE_BODY_ADS_INLINE_ENABLED = False
 
 
+def _cloudflare_allowed_inline_image_slot_roles(category_slug: str | None) -> tuple[str, ...]:
+    leaf = get_cloudflare_prompt_category_relative_path(str(category_slug or "")).name
+    if leaf in {"cugjewa-hyeonjang", "munhwawa-gonggan"}:
+        return ("inline_1", "inline_2")
+    return ()
+
+
 def _cloudflare_allows_inline_image_slots(category_slug: str | None) -> bool:
-    return get_cloudflare_prompt_category_relative_path(str(category_slug or "")).name in {
-        "cugjewa-hyeonjang",
-        "munhwawa-gonggan",
-    }
+    return bool(_cloudflare_allowed_inline_image_slot_roles(category_slug))
 
 
 CLOUDFLARE_LAYOUT_TEMPLATE_BY_CATEGORY: dict[str, str] = {
@@ -215,6 +232,8 @@ CLOUDFLARE_BODY_ALLOWED_TAGS: set[str] = {
     "summary",
     "h2",
     "h3",
+    "pre",
+    "code",
     "p",
     "ul",
     "ol",
@@ -865,6 +884,39 @@ def _safe_float(value: Any, fallback: float) -> float:
         return float(str(value).strip())
     except (TypeError, ValueError):
         return fallback
+
+
+def _cloudflare_average_score(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return round(sum(values) / len(values), 2)
+
+
+def _cloudflare_score_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    numeric_fields = (
+        "seo_score",
+        "geo_score",
+        "ctr_score",
+        "lighthouse_score",
+        "persona_fit_score",
+        "title_final_score",
+    )
+    averages: dict[str, float | None] = {}
+    for field in numeric_fields:
+        values = [
+            float(row[field])
+            for row in rows
+            if row.get(field) is not None
+        ]
+        averages[field] = _cloudflare_average_score(values)
+    return {
+        "count": len(rows),
+        "seo_avg": averages["seo_score"],
+        "geo_avg": averages["geo_score"],
+        "ctr_avg": averages["ctr_score"],
+        "lighthouse_avg": averages["lighthouse_score"],
+        "averages": averages,
+    }
 
 
 def _resolve_topic_history_settings(values: dict[str, str]) -> tuple[int, float, float, int]:
@@ -1903,6 +1955,7 @@ def _build_cloudflare_master_article_prompt(
     pattern_selection: Any | None = None,
 ) -> str:
     category_name = str(category.get("name") or category.get("slug") or "").strip()
+    category_id = str(category.get("id") or "").strip()
     category_slug = str(category.get("slug") or "").strip()
     category_description = str(category.get("description") or "").strip()
     pattern_selection = pattern_selection or select_cloudflare_article_pattern(db, category_slug=category_slug)
@@ -1943,10 +1996,10 @@ def _build_cloudflare_master_article_prompt(
         f"{base_rendered}\n\n"
         f"{build_article_pattern_prompt_block(pattern_selection)}\n"
         "[HTML structure policy]\n"
-        "- Allowed tags only: <section>, <article>, <div>, <aside>, <blockquote>, <table>, <thead>, <tbody>, <tr>, <th>, <td>, <details>, <summary>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <span>, <br>, <hr>.\n"
-        "- Allowed class presets only: callout, timeline, card-grid, fact-box, caution-box, quote-box, chat-thread, comparison-table, route-steps, route-hero-card, step-flow, timing-box, timing-table, local-tip-box, event-checklist, event-hero, crowd-timing-box, food-lodging-table, field-caution-box, policy-summary, summary-box, comparison-matrix, workflow-strip, scene-intro, scene-divider, note-block, note-aside, closing-record, viewing-order-box, highlight-table, curator-note, case-summary, timeline-board, evidence-table, interpretation-compare, checklist-box, step-box, friction-table, eligibility-table, process-strip, document-checklist, market-summary, factor-table, viewpoint-compare, company-brief, dialogue-thread, checkpoint-box, checkpoint-strip, risk-factor-table, reflection-scene, thought-block.\n"
+        "- Allowed tags only: <section>, <article>, <div>, <aside>, <blockquote>, <table>, <thead>, <tbody>, <tr>, <th>, <td>, <details>, <summary>, <h2>, <h3>, <pre>, <code>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <span>, <br>, <hr>.\n"
+        "- Allowed class presets only: callout, timeline, card-grid, fact-box, caution-box, quote-box, chat-thread, comparison-table, route-steps, route-hero-card, step-flow, timing-box, timing-table, local-tip-box, event-checklist, event-hero, crowd-timing-box, food-lodging-table, field-caution-box, policy-summary, summary-box, comparison-matrix, workflow-strip, scene-intro, scene-divider, note-block, note-aside, closing-record, viewing-order-box, highlight-table, curator-note, case-summary, timeline-board, evidence-table, interpretation-compare, checklist-box, step-box, friction-table, eligibility-table, process-strip, document-checklist, market-summary, factor-table, viewpoint-compare, company-brief, dialogue-thread, checkpoint-box, checkpoint-strip, risk-factor-table, reflection-scene, thought-block, cf-image-slot.\n"
         "- Return article_pattern_id and article_pattern_version in the JSON output.\n"
-        f"{_article_output_contract(is_mysteria=_is_mysteria_story_category(category_slug), category_slug=category_slug)}"
+        f"{_article_output_contract(is_mysteria=_is_mysteria_story_category(category_id=category_id, category_slug=category_slug), category_slug=category_slug)}"
     )
 
 
@@ -1975,12 +2028,12 @@ def _build_mysteria_blogger_source_block(
         return ""
 
     intro_lines = [
-        "[誘몄뒪?뚮━???ㅽ넗由??뚯뒪 ?댁쁺 而⑥뀎]",
-        "- ??移댄뀒怨좊━??Blogger ?먮낯 ?뚯뒪瑜??쒓뎅??臾명솕沅?留λ씫??留욊쾶 ?ш?怨듯븯??諛⑹떇?쇰줈 ?묒꽦?⑸땲??",
-        "- DB ?뚯뒪 ?먮뒗 ?ㅻ옒??湲遺??ascending) ?쒖꽌?濡??쎄퀬, ???뚯감??2媛쒖뵫(source pair) 臾띠뼱 ?ъ슜?⑸땲??",
-        "- ?⑥닚 吏곸뿭 湲덉?: ?ъ떎 愿怨?異쒖쿂???좎??섍퀬 ?쒓뎅 ?낆옄 湲곗???留λ씫, ?⑹뼱, ?ㅻ챸 ?쒖꽌濡??ш뎄?깊빀?덈떎.",
-        "- source pair?먯꽌 寃뱀튂???ъ떎? 援먯감 寃利??ъ씤?몃줈 ?뺣━?섍퀬, ?곸땐 ?댁슜? 遺꾨━ ?쒓린?⑸땲??",
-        "- 蹂몃Ц?먯꽌 ?먮Ц ?쒗쁽??湲멸쾶 蹂듭궗?섏? 留먭퀬, 寃利?媛?ν븳 ?ъ떎 以묒떖???쒓뎅???ㅽ걧硫섑꽣由??ㅼ쑝濡??곷땲??",
+        "[Blogger source pairing rules]",
+        "- Use the oldest published Blogger mystery posts as source references for Cloudflare Mysteria story generation.",
+        "- Pair records in ascending DB order and use exactly two source posts when available.",
+        "- Preserve the source case, evidence, timeline, location, and human context without copying prose verbatim.",
+        "- If source data is incomplete, mark the missing fact as unknown instead of inventing details.",
+        "- The Cloudflare output must be a new Korean dark-archive article, not a direct translation dump.",
     ]
 
     try:
@@ -2611,10 +2664,19 @@ def _cloudflare_body_contract_violations(body_html: str, *, category_slug: str) 
             break
 
     slot_roles = _extract_cloudflare_inline_slot_roles(body)
-    if slot_roles and not _cloudflare_allows_inline_image_slots(category_slug):
+    allowed_slot_roles = set(_cloudflare_allowed_inline_image_slot_roles(category_slug))
+    category_leaf = get_cloudflare_prompt_category_relative_path(str(category_slug or "")).name
+    if slot_roles and not allowed_slot_roles:
         reasons.append("inline_slot_not_allowed")
     if any(role not in CLOUDFLARE_BODY_ALLOWED_SLOT_ROLES for role in slot_roles):
         reasons.append("invalid_inline_slot")
+    if allowed_slot_roles and any(role not in allowed_slot_roles for role in slot_roles):
+        reasons.append("inline_slot_role_not_allowed")
+    if allowed_slot_roles:
+        for required_role in sorted(allowed_slot_roles):
+            if slot_roles.count(required_role) != 1:
+                reasons.append("required_inline_slot_count_mismatch")
+                break
     if "<!--cf_image_slot" in lowered:
         # Legacy comments are normalized before publish, but they should not remain in final body.
         reasons.append("legacy_comment_slot_present")
@@ -2733,6 +2795,22 @@ def _sanitize_cloudflare_public_body(body_html: str, *, category_slug: str, titl
     return cleaned.strip()
 
 
+def _has_suspicious_mojibake_text(value: str | None) -> bool:
+    text = re.sub(r"https?://\S+", " ", str(value or ""))
+    if "\ufffd" in text:
+        return True
+    if len(re.findall(r"\?{2,}", text)) >= 2:
+        return True
+    suspicious_lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip() and re.search(r"(?:\?{2,}|\*\*\?\?\*\*)", line)
+    ]
+    if len(suspicious_lines) >= 2:
+        return True
+    return any(re.search(r"^\s*(?:\*\*)?\?{2,}(?:\*\*)?\s*$", line) for line in suspicious_lines)
+
+
 def _cloudflare_public_body_quality_reasons(body_markdown: str, *, category_slug: str) -> list[str]:
     reasons: list[str] = []
     stripped_body = re.sub(r"<!--.*?-->", "", str(body_markdown or ""), flags=re.DOTALL)
@@ -2762,6 +2840,8 @@ def _cloudflare_public_body_quality_reasons(body_markdown: str, *, category_slug
         reasons.append("category_intro_leak")
     if adsense_body_token_violations(body_markdown):
         reasons.append("adsense_body_token_present")
+    if _has_suspicious_mojibake_text(body_markdown):
+        reasons.append("mojibake_text_detected")
     for contract_reason in _cloudflare_body_contract_violations(body_markdown, category_slug=category_slug):
         if contract_reason not in reasons:
             reasons.append(contract_reason)
@@ -3857,20 +3937,23 @@ def _build_history_exclusion_prompt_from_entries(entries: Sequence[Any], *, limi
 
 def _article_output_contract(*, is_mysteria: bool = False, category_slug: str = "") -> str:
     inline_slots_allowed = (not is_mysteria) and _cloudflare_allows_inline_image_slots(category_slug)
+    inline_slot_roles = _cloudflare_allowed_inline_image_slot_roles(category_slug) if inline_slots_allowed else ()
+    image_roles = ("hero", *inline_slot_roles)
+    image_roles_json = ",".join(json.dumps(role, ensure_ascii=False) for role in image_roles)
     inline_contract = '  "inline_collage_prompt": null,\n'
-    image_asset_plan_contract = (
-        '  "image_asset_plan": {"roles":["hero","inline_1","inline_2"],"live_apply_status":"blocked"},\n'
-        if inline_slots_allowed
-        else '  "image_asset_plan": {"roles":["hero"],"live_apply_status":"blocked"},\n'
-    )
+    image_asset_plan_contract = f'  "image_asset_plan": {{"roles":[{image_roles_json}],"live_apply_status":"blocked"}},\n'
     layout_rule = (
         "- Use the same live layout pattern as the exemplar post: one left-aligned lead section, 4 or 5 H2 sections, optional H3 subsections, at least one bordered table, one inline FAQ section near the end, and a final closing section.\n"
         if is_mysteria
         else "- Use the same live layout pattern as the category policy: one left-aligned lead section, 4 to 6 H2 sections, optional H3 subsections, at least one structured block, and a final closing section.\n"
     )
     if inline_slots_allowed:
+        slot_examples = " and ".join(
+            f'<div class="cf-image-slot" data-cf-image-slot="{role}"></div>' for role in inline_slot_roles
+        )
         inline_rule = (
-            '- Do not insert <img>, <figure>, or markdown image syntax. Use only inert DOM slots: <div class="cf-image-slot" data-cf-image-slot="inline_1"></div> and <div class="cf-image-slot" data-cf-image-slot="inline_2"></div> where the category needs body image slots.\n'
+            f"- Do not insert <img>, <figure>, or markdown image syntax. Use only inert DOM slots: {slot_examples}.\n"
+            "- Inline slots are allowed only for 문화와-공간 and 축제와-현장. Use inline_1 for access/viewing/queue flow and inline_2 for highlight/risk/time context.\n"
             "- inline_collage_prompt must be null or empty; ImageGen prompt preparation is handled by the role-based queue.\n"
         )
     else:
@@ -3937,15 +4020,23 @@ def _article_output_contract(*, is_mysteria: bool = False, category_slug: str = 
     )
 
 
-def _append_no_inline_image_rule(prompt: str, *, allow_inline_slots: bool = False) -> str:
+def _append_no_inline_image_rule(
+    prompt: str,
+    *,
+    allow_inline_slots: bool = False,
+    allowed_slot_roles: tuple[str, ...] = (),
+) -> str:
     if allow_inline_slots:
+        slot_examples = " and ".join(
+            f'<div class="cf-image-slot" data-cf-image-slot="{role}"></div>' for role in allowed_slot_roles
+        )
         return (
             f"{prompt}\n\n"
             "[Inline image slot policy]\n"
             "- Do not output <img>, <figure>, or markdown image syntax in the public body.\n"
             "- inline_collage_prompt must be null or empty.\n"
-            '- This category may place only these inert body image slots: <div class="cf-image-slot" data-cf-image-slot="inline_1"></div> and <div class="cf-image-slot" data-cf-image-slot="inline_2"></div>.\n'
-            "- Use slots only when they support route/access/viewing flow or highlight/risk context; never use midpoint auto insertion.\n"
+            f"- This category may place only these inert body image slots: {slot_examples}.\n"
+            "- Inline slots are allowed only for 문화와-공간 and 축제와-현장; use inline_1 for access/viewing/queue flow and inline_2 for highlight/risk/time context.\n"
         )
     return (
         f"{prompt}\n\n"
@@ -4019,6 +4110,7 @@ def _category_hard_gate(category_slug: str, category_name: str) -> str:
         lines.append("- This category is for policy, welfare, subsidy, and application guidance. Do not drift into mindset essays or quote collections.")
     if category_slug == "개발과-프로그래밍":
         lines.append("- This category must stay in AI coding, LLM agents, automation workflows, tool comparison, or practical setup. Do not drift into generic IT news.")
+        lines.append("- Keep this category hero-only. Do not output inline image slots in html_article.")
     if category_slug == "여행과-기록":
         lines.append("- Travel category must stay with real places, route flow, and first-hand travel movement.")
         lines.append("- Reject blog introductions, archive introductions, category introductions, and generic travel essays.")
@@ -4302,6 +4394,43 @@ def _insert_markdown_inline_image(body_markdown: str, image_markdown: str) -> st
         return f"{body[:insert_at].rstrip()}\n\n{image_block}\n\n{body[insert_at:].lstrip()}"
 
     return f"{body}\n\n{image_block}"
+
+
+def _render_full_width_cloudflare_image(*, url: str, alt: str, loading: str = "lazy") -> str:
+    src = str(url or "").strip()
+    if not src:
+        return ""
+    safe_alt = escape(str(alt or "").strip(), quote=True)
+    safe_loading = "eager" if str(loading or "").strip().lower() == "eager" else "lazy"
+    return f'<img src="{escape(src, quote=True)}" alt="{safe_alt}" width="100%" loading="{safe_loading}" decoding="async" />'
+
+
+def _replace_cloudflare_image_slot_with_markdown(body_markdown: str, *, slot_role: str, image_markdown: str) -> tuple[str, bool]:
+    body = (body_markdown or "").strip()
+    image_block = (image_markdown or "").strip()
+    role = str(slot_role or "").strip().lower().replace("-", "_")
+    if not body or not image_block or not role:
+        return body, False
+    pattern = re.compile(
+        rf'(?is)<div\b(?=[^>]*\bdata-cf-image-slot\s*=\s*(["\']){re.escape(role)}\1)[^>]*>\s*</div>'
+    )
+    replaced, count = pattern.subn(f"\n\n{image_block}\n\n", body, count=1)
+    if count <= 0:
+        return body, False
+    return re.sub(r"\n{3,}", "\n\n", replaced).strip(), True
+
+
+def _build_developer_inline_infographic_prompt(*, title: str, excerpt: str, keyword: str) -> str:
+    context = " ".join(part for part in [title, excerpt, keyword] if str(part or "").strip())
+    return normalize_visual_prompt(
+        "Create one 16:9 inline infographic for a Korean developer blog article. "
+        "Topic context: "
+        f"{context[:260]}. "
+        "Show a clean workflow or architecture flow with five compact nodes: Context, Setup, Agent, Review, Publish. "
+        "Use only short Korean or English labels, step numbers, and 1-3 word keywords inside the image. "
+        "No long sentences, no logos, no watermarks, no fake official UI, no fake brand marks. "
+        "Modern developer desk and terminal-inspired visual system, high contrast, readable spacing, distinct from the hero cover."
+    )
 
 
 MYSTERY_BLOCK_TERMS = (
@@ -5352,8 +5481,13 @@ def generate_cloudflare_posts(
                     )
                 planner_brief_block = "\n".join(planner_lines)
             is_mysteria_category = _is_mysteria_story_category(category_id=category_id, category_slug=category_slug)
-            inline_slots_allowed_for_category = (not is_mysteria_category) and _cloudflare_allows_inline_image_slots(category_slug)
-            inline_images_enabled_for_category = False
+            inline_slot_roles_for_category = (
+                ()
+                if is_mysteria_category
+                else _cloudflare_allowed_inline_image_slot_roles(category_slug)
+            )
+            inline_slots_allowed_for_category = bool(inline_slot_roles_for_category)
+            inline_images_enabled_for_category = inline_slot_roles_for_category == ("inline_1",)
             try:
                 locked_pattern_selection = select_cloudflare_article_pattern(db, category_slug=category_slug)
                 prn_preview = preview_cloudflare_prn_titles(
@@ -5381,6 +5515,7 @@ def generate_cloudflare_posts(
                 article_prompt = _append_no_inline_image_rule(
                     article_prompt,
                     allow_inline_slots=inline_slots_allowed_for_category,
+                    allowed_slot_roles=inline_slot_roles_for_category,
                 )
                 article_model = article_requested_model
                 if runtime.provider_mode == "live":
@@ -5611,12 +5746,44 @@ def generate_cloudflare_posts(
                     )
                     continue
 
+                category_leaf = get_cloudflare_prompt_category_relative_path(category_slug).name
+                image_asset_plan = getattr(article_output, "image_asset_plan", None)
+                planned_roles = [
+                    str(role or "").strip()
+                    for role in (
+                        image_asset_plan.get("roles", [])
+                        if isinstance(image_asset_plan, dict)
+                        else []
+                    )
+                    if str(role or "").strip()
+                ]
+                expected_roles = ["hero", *inline_slot_roles_for_category]
+                if planned_roles != expected_roles:
+                    failed_count += 1
+                    items.append(
+                        {
+                            "status": "failed",
+                            "keyword": keyword,
+                            "title": article_output.title,
+                            "category_id": category_id,
+                            "topic_novelty": topic_novelty,
+                            "quality_gate": quality_gate_payload,
+                            "persona_fit": persona_fit_payload,
+                            "prn": prn_preview,
+                            "error": "image_asset_plan_roles_invalid",
+                            "expected_roles": expected_roles,
+                            "actual_roles": planned_roles,
+                        }
+                    )
+                    continue
                 article_visual_prompt = normalize_visual_prompt(article_output.image_collage_prompt)
                 inline_visual_prompt = normalize_visual_prompt(article_output.inline_collage_prompt)
+                hero_requires_collage = category_leaf != "gaebalgwa-peurogeuraeming"
                 reuse_article_prompts, article_visual_prompt_valid, inline_visual_prompt_valid = should_reuse_article_collage_prompts(
                     hero_prompt=article_visual_prompt,
                     inline_prompt=inline_visual_prompt,
                     inline_required=inline_images_enabled_for_category,
+                    hero_requires_collage=hero_requires_collage,
                 )
                 visual_prompt = ""
                 visual_prompt_source = "article_generation_reuse"
@@ -5649,7 +5816,12 @@ def generate_cloudflare_posts(
                     )
                     generated_visual_prompt, _visual_raw = prompt_provider.generate_visual_prompt(image_prompt_base)
                     generated_visual_prompt = normalize_visual_prompt(generated_visual_prompt)
-                    if is_valid_collage_prompt(generated_visual_prompt):
+                    generated_visual_prompt_valid = (
+                        is_valid_collage_prompt(generated_visual_prompt)
+                        if hero_requires_collage
+                        else is_valid_visual_prompt(generated_visual_prompt)
+                    )
+                    if generated_visual_prompt_valid:
                         visual_prompt = _append_hero_only_visual_rule(generated_visual_prompt, is_mysteria=is_mysteria_category)
                         visual_prompt_source = "image_prompt_generation_fallback"
                     else:
@@ -5764,7 +5936,15 @@ def generate_cloudflare_posts(
                     )
                 )
                 inline_prompt = normalize_visual_prompt(getattr(article_output, "inline_collage_prompt", "") or "")
-                if inline_images_enabled_for_category and is_valid_collage_prompt(inline_prompt, minimum_length=30):
+                if inline_images_enabled_for_category and not inline_prompt:
+                    inline_prompt = _build_developer_inline_infographic_prompt(
+                        title=title,
+                        excerpt=article_output.excerpt,
+                        keyword=keyword,
+                    )
+                inline_prompt_valid = is_valid_visual_prompt(inline_prompt, minimum_length=30)
+                inline_url = ""
+                if inline_images_enabled_for_category and inline_prompt_valid:
                     try:
                         inline_bytes, _inline_raw = image_provider.generate_image(inline_prompt, f"{slug_candidate}-inline-3x2")
                         if cover_image_url and _is_inline_duplicate(cover_hash, inline_bytes):
@@ -5779,10 +5959,17 @@ def generate_cloudflare_posts(
                                 filename=f"{slug_candidate}-inline-3x2.webp",
                                 image_bytes=inline_bytes,
                             )
-                            body_markdown = _insert_markdown_inline_image(
-                                body_markdown,
-                                f"![{title} inline collage]({inline_url})",
+                            inline_markdown = _render_full_width_cloudflare_image(
+                                url=inline_url,
+                                alt=f"{title} inline infographic",
                             )
+                            body_markdown, replaced_inline_slot = _replace_cloudflare_image_slot_with_markdown(
+                                body_markdown,
+                                slot_role="inline_1",
+                                image_markdown=inline_markdown,
+                            )
+                            if not replaced_inline_slot:
+                                body_markdown = _insert_markdown_inline_image(body_markdown, inline_markdown)
                     except Exception as inline_exc:  # noqa: BLE001
                         image_warning = "; ".join(
                             value
@@ -5795,6 +5982,23 @@ def generate_cloudflare_posts(
                         for value in (image_warning, "inline_collage_skipped:validation_failed")
                         if value
                     )
+                if inline_images_enabled_for_category and not inline_url:
+                    failed_count += 1
+                    items.append(
+                        {
+                            "status": "failed",
+                            "keyword": keyword,
+                            "title": title,
+                            "category_id": category_id,
+                            "topic_novelty": topic_novelty,
+                            "quality_gate": quality_gate_payload,
+                            "persona_fit": persona_fit_payload,
+                            "prn": prn_preview,
+                            "error": "inline_1_image_missing",
+                            "image_warning": image_warning or "inline_1_image_missing",
+                        }
+                    )
+                    continue
 
                 tag_names: list[str] = []
                 seen_tag_keys: set[str] = set()
@@ -6097,13 +6301,26 @@ def generate_cloudflare_posts(
     except Exception as exc:  # noqa: BLE001
         quality_sheet_sync = {"status": "failed", "reason": str(exc), "rows": len(cloudflare_quality_rows)}
     sync_result: dict[str, Any] | None = None
+    db_sync_scores: list[dict[str, Any]] = []
+    post_publish_sync: dict[str, Any] = {
+        "provider": "cloudflare",
+        "status": "skipped",
+        "reason": "no_created_posts",
+        "synced_count": 0,
+        "score_summary": _cloudflare_score_summary([]),
+        "score_rows": [],
+    }
+    post_publish_sync_failed = False
+    post_publish_sync_error: str | None = None
     lighthouse_results: list[dict[str, Any]] = []
     lighthouse_failed_count = 0
     if created_pattern_map:
         try:
-            from app.services.cloudflare.cloudflare_sync_service import sync_cloudflare_posts
+            from app.services.cloudflare.cloudflare_sync_service import collect_cloudflare_sync_score_rows, sync_cloudflare_posts
 
             sync_result = sync_cloudflare_posts(db, include_non_published=True)
+            if str(sync_result.get("status") or "").strip().lower() == "fetch_failed":
+                raise RuntimeError(str(sync_result.get("error") or "cloudflare_sync_fetch_failed"))
             synced_rows = (
                 db.execute(
                     select(SyncedCloudflarePost).where(
@@ -6216,10 +6433,36 @@ def generate_cloudflare_posts(
                         synced_changed = True
             if synced_changed or lighthouse_results:
                 db.commit()
+            db_sync_scores = collect_cloudflare_sync_score_rows(
+                db,
+                remote_post_ids=list(created_pattern_map.keys()),
+            )
+            if isinstance(sync_result, dict):
+                sync_result["score_rows"] = db_sync_scores
+                sync_result["score_summary"] = _cloudflare_score_summary(db_sync_scores)
+            if not db_sync_scores:
+                raise RuntimeError("post_publish_score_rows_empty")
+            post_publish_sync = {
+                "provider": "cloudflare",
+                "status": "ok",
+                "synced_count": len(db_sync_scores),
+                "score_summary": _cloudflare_score_summary(db_sync_scores),
+                "score_rows": db_sync_scores,
+            }
         except Exception as exc:  # noqa: BLE001
+            post_publish_sync_failed = True
+            post_publish_sync_error = str(exc)
             sync_result = {"status": "failed", "reason": str(exc)}
+            post_publish_sync = {
+                "provider": "cloudflare",
+                "status": "failed",
+                "synced_count": 0,
+                "sync_error": str(exc),
+                "score_summary": _cloudflare_score_summary([]),
+                "score_rows": [],
+            }
     failed_count += lighthouse_failed_count
-    status_value = "ok" if failed_count == 0 else ("partial" if created_count > 0 else "failed")
+    status_value = "ok" if failed_count == 0 and not post_publish_sync_failed else ("partial" if created_count > 0 else "failed")
     return {
         "status": status_value,
         "created_count": created_count,
@@ -6231,5 +6474,8 @@ def generate_cloudflare_posts(
         "lighthouse": lighthouse_results,
         "quality_sheet_sync": quality_sheet_sync,
         "sync_result": sync_result,
+        "post_publish_sync": post_publish_sync,
+        "sync_error": post_publish_sync_error,
+        "db_sync_scores": db_sync_scores,
         "categories": category_results,
     }

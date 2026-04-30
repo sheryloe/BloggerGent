@@ -8,10 +8,10 @@ from urllib.parse import urlsplit
 from slugify import slugify
 
 
-TRAVEL_IMAGE_POLICY_VERSION = "2026-04-27"
-TRAVEL_IMAGE_LAYOUT_POLICY = "travel_editorial_20panel_5x4_apr2026"
+TRAVEL_IMAGE_POLICY_VERSION = "2026-04-29"
+TRAVEL_IMAGE_LAYOUT_POLICY = "travel_editorial_12panel_4x3"
 TRAVEL_LOCKED_IMAGE_MODEL = "gpt-image-1"
-TRAVEL_PANEL_COUNT = 20
+TRAVEL_PANEL_COUNT = 12
 TRAVEL_CANONICAL_PREFIX = "assets/travel-blogger/"
 TRAVEL_BLOG_GROUP = "travel-blogger"
 TRAVEL_TEXT_ROUTE_CODEX = "codex_cli"
@@ -82,6 +82,36 @@ TRAVEL_EDITORIAL_GUIDANCE = {
         "Forbidden drift: generic foodie hype, ingredient dumping, and taste adjectives with no ordering or route value."
     ),
 }
+TRAVEL_CATEGORY_VISUAL_PROFILES = {
+    "travel": "Photorealistic editorial route collage focused on route flow, station exits, alleys, transit choices, timing windows, crowd avoidance, and nearby pairing.",
+    "culture": "Editorial illustrator collage grounded in real Korean venues, festival timing, venue context, ticketing, etiquette, crowd rhythm, and details to notice.",
+    "food": "Photorealistic food-and-route documentary collage focused on storefronts, queue signals, ordering moments, signature dishes, budget cues, and nearby route pairing.",
+    "uncategorized": "Photorealistic editorial route collage grounded in real Korean streets, transit choices, timing windows, and local context.",
+}
+TRAVEL_PATTERN_SCENE_OVERLAYS = {
+    "hidden-path-route": "Route flow scenes: entrances, alleys, transfers, timing decisions, quiet side paths, and the final viewpoint.",
+    "cultural-insider": "Cultural insider scenes: venue context, ticketing or entry flow, etiquette, crowd rhythm, artifacts, signage shapes without readable text, and details to notice.",
+    "local-flavor-guide": "Local flavor scenes: storefront, queue, order counter, signature dish, table detail, price or menu decision without readable text, and the nearby walking route.",
+    "seasonal-secret": "Seasonal secret scenes: seasonal light, weather texture, bloom or foliage timing, crowd avoidance, backup stop, and best time-of-day contrast.",
+    "smart-traveler-log": "Smart traveler scenes: reservation or wait decision, queue management, budget cue, transit choice, fallback plan, and failure-avoidance checkpoints.",
+}
+TRAVEL_IMAGE_BASE_CONTRACT = (
+    "ONE single flattened final image. "
+    "4 columns x 3 rows visible editorial collage. "
+    "Exactly 12 distinct visible panels inside one composition. "
+    "Thin white gutters visible between panels. "
+    "One dominant anchor panel must feel visually strongest while still remaining inside the 4x3 grid. "
+    "Use varied camera distances across panels: wide establishing route scene, medium street scene, close-up local detail, food or rest detail, and transit or walking decision moment. "
+    "Use cinematic natural light matched to the topic: golden hour, blue hour, rainy reflections, spring haze, lantern glow, or crisp morning light. "
+    "Every panel must show a different route decision moment, not repeated scenery from the same angle. "
+    "Make it feel like an editorial travel magazine opener, not a neutral information collage. "
+    "No text, no logos, no watermark. "
+    "Do not generate 12 separate images. "
+    "Do not generate one single hero shot without panel structure. "
+    "No contact sheet, no sprite sheet, no separate assets. "
+    "Avoid generic stock-photo tourism, fake landmarks, empty postcard streets, plastic-looking people, and repetitive panels."
+)
+
 TRAVEL_ALLOWED_FILENAME_RE = re.compile(r"^(?P<post_slug>[a-z0-9]+(?:-[a-z0-9]+)*)\.webp$", re.IGNORECASE)
 
 
@@ -95,7 +125,7 @@ class TravelBlogPolicy:
     image_policy_version: str = TRAVEL_IMAGE_POLICY_VERSION
     image_layout_policy: str = TRAVEL_IMAGE_LAYOUT_POLICY
     panel_count: int = TRAVEL_PANEL_COUNT
-    layout: str = "20_panel_5x4_collage"
+    layout: str = "12_panel_4x3_collage"
     visible_gutters: bool = True
     single_scene_forbidden: bool = True
     hero_only: bool = True
@@ -439,30 +469,55 @@ def build_travel_policy_config(
     return None
 
 
+def build_travel_image_contract(
+    *,
+    category_key: str | None = None,
+    pattern_key: str | None = None,
+    pattern_id: str | None = None,
+    policy: TravelBlogPolicy | None = None,
+) -> str:
+    resolved_category = normalize_travel_category_key(category_key)
+    if resolved_category not in TRAVEL_CATEGORY_VISUAL_PROFILES:
+        resolved_category = "uncategorized"
+    resolved_pattern = normalize_travel_pattern_key(pattern_key, pattern_id=pattern_id)
+    if resolved_pattern not in TRAVEL_PATTERN_SCENE_OVERLAYS:
+        resolved_pattern = "hidden-path-route"
+    audience = {
+        "en": "Practical English readers who want credible route decisions, not brochure copy.",
+        "es": "Spanish-speaking readers who want scene-first emotion with practical route decisions.",
+        "ja": "Japanese independent travelers who prioritize efficient movement, reservations, transit, and crowd control.",
+    }.get((policy.primary_language if policy else "") or "", "International Korea travel readers who need practical route clarity.")
+    return (
+        f"{TRAVEL_IMAGE_BASE_CONTRACT} "
+        f"Visual style: {TRAVEL_CATEGORY_VISUAL_PROFILES[resolved_category]} "
+        f"Pattern scene overlay: {TRAVEL_PATTERN_SCENE_OVERLAYS[resolved_pattern]} "
+        f"Audience: {audience}"
+    )
+
+
 def travel_panel_prompt_missing_requirements(prompt: str | None) -> list[str]:
     lowered = str(prompt or "").strip().lower()
     missing: list[str] = []
     if not any(token in lowered for token in ("collage", "grid", "panel")):
         missing.append("missing_collage_terms")
-    if not any(
-        token in lowered
-        for token in (
-            "5x4",
-            "5 x 4",
-            "5 columns x 4 rows",
-            "5 columns by 4 rows",
-            "five columns x four rows",
-        )
-    ):
-        missing.append("missing_5x4_layout")
-    if not any(token in lowered for token in ("20 visible panels", "20 distinct panels", "20 panels", "twenty panels")):
-        missing.append("missing_20panel_layout")
+    if not any(token in lowered for token in ("4x3", "4 x 3", "4 columns x 3 rows", "4 columns by 3 rows", "four columns x three rows", "four columns by three rows")):
+        missing.append("missing_4x3_layout")
+    if not any(token in lowered for token in ("exactly 12", "12 visible panels", "12 distinct visible panels", "12 distinct panels", "twelve visible panels", "twelve distinct panels")):
+        missing.append("missing_12panel_layout")
     if not any(token in lowered for token in ("single flattened final image", "one single flattened final image", "single final image")):
         missing.append("missing_single_final_image_rule")
     if "gutter" not in lowered and "border" not in lowered:
         missing.append("missing_visible_gutters")
+    if "anchor panel" not in lowered and "dominant anchor" not in lowered:
+        missing.append("missing_dominant_anchor_panel")
+    if "camera distance" not in lowered and "wide establishing" not in lowered:
+        missing.append("missing_camera_distance_variation")
+    if "stock-photo" not in lowered and "stock photo" not in lowered:
+        missing.append("missing_anti_stock_photo_rule")
     if "separate image" not in lowered and "separate images" not in lowered:
         missing.append("missing_no_separate_images_rule")
+    if "single hero shot" not in lowered and "one single hero shot" not in lowered:
+        missing.append("missing_no_single_hero_rule")
     if "no text" not in lowered and "no logo" not in lowered:
         missing.append("missing_no_text_logo_rule")
     return missing
@@ -477,50 +532,43 @@ def travel_panel_size_missing_requirements(width: int, height: int) -> list[str]
     return missing
 
 
-def build_travel_20panel_retry_prompt(
+def build_travel_12panel_retry_prompt(
     *,
     policy: TravelBlogPolicy,
     keyword: str,
     title: str,
     original_prompt: str,
+    category_key: str | None = None,
+    pattern_key: str | None = None,
+    pattern_id: str | None = None,
 ) -> str:
-    persona = {
-        "en": "US-first and global English travelers who want route clarity and trendy but authentic Korea scenes.",
-        "es": "Spanish-speaking travelers who need practical route cues, timing decisions, and believable on-site scenes.",
-        "ja": "Japanese independent travelers who prioritize route flow, crowd control, time savings, and clean realistic scenes.",
-    }.get(policy.primary_language, "International Korea travel readers who need practical route clarity.")
+    contract = build_travel_image_contract(category_key=category_key, pattern_key=pattern_key, pattern_id=pattern_id, policy=policy)
     return (
-        "Create one single flattened final editorial travel image at 1024x1024. "
-        "The image must visibly show a 5 columns x 4 rows collage with exactly 20 distinct panels inside one composition. "
-        "Use thin visible white gutters between panels so every panel reads as a separate photo. "
-        "Do not generate 20 separate images. Do not generate one single hero shot without panel structure. "
-        "Do not describe a contact sheet, sprite sheet, file set, or separate assets. "
-        "Use realistic Korea travel photography only, no text, no logos, no infographic styling. "
-        f"Audience direction: {persona} "
-        f"Topic: {keyword}. Title context: {title}. Story direction: {original_prompt}"
+        f"{contract} "
+        "Use realistic Korean location cues and a coherent editorial travel mood. "
+        f"Topic: {str(keyword or '').strip()}. "
+        f"Title context: {str(title or '').strip()}. "
+        f"Story direction: {str(original_prompt or '').strip()}"
     )
 
 
-def build_travel_8panel_retry_prompt(
+def build_travel_collage_context(
     *,
-    policy: TravelBlogPolicy,
-    keyword: str,
     title: str,
-    original_prompt: str,
+    excerpt: str,
+    labels: list[str] | None,
+    image_seed: str | None,
+    planner_summary: str | None,
+    category_key: str | None = None,
+    pattern_key: str | None = None,
+    pattern_id: str | None = None,
+    policy: TravelBlogPolicy | None = None,
 ) -> str:
-    return build_travel_20panel_retry_prompt(
-        policy=policy,
-        keyword=keyword,
-        title=title,
-        original_prompt=original_prompt,
-    )
-
-
-def build_travel_collage_context(*, title: str, excerpt: str, labels: list[str] | None, image_seed: str | None, planner_summary: str | None) -> str:
     lines = [
         f"Title: {str(title or '').strip()}",
         f"Excerpt: {str(excerpt or '').strip()}",
         f"Labels: {', '.join(str(item).strip() for item in (labels or []) if str(item).strip())}",
+        "Image contract: " + build_travel_image_contract(category_key=category_key, pattern_key=pattern_key, pattern_id=pattern_id, policy=policy),
     ]
     seed = str(image_seed or "").strip()
     if seed:

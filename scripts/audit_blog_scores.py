@@ -16,6 +16,24 @@ SEO_THRESHOLD = 70
 GEO_THRESHOLD = 60
 CTR_PRIORITY_THRESHOLD = 60
 
+
+def _load_runtime_env() -> None:
+    env_path = REPO_ROOT / "env" / "runtime.settings.env"
+    if not env_path.exists():
+        return
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and not os.environ.get(key):
+            os.environ[key] = value
+
+
+_load_runtime_env()
+
 if "DATABASE_URL" not in os.environ:
     os.environ["DATABASE_URL"] = os.environ.get(
         "BLOGGENT_DATABASE_URL",
@@ -32,7 +50,11 @@ from sqlalchemy.orm import selectinload  # noqa: E402
 
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.entities import Article, Blog, BloggerPost, PostStatus  # noqa: E402
-from app.services.cloudflare.cloudflare_channel_service import _list_remote_posts  # noqa: E402
+from app.services.cloudflare.cloudflare_channel_service import (  # noqa: E402
+    _integration_data_or_raise,
+    _integration_request,
+    _list_integration_posts,
+)
 from app.services.content.content_ops_service import compute_seo_geo_scores  # noqa: E402
 from app.services.integrations.settings_service import get_settings_map  # noqa: E402
 
@@ -119,17 +141,36 @@ def _build_blogger_rows(db, *, seo_threshold: int, geo_threshold: int) -> list[d
 
 
 def _build_cloudflare_rows(db, *, seo_threshold: int, geo_threshold: int) -> list[dict[str, Any]]:
-    values = get_settings_map(db)
-    posts = _list_remote_posts(values)
+    posts = _list_integration_posts(db)
     rows: list[dict[str, Any]] = []
     for post in posts:
+        status = str(post.get("status") or "").strip().lower()
+        if status not in {"published", "live"}:
+            continue
+        remote_id = str(post.get("id") or "").strip()
+        detail = post
+        if remote_id:
+            try:
+                response = _integration_request(db, method="GET", path=f"/api/integrations/posts/{remote_id}", timeout=45.0)
+                data = _integration_data_or_raise(response)
+                if isinstance(data, dict):
+                    detail = data
+            except Exception:
+                detail = post
         slug = str(post.get("slug") or "").strip()
-        title = str(post.get("title") or slug).strip()
-        body_html = str(post.get("contentMarkdown") or post.get("content") or post.get("excerpt") or "").strip()
-        excerpt = str(post.get("excerpt") or "").strip()
-        category = post.get("category") if isinstance(post.get("category"), dict) else {}
+        title = str(detail.get("title") or post.get("title") or slug).strip()
+        body_html = str(
+            detail.get("contentHtml")
+            or detail.get("contentMarkdown")
+            or detail.get("content")
+            or detail.get("excerpt")
+            or post.get("excerpt")
+            or ""
+        ).strip()
+        excerpt = str(detail.get("seoDescription") or detail.get("excerpt") or post.get("excerpt") or "").strip()
+        category = detail.get("category") if isinstance(detail.get("category"), dict) else {}
         score_payload = _score_payload(
-            title=title,
+            title=str(detail.get("seoTitle") or title),
             html_body=body_html,
             excerpt=excerpt,
             faq_section=[],
@@ -141,10 +182,11 @@ def _build_cloudflare_rows(db, *, seo_threshold: int, geo_threshold: int) -> lis
         rows.append(
             {
                 "provider": "cloudflare",
+                "remote_post_id": remote_id,
                 "channel": str(category.get("slug") or "").strip(),
                 "slug": slug,
                 "title": title,
-                "post_url": str(post.get("publicUrl") or post.get("url") or "").strip(),
+                "post_url": str(detail.get("publicUrl") or detail.get("url") or post.get("publicUrl") or post.get("url") or "").strip(),
                 "seo_score": seo_score,
                 "geo_score": geo_score,
                 "ctr_score": ctr_score,
@@ -218,6 +260,7 @@ def _write_reports(rows: list[dict[str, Any]], *, prefix: str, seo_threshold: in
 
     fieldnames = [
         "provider",
+        "remote_post_id",
         "channel",
         "slug",
         "title",

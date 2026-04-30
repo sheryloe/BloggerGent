@@ -336,13 +336,57 @@ def test_sanitize_cloudflare_public_body_enforces_body_only_contract_and_slots()
     assert 'class="cf-image-slot" data-cf-image-slot="inline_1"' in cleaned
 
 
-def test_cloudflare_public_body_quality_reasons_rejects_inline_slots_outside_info_categories() -> None:
+def test_cloudflare_public_body_quality_reasons_rejects_inline_slots_outside_inline_categories() -> None:
     reasons = cloudflare_service._cloudflare_public_body_quality_reasons(
         '<h2>본문</h2><div class="cf-image-slot" data-cf-image-slot="inline_1"></div><p>내용</p><h2>마무리 기록</h2><p>끝</p>',
-        category_slug="개발과-프로그래밍",
+        category_slug="일상과-메모",
     )
 
     assert "inline_slot_not_allowed" in reasons
+
+
+def test_cloudflare_public_body_quality_reasons_rejects_dev_inline_slots() -> None:
+    reasons = cloudflare_service._cloudflare_public_body_quality_reasons(
+        (
+            '<h2>실전 사용법</h2><p>작업 흐름을 먼저 정리합니다.</p>'
+            '<div class="cf-image-slot" data-cf-image-slot="inline_1"></div>'
+            '<pre><code>pwsh -NoProfile -Command "Write-Output ok"</code></pre>'
+            '<h2>마무리 기록</h2><p>끝</p>'
+        ),
+        category_slug='개발과-프로그래밍',
+    )
+
+    assert "inline_slot_not_allowed" in reasons
+
+
+def test_cloudflare_public_body_quality_reasons_allows_culture_inline_pair() -> None:
+    reasons = cloudflare_service._cloudflare_public_body_quality_reasons(
+        (
+            '<h2>관람 정보</h2><p>장소와 기간을 정리합니다.</p>'
+            '<div class="cf-image-slot" data-cf-image-slot="inline_1"></div>'
+            '<h2>동선</h2><p>입구와 관람 순서를 정리합니다.</p>'
+            '<div class="cf-image-slot" data-cf-image-slot="inline_2"></div>'
+            '<h2>마무리 기록</h2><p>끝</p>'
+        ),
+        category_slug='문화와-공간',
+    )
+
+    assert "inline_slot_not_allowed" not in reasons
+    assert "inline_slot_role_not_allowed" not in reasons
+    assert "required_inline_slot_count_mismatch" not in reasons
+
+
+def test_cloudflare_public_body_quality_reasons_requires_culture_inline_pair() -> None:
+    reasons = cloudflare_service._cloudflare_public_body_quality_reasons(
+        (
+            '<h2>관람 정보</h2><p>장소와 기간을 정리합니다.</p>'
+            '<div class="cf-image-slot" data-cf-image-slot="inline_1"></div>'
+            '<h2>마무리 기록</h2><p>끝</p>'
+        ),
+        category_slug='문화와-공간',
+    )
+
+    assert "required_inline_slot_count_mismatch" in reasons
 
 
 def test_cloudflare_public_body_quality_reasons_rejects_ads_and_outer_layout_tokens() -> None:
@@ -354,3 +398,12 @@ def test_cloudflare_public_body_quality_reasons_rejects_ads_and_outer_layout_tok
     assert "h1_present" in reasons
     assert "adsense_body_token_present" in reasons
     assert "outer_layout_wrapper_present" in reasons
+
+
+def test_cloudflare_public_body_quality_reasons_rejects_question_mark_mojibake() -> None:
+    reasons = cloudflare_service._cloudflare_public_body_quality_reasons(
+        "<h2>Intro</h2><p>**??**</p><p>1. ??? ?? 7?? ??</p><h2>마무리 기록</h2><p>끝.</p>",
+        category_slug="개발과-프로그래밍",
+    )
+
+    assert "mojibake_text_detected" in reasons

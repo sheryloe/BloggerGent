@@ -7,20 +7,27 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from celery import Task
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import selectinload
 
 from app.core.celery_app import celery_app
 from app.db.session import SessionLocal
 from app.models.entities import (
     Article,
+    AIUsageEvent,
+    AnalyticsArticleFact,
+    AuditLog,
     Blog,
     BloggerPost,
+    ContentItem,
+    ContentPlanSlot,
     Image,
     JobStatus,
     LogLevel,
+    ManualImageSlot,
     PostStatus,
     PublishMode,
+    PublishQueueItem,
     Topic,
     WorkflowStageType,
 )
@@ -36,7 +43,11 @@ from app.services.content.article_three_pass_service import (
     generate_three_step_article,
     generate_travel_four_beat_article,
 )
-from app.services.content.article_pattern_service import apply_pattern_defaults, select_blogger_article_pattern
+from app.services.content.article_pattern_service import (
+    apply_pattern_defaults,
+    build_article_pattern_prompt_block,
+    select_blogger_article_pattern,
+)
 from app.services.content.mystery_artifact_service import (
     MysteryArtifactContext,
     build_mystery_artifact_context,
@@ -61,7 +72,8 @@ from app.services.content.travel_blog_policy import (
     TRAVEL_EDITORIAL_GUIDANCE,
     TRAVEL_EDITORIAL_LABELS,
     TRAVEL_IMAGE_POLICY_VERSION,
-    build_travel_20panel_retry_prompt,
+    build_travel_12panel_retry_prompt,
+    build_travel_image_contract,
     build_travel_policy_config,
     get_travel_blog_policy,
     is_travel_policy_blog,
@@ -112,6 +124,11 @@ from app.services.content.multilingual_bundle_service import (
     resolve_blog_bundle_language,
 )
 from app.services.ops.lighthouse_service import LighthouseAuditError, run_required_article_lighthouse_audit
+from app.services.ops.analytics_service import (
+    collect_blogger_sync_score_rows,
+    summarize_publish_score_rows,
+    upsert_article_fact,
+)
 from app.services.providers.base import ProviderRuntimeError
 from app.services.providers.factory import (
     get_article_provider,
@@ -698,32 +715,38 @@ def _append_hero_only_visual_rule(
     *,
     is_mystery: bool = False,
     is_travel: bool = False,
+    travel_policy=None,
+    editorial_category_key: str | None = None,
+    article_pattern_key: str | None = None,
+    article_pattern_id: str | None = None,
 ) -> str:
     if is_mystery:
         return (
             f"{prompt}\n\n"
             "[Hero image policy]\n"
             "- Generate one hero-cover image prompt only.\n"
-            '- Enforce "5x4 panel grid collage" with clear panel separation.\n'
+            '- Enforce a clear editorial panel-grid collage with visible panel separation.\n'
             '- Include "visible white gutters" and "clean grid layout".\n'
             "- Keep one balanced single-image composition.\n"
             "- Keep wording concise for lightweight/free models (under 60 words).\n"
             "- Limit scene direction to 2-4 grouped visual categories.\n"
-            "- Do not request 20 separate images or later panel compositing.\n"
+            "- Do not request separate image files or later panel compositing.\n"
             "- Do not request inline, middle, secondary, or body images.\n"
         )
     if is_travel:
+        contract = build_travel_image_contract(
+            category_key=editorial_category_key,
+            pattern_key=article_pattern_key,
+            pattern_id=article_pattern_id,
+            policy=travel_policy,
+        )
         return (
             f"{prompt}\n\n"
             "[Hero image policy]\n"
             "- Generate one hero-cover image prompt only.\n"
-            "- Generate one single flattened final image, not a file set.\n"
-            "- Use a 5 columns x 4 rows collage with exactly 20 visible panels.\n"
-            "- Keep thin visible white gutters between panels.\n"
-            "- Do not generate 20 separate images.\n"
-            "- Do not generate one single hero shot without panel structure.\n"
             "- Do not request inline, middle, secondary, or body images.\n"
             "- Do not include panel marker text inside article content.\n"
+            f"- {contract}\n"
         )
     return (
         f"{prompt}\n\n"
@@ -1061,12 +1084,14 @@ def _apply_quality_cache_fields(
     seo_score: int | None,
     geo_score: int | None,
     quality_status: str,
+    ctr_score: float | None = None,
     rewrite_attempts: int | None = None,
 ) -> None:
     article.quality_similarity_score = round(float(similarity_score), 1) if similarity_score is not None else None
     article.quality_most_similar_url = str(most_similar_url or "").strip() or None
     article.quality_seo_score = int(seo_score) if seo_score is not None else None
     article.quality_geo_score = int(geo_score) if geo_score is not None else None
+    article.quality_ctr_score = float(ctr_score) if ctr_score is not None else None
     article.quality_status = str(quality_status or "").strip() or None
     if rewrite_attempts is not None:
         article.quality_rewrite_attempts = max(0, int(rewrite_attempts))
@@ -1155,6 +1180,7 @@ def _finalize_mystery_blogger_entities(
     final_article.quality_most_similar_url = transient_article.quality_most_similar_url
     final_article.quality_seo_score = transient_article.quality_seo_score
     final_article.quality_geo_score = transient_article.quality_geo_score
+    final_article.quality_ctr_score = transient_article.quality_ctr_score
     final_article.quality_status = transient_article.quality_status
     final_article.quality_rewrite_attempts = transient_article.quality_rewrite_attempts
     final_article.quality_last_audited_at = transient_article.quality_last_audited_at
@@ -1187,6 +1213,7 @@ def _finalize_mystery_blogger_entities(
         url=published_url,
         form_factor="mobile",
         commit=False,
+        required=False,
     )
     if mystery_artifact_context is not None:
         write_mystery_artifact_json(
@@ -1224,6 +1251,7 @@ def _finalize_mystery_blogger_entities(
                 "quality_status": str(final_article.quality_status or ""),
                 "quality_seo_score": final_article.quality_seo_score,
                 "quality_geo_score": final_article.quality_geo_score,
+                "quality_ctr_score": final_article.quality_ctr_score,
                 "quality_lighthouse_score": final_article.quality_lighthouse_score,
                 "success_basis": "live_verified",
             },
@@ -1292,6 +1320,13 @@ def _run_blogger_quality_gate(
                 blog_id=blog.id,
                 profile_key=blog.profile_key,
                 editorial_category_key=(topic.editorial_category_key if topic else None),
+                preferred_pattern_id=None,
+                preferred_selection_note="blog_specific_pattern_selection_no_sync_inheritance",
+                pattern_context_key=_travel_pattern_context_key(
+                    job=job,
+                    topic=topic,
+                    editorial_category_key=(topic.editorial_category_key if topic else None),
+                ),
             ),
         )
         merge_response(
@@ -1384,6 +1419,11 @@ def _run_blogger_quality_gate(
         if final_assessment.get("geo_score") is not None
         else None
     )
+    quality_ctr_score = (
+        float(final_assessment.get("ctr_score"))
+        if final_assessment.get("ctr_score") is not None
+        else None
+    )
     if persist_intermediate:
         persist_article_quality_cache(
             db,
@@ -1392,6 +1432,7 @@ def _run_blogger_quality_gate(
             most_similar_url=str(final_assessment.get("most_similar_url") or ""),
             seo_score=quality_seo_score,
             geo_score=quality_geo_score,
+            ctr_score=quality_ctr_score,
             quality_status="ok" if gate_payload["passed"] else "quality_gate_failed",
             rewrite_attempts=max(0, len(assessments) - 1),
         )
@@ -1404,6 +1445,7 @@ def _run_blogger_quality_gate(
             most_similar_url=str(final_assessment.get("most_similar_url") or ""),
             seo_score=quality_seo_score,
             geo_score=quality_geo_score,
+            ctr_score=quality_ctr_score,
             quality_status="ok" if gate_payload["passed"] else "quality_gate_failed",
             rewrite_attempts=max(0, len(assessments) - 1),
         )
@@ -2024,6 +2066,24 @@ def _apply_travel_sync_article_fields(db, *, job, article) -> None:
         db.flush()
 
 
+def _travel_pattern_context_key(*, job, topic, editorial_category_key: str | None) -> str:
+    raw_prompts = job.raw_prompts if isinstance(getattr(job, "raw_prompts", None), dict) else {}
+    travel_sync = raw_prompts.get("travel_sync") if isinstance(raw_prompts, dict) else None
+    travel_sync = travel_sync if isinstance(travel_sync, dict) else {}
+    prompt_parts = [
+        travel_sync.get("group_key"),
+        travel_sync.get("source_article_id"),
+        travel_sync.get("source_slug"),
+        travel_sync.get("target_language"),
+        getattr(topic, "id", None),
+        getattr(topic, "keyword", None),
+        getattr(topic, "title", None),
+        getattr(job, "keyword_snapshot", None),
+        editorial_category_key,
+    ]
+    return "|".join(str(part or "").strip() for part in prompt_parts if str(part or "").strip())
+
+
 def discover_topics_and_enqueue(
     db,
     blog_id: int,
@@ -2624,6 +2684,148 @@ def _publish_article(
         return summary, raw_payload, "draft"
     return summary, raw_payload, "publish"
 
+
+def _resolve_blogger_remote_post_id(*, blogger_post, summary: dict) -> str:
+    return str(
+        (blogger_post.blogger_post_id if blogger_post is not None else None)
+        or summary.get("id")
+        or summary.get("postId")
+        or ""
+    ).strip()
+
+
+def _build_pending_blogger_post_publish_sync(
+    *,
+    published_post_status: PostStatus,
+    published_url: str,
+    remote_post_id: str,
+) -> dict:
+    score_rows: list[dict] = []
+    return {
+        "provider": "blogger",
+        "status": "pending_sync",
+        "reason": "post_not_live" if published_post_status == PostStatus.DRAFT else "scheduled_post_not_live",
+        "synced_count": 0,
+        "remote_post_id": remote_post_id or None,
+        "public_url": published_url or None,
+        "score_summary": summarize_publish_score_rows(score_rows),
+        "score_rows": score_rows,
+    }
+
+
+def _finalize_blogger_post_publish_sync(
+    db,
+    *,
+    blog,
+    article,
+    blogger_post,
+    published_url: str,
+    remote_post_id: str,
+) -> dict:
+    from app.services.blogger.blogger_sync_service import sync_blogger_posts_for_blog
+
+    if article.id is not None:
+        upsert_article_fact(db, article.id, commit=True)
+    sync_result = sync_blogger_posts_for_blog(db, blog)
+    if article.id is not None:
+        upsert_article_fact(db, article.id, commit=True)
+    score_rows = collect_blogger_sync_score_rows(
+        db,
+        blog_id=blog.id,
+        remote_post_ids=[remote_post_id] if remote_post_id else None,
+        article_ids=[article.id] if article.id is not None else None,
+        urls=[published_url] if published_url else None,
+    )
+    if not score_rows:
+        raise ValueError("post_publish_score_rows_empty")
+    return {
+        "provider": "blogger",
+        "status": "ok",
+        "synced_count": len(score_rows),
+        "remote_post_id": remote_post_id or None,
+        "public_url": published_url or None,
+        "sync_result": sync_result,
+        "score_summary": summarize_publish_score_rows(score_rows),
+        "score_rows": score_rows,
+    }
+
+
+def _purge_generated_article_bundle_after_score_failure(
+    db,
+    *,
+    article_id: int | None,
+    job_id: int | None,
+    reason: str,
+    published_url: str | None,
+) -> dict:
+    article_ids = [int(article_id)] if article_id is not None else []
+    job_ids = [int(job_id)] if job_id is not None else []
+    deleted: dict[str, int] = {}
+
+    if article_ids:
+        slot_result = db.execute(
+            update(ContentPlanSlot)
+            .where(ContentPlanSlot.article_id.in_(article_ids))
+            .values(article_id=None, status="score_pending", error_message=reason)
+        )
+        deleted["content_plan_slots_article_unlinked"] = int(slot_result.rowcount or 0)
+
+        content_result = db.execute(
+            update(ContentItem)
+            .where(ContentItem.source_article_id.in_(article_ids))
+            .values(source_article_id=None, lifecycle_status="score_pending", blocked_reason="score_pending")
+        )
+        deleted["content_items_article_unlinked"] = int(content_result.rowcount or 0)
+
+        for model, label in (
+            (PublishQueueItem, "publish_queue_items"),
+            (AIUsageEvent, "ai_usage_events_by_article"),
+            (AnalyticsArticleFact, "analytics_article_facts"),
+            (ManualImageSlot, "manual_image_slots_by_article"),
+            (BloggerPost, "blogger_posts"),
+            (Image, "images_by_article"),
+        ):
+            result = db.execute(delete(model).where(model.article_id.in_(article_ids)))
+            deleted[label] = int(result.rowcount or 0)
+
+    if job_ids:
+        slot_result = db.execute(
+            update(ContentPlanSlot)
+            .where(ContentPlanSlot.job_id.in_(job_ids))
+            .values(job_id=None, status="score_pending", error_message=reason)
+        )
+        deleted["content_plan_slots_job_unlinked"] = int(slot_result.rowcount or 0)
+
+        content_result = db.execute(
+            update(ContentItem)
+            .where(ContentItem.job_id.in_(job_ids))
+            .values(job_id=None, lifecycle_status="score_pending", blocked_reason="score_pending")
+        )
+        deleted["content_items_job_unlinked"] = int(content_result.rowcount or 0)
+
+        for model, label in (
+            (AIUsageEvent, "ai_usage_events_by_job"),
+            (ManualImageSlot, "manual_image_slots_by_job"),
+            (Image, "images_by_job"),
+            (BloggerPost, "blogger_posts_by_job"),
+        ):
+            result = db.execute(delete(model).where(model.job_id.in_(job_ids)))
+            deleted[label] = deleted.get(label, 0) + int(result.rowcount or 0)
+
+    if article_ids:
+        result = db.execute(delete(Article).where(Article.id.in_(article_ids)))
+        deleted["articles"] = int(result.rowcount or 0)
+
+    return {
+        "status": "purged_generated_db_bundle",
+        "reason": reason,
+        "article_ids": article_ids,
+        "job_ids": job_ids,
+        "published_url": published_url,
+        "deleted": deleted,
+    }
+
+
 def execute_job_pipeline(db, *, job_id: int) -> None:
     job = load_job(db, job_id)
     if not job:
@@ -2667,6 +2869,13 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
         blog_id=blog.id,
         profile_key=blog.profile_key,
         editorial_category_key=topic_editorial_key,
+        preferred_pattern_id=None,
+        preferred_selection_note="blog_specific_pattern_selection_no_sync_inheritance",
+        pattern_context_key=_travel_pattern_context_key(
+            job=job,
+            topic=topic,
+            editorial_category_key=topic_editorial_key,
+        ),
     )
     rendered_article_prompt = render_agent_prompt(
         db,
@@ -2677,6 +2886,7 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
         editorial_category_key=topic_editorial_key,
         editorial_category_label=topic_editorial_label,
         editorial_category_guidance=topic_editorial_guidance,
+        article_pattern_prompt_block=build_article_pattern_prompt_block(article_pattern_selection),
     )
     rendered_article_prompt = _append_blogger_seo_trust_guard(
         rendered_article_prompt,
@@ -2920,11 +3130,21 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
         if travel_policy is not None and isinstance(article.render_metadata, dict):
             travel_planner_summary = str(article.render_metadata.get("travel_planner_summary") or "").strip()
 
+        if travel_policy is not None and reuse_article_prompts:
+            travel_prompt_missing = travel_panel_prompt_missing_requirements(hero_prompt_from_article)
+            if travel_prompt_missing:
+                reuse_article_prompts = False
+                hero_prompt_valid = False
+
         if reuse_article_prompts:
             rendered_visual_prompt = _append_hero_only_visual_rule(
                 hero_prompt_from_article,
                 is_mystery=is_mystery_blog,
                 is_travel=travel_policy is not None,
+                travel_policy=travel_policy,
+                editorial_category_key=topic_editorial_key,
+                article_pattern_key=getattr(article, "article_pattern_key", None),
+                article_pattern_id=getattr(article, "article_pattern_id", None),
             )
             if image_prompt_step:
                 merge_prompt(
@@ -2973,6 +3193,10 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
                 rendered_visual_prompt_request,
                 is_mystery=is_mystery_blog,
                 is_travel=travel_policy is not None,
+                travel_policy=travel_policy,
+                editorial_category_key=topic_editorial_key,
+                article_pattern_key=getattr(article, "article_pattern_key", None),
+                article_pattern_id=getattr(article, "article_pattern_id", None),
             )
             merge_prompt(db, job, image_prompt_step.stage_type.value, rendered_visual_prompt_request)
             travel_image_prompt_config = (
@@ -3065,6 +3289,10 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
                 rendered_visual_prompt,
                 is_mystery=is_mystery_blog,
                 is_travel=travel_policy is not None,
+                travel_policy=travel_policy,
+                editorial_category_key=topic_editorial_key,
+                article_pattern_key=getattr(article, "article_pattern_key", None),
+                article_pattern_id=getattr(article, "article_pattern_id", None),
             )
             merge_response(
                 db,
@@ -3086,6 +3314,10 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
                 rendered_visual_prompt,
                 is_mystery=is_mystery_blog,
                 is_travel=travel_policy is not None,
+                travel_policy=travel_policy,
+                editorial_category_key=topic_editorial_key,
+                article_pattern_key=getattr(article, "article_pattern_key", None),
+                article_pattern_id=getattr(article, "article_pattern_id", None),
             )
             merge_response(
                 db,
@@ -3275,11 +3507,14 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
                     "size_missing": size_missing,
                 }
                 if not panel_gate_payload["passed"]:
-                    retry_prompt = build_travel_20panel_retry_prompt(
+                    retry_prompt = build_travel_12panel_retry_prompt(
                         policy=travel_policy,
                         keyword=job.keyword_snapshot,
                         title=article.title,
                         original_prompt=rendered_visual_prompt,
+                        category_key=topic_editorial_key,
+                        pattern_key=getattr(article, "article_pattern_key", None),
+                        pattern_id=getattr(article, "article_pattern_id", None),
                     )
                     retry_image, retry_public_url = _generate_and_store(retry_prompt, asset_role="hero-retry")
                     retry_prompt_missing = travel_panel_prompt_missing_requirements(retry_prompt)
@@ -3330,7 +3565,7 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
                             },
                         )
                         raise ValueError(
-                            "travel_20panel_panel_gate_failed: generated image did not satisfy 20-panel travel requirements."
+                            "travel_12panel_panel_gate_failed: generated image did not satisfy 4x3/12-panel travel requirements."
                         )
 
                 if inline_collage_enabled:
@@ -3636,17 +3871,28 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
                         url=published_url,
                         form_factor="mobile",
                         commit=True,
+                        required=True,
                     )
                 except LighthouseAuditError as exc:
                     lighthouse_result = {
-                        "status": "failed",
+                        "status": "score_pending",
                         "reason": str(exc),
                         "required": True,
                         "url": published_url,
                         "form_factor": "mobile",
+                        "measurement_source": "google_pagespeed_insights_lighthouse",
                     }
+                    purge_result = _purge_generated_article_bundle_after_score_failure(
+                        db,
+                        article_id=article.id,
+                        job_id=job.id,
+                        reason=str(exc),
+                        published_url=published_url,
+                    )
+                    lighthouse_result["db_cleanup"] = purge_result
                     merge_response(db, job, publishing_step.stage_type.value, {"lighthouse": lighthouse_result})
-                    raise QualityGateError("lighthouse_audit_failed", payload=lighthouse_result) from exc
+                    db.commit()
+                    raise QualityGateError("post_publish_score_pending", payload=lighthouse_result) from exc
                 if article.id is not None:
                     review_article_publish_state(db, article.id, trigger="pipeline_publish")
                 telegram_result = send_telegram_post_notification(
@@ -3720,6 +3966,58 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
             scheduled_for=blogger_post.scheduled_for if blogger_post.scheduled_for else None,
         )
 
+    remote_post_id = _resolve_blogger_remote_post_id(blogger_post=blogger_post, summary=summary)
+    db_sync_scores: list[dict] = []
+    post_publish_sync = _build_pending_blogger_post_publish_sync(
+        published_post_status=published_post_status,
+        published_url=published_url,
+        remote_post_id=remote_post_id,
+    )
+    if published_post_status == PostStatus.PUBLISHED:
+        try:
+            post_publish_sync = _finalize_blogger_post_publish_sync(
+                db,
+                blog=blog,
+                article=article,
+                blogger_post=blogger_post,
+                published_url=published_url,
+                remote_post_id=remote_post_id,
+            )
+            db_sync_scores = list(post_publish_sync.get("score_rows") or [])
+        except Exception as exc:  # noqa: BLE001
+            db.rollback()
+            post_publish_sync = {
+                "provider": "blogger",
+                "status": "failed",
+                "synced_count": 0,
+                "remote_post_id": remote_post_id or None,
+                "public_url": published_url or None,
+                "sync_error": str(exc),
+                "score_summary": summarize_publish_score_rows([]),
+                "score_rows": [],
+            }
+            merge_response(
+                db,
+                job,
+                publishing_step.stage_type.value,
+                {
+                    "mode": publish_action,
+                    "publish_mode_requested": job.publish_mode.value,
+                    "scheduled_for": scheduled_for.isoformat() if scheduled_for else None,
+                    "summary": summary,
+                    "hero_image_url": hero_image_url,
+                    "live_verify_ok": str(live_publish_validation.get("status") or "").strip().lower() == "ok",
+                    "live_publish_validation": live_publish_validation,
+                    "lighthouse": lighthouse_result,
+                    "telegram": telegram_result,
+                    "multilingual_bundle_sync": language_sync_result,
+                    "manual_image_slots": manual_image_slots_payload,
+                    "post_publish_sync": post_publish_sync,
+                    "db_sync_scores": db_sync_scores,
+                },
+            )
+            raise QualityGateError("post_publish_db_sync_failed", payload=post_publish_sync) from exc
+
     merge_response(
         db,
         job,
@@ -3736,6 +4034,8 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
             "telegram": telegram_result,
             "multilingual_bundle_sync": language_sync_result,
             "manual_image_slots": manual_image_slots_payload,
+            "post_publish_sync": post_publish_sync,
+            "db_sync_scores": db_sync_scores,
         },
     )
     set_status(
@@ -3752,6 +4052,8 @@ def execute_job_pipeline(db, *, job_id: int) -> None:
             "scheduled_for": blogger_post.scheduled_for.isoformat() if blogger_post is not None and blogger_post.scheduled_for else None,
             "live_publish_validation": live_publish_validation,
             "manual_image_slots": manual_image_slots_payload,
+            "post_publish_sync": post_publish_sync,
+            "db_sync_scores": db_sync_scores,
         },
     )
 

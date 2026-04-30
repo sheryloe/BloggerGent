@@ -32,10 +32,11 @@ RETRYABLE_PUBLISH_ERROR_CODES = {
     "Cloudflare integration asset upload failed.": "cloudflare_asset_upload_failed",
 }
 MAX_PUBLISH_RETRY_ATTEMPTS = 3
-CTR_PERMALINK_TARGET_BLOG_ID = 37
-CTR_PERMALINK_TITLE_SUFFIX = "Korea Travel Guide"
+JA_ENGLISH_SLUG_PERMALINK_BLOG_ID = 37
+JA_ENGLISH_SLUG_PERMALINK_MAX_LENGTH = 72
 CTR_PERMALINK_MAX_LENGTH = 72
-CTR_PERMALINK_STOPWORDS = {"how", "to", "the", "and", "for", "with", "in", "on", "at", "of", "a", "an"}
+CTR_PERMALINK_SUFFIX = "Korea Travel Guide"
+PERMALINK_TITLE_STOPWORDS = {"how", "to", "the", "and", "for", "with", "in", "on", "at", "of", "a", "an"}
 JA_LABEL_TRAVEL = "旅行・お祭り"
 JA_LABEL_LIFESTYLE = "ライフスタイル"
 
@@ -43,7 +44,7 @@ JA_LABEL_LIFESTYLE = "ライフスタイル"
 def _tokenize_ascii_terms(value: str | None) -> list[str]:
     tokens: list[str] = []
     for token in re.findall(r"[a-z0-9]+", str(value or "").lower()):
-        if token in CTR_PERMALINK_STOPWORDS:
+        if token in PERMALINK_TITLE_STOPWORDS:
             continue
         tokens.append(token)
     return tokens
@@ -54,7 +55,7 @@ def _title_case_keywords(tokens: list[str]) -> str:
     return " ".join(words).strip()
 
 
-def _trim_title_at_word_boundary(value: str, max_length: int = CTR_PERMALINK_MAX_LENGTH) -> str:
+def _trim_title_at_word_boundary(value: str, max_length: int = JA_ENGLISH_SLUG_PERMALINK_MAX_LENGTH) -> str:
     text = str(value or "").strip()
     if len(text) <= max_length:
         return text
@@ -65,7 +66,11 @@ def _trim_title_at_word_boundary(value: str, max_length: int = CTR_PERMALINK_MAX
     return trimmed
 
 
-def build_ctr_permalink_title(article: Article, *, max_length: int = CTR_PERMALINK_MAX_LENGTH) -> str:
+def build_english_slug_permalink_seed_title(
+    article: Article,
+    *,
+    max_length: int = JA_ENGLISH_SLUG_PERMALINK_MAX_LENGTH,
+) -> str:
     tokens = _tokenize_ascii_terms(article.slug)
     if not tokens:
         label_tokens: list[str] = []
@@ -75,23 +80,44 @@ def build_ctr_permalink_title(article: Article, *, max_length: int = CTR_PERMALI
 
     if tokens:
         keyword_part = _title_case_keywords(tokens)
-        suffix = f" | {CTR_PERMALINK_TITLE_SUFFIX}"
-        keyword_max = max_length - len(suffix)
-        if keyword_max > 0:
-            keyword_trimmed = _trim_title_at_word_boundary(keyword_part, max_length=keyword_max)
-            if keyword_trimmed:
-                return f"{keyword_trimmed}{suffix}"
+        keyword_trimmed = _trim_title_at_word_boundary(keyword_part, max_length=max_length)
+        if keyword_trimmed:
+            return keyword_trimmed
 
-    fallback = f"{CTR_PERMALINK_TITLE_SUFFIX} {article.id}".strip()
+    fallback = f"korea-travel-guide-{article.id}".strip()
     return _trim_title_at_word_boundary(fallback, max_length=max_length)
 
 
-def _should_force_ctr_permalink_title(article: Article, existing_post: BloggerPost | None) -> bool:
-    if int(article.blog_id or 0) != CTR_PERMALINK_TARGET_BLOG_ID:
+def build_ctr_permalink_title(
+    article: Article,
+    *,
+    max_length: int = CTR_PERMALINK_MAX_LENGTH,
+) -> str:
+    """Build the temporary Blogger title used to force a CTR-safe permalink."""
+
+    tokens = _tokenize_ascii_terms(getattr(article, "slug", ""))
+    if not tokens:
+        label_tokens: list[str] = []
+        for label in list(getattr(article, "labels", []) or []):
+            label_tokens.extend(_tokenize_ascii_terms(str(label)))
+        tokens = label_tokens
+
+    if not tokens:
+        fallback = f"{CTR_PERMALINK_SUFFIX} {getattr(article, 'id', '')}".strip()
+        return _trim_title_at_word_boundary(fallback, max_length=max_length)
+
+    keywords = _title_case_keywords(tokens)
+    suffix = CTR_PERMALINK_SUFFIX
+    keyword_max_length = max(1, max_length - len(suffix) - 1)
+    keyword_part = _trim_title_at_word_boundary(keywords, max_length=keyword_max_length)
+    candidate = f"{keyword_part} {suffix}".strip()
+    return _trim_title_at_word_boundary(candidate, max_length=max_length)
+
+
+def _should_use_english_slug_permalink_seed(article: Article, existing_post: BloggerPost | None) -> bool:
+    if int(article.blog_id or 0) != JA_ENGLISH_SLUG_PERMALINK_BLOG_ID:
         return False
-    if existing_post is None:
-        return True
-    return existing_post.post_status == PostStatus.DRAFT
+    return existing_post is None
 
 
 def _is_mojibake_label(value: str | None) -> bool:
@@ -119,7 +145,7 @@ def sanitize_blogger_labels_for_article(article: Article, labels: list[str] | No
         seen.add(lowered)
         clean_labels.append(label)
 
-    if int(article.blog_id or 0) == CTR_PERMALINK_TARGET_BLOG_ID:
+    if int(article.blog_id or 0) == JA_ENGLISH_SLUG_PERMALINK_BLOG_ID:
         has_ja_anchor = any(label in {JA_LABEL_TRAVEL, JA_LABEL_LIFESTYLE} for label in clean_labels)
         if (removed_mojibake or not clean_labels) and not has_ja_anchor:
             if any(label.casefold() == "travel" for label in clean_labels):
@@ -389,14 +415,6 @@ def perform_publish_now(db: Session, *, article: Article, queue_item: PublishQue
     if existing_post and existing_status in {PostStatus.PUBLISHED, PostStatus.SCHEDULED}:
         raise ValueError("This article is already published or scheduled in Blogger.")
 
-    if _should_force_ctr_permalink_title(article, existing_post):
-        ctr_title = build_ctr_permalink_title(article)
-        if ctr_title and ctr_title != article.title:
-            article.title = ctr_title
-            db.add(article)
-            db.commit()
-            db.refresh(article)
-
     labels = sanitize_blogger_labels_for_article(article, ensure_article_editorial_labels(db, article))
     if labels != list(article.labels or []):
         article.labels = list(labels)
@@ -451,14 +469,46 @@ def perform_publish_now(db: Session, *, article: Article, queue_item: PublishQue
             summary = update_summary
             raw_payload = update_payload
     else:
-        summary, raw_payload = provider.publish(
-            title=article.title,
-            content=assembled_html or article.html_article,
-            labels=labels,
-            meta_description=article.meta_description,
-            slug=article.slug,
-            publish_mode=PublishMode.PUBLISH,
-        )
+        if _should_use_english_slug_permalink_seed(article, existing_post) and hasattr(provider, "publish_draft"):
+            permalink_seed_title = build_english_slug_permalink_seed_title(article)
+            draft_summary, draft_payload = provider.publish(
+                title=permalink_seed_title,
+                content=assembled_html or article.html_article,
+                labels=labels,
+                meta_description=article.meta_description,
+                slug=article.slug,
+                publish_mode=PublishMode.DRAFT,
+            )
+            draft_post_id = str(draft_summary.get("id") or "").strip()
+            if not draft_post_id:
+                raise ValueError("Blogger draft post id is missing after permalink seed publish")
+            publish_summary, publish_payload = provider.publish_draft(draft_post_id)
+            update_summary, update_payload = provider.update_post(
+                post_id=draft_post_id,
+                title=article.title,
+                content=assembled_html,
+                labels=labels,
+                meta_description=article.meta_description,
+            )
+            summary = update_summary or publish_summary
+            raw_payload = {
+                "draft_permalink_seed": draft_payload,
+                "publish": publish_payload,
+                "draft_title_restore": update_payload,
+                "permalink_seed_title": permalink_seed_title,
+                "permalink_source_slug": article.slug,
+                "visible_title_preserved": article.title,
+                "permalink_sequence": "seed_draft_then_publish_then_restore_title",
+            }
+        else:
+            summary, raw_payload = provider.publish(
+                title=article.title,
+                content=assembled_html or article.html_article,
+                labels=labels,
+                meta_description=article.meta_description,
+                slug=article.slug,
+                publish_mode=PublishMode.PUBLISH,
+            )
 
     upsert_article_blogger_post(db, article=article, summary=summary, raw_payload=raw_payload)
     rebuild_topic_memories_for_blog(db, article.blog)

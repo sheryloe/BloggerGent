@@ -83,6 +83,36 @@ def test_sync_cloudflare_posts_physically_dedupes_scheme_variants(db: Session, m
     assert result["count"] == 2
     assert result["dedupe"]["merged_group_count"] == 1
     assert result["dedupe"]["merged_row_deleted_count"] == 1
+    assert result["score_summary"]["count"] == 1
+    assert result["score_summary"]["seo_avg"] == 88
+    assert result["score_summary"]["lighthouse_avg"] == 82
+    assert result["score_summary"]["averages"]["seo_score"] == 88
+    assert result["score_summary"]["averages"]["lighthouse_score"] == 82
+    assert result["score_rows"] == [
+        {
+            "provider": "cloudflare",
+            "remote_post_id": "remote-https",
+            "remote_id": "remote-https",
+            "title": "2026 Busan Haeundae Sand Festival Guide",
+            "slug": "busan-sand-festival-guide",
+            "url": "https://dongriarchive.com/ko/post/busan-sand-festival-guide",
+            "status": "published",
+            "category_slug": None,
+            "seo_score": 88.0,
+            "geo_score": None,
+            "ctr_score": None,
+            "lighthouse_score": 82.0,
+            "lighthouse_accessibility_score": None,
+            "lighthouse_best_practices_score": None,
+            "lighthouse_seo_score": None,
+            "quality_status": None,
+            "persona_fit_score": None,
+            "title_final_score": None,
+            "article_pattern_id": None,
+            "article_pattern_version": None,
+            "synced_at": result["score_rows"][0]["synced_at"],
+        }
+    ]
     assert len(rows) == 1
     row = rows[0]
     assert row.status == "published"
@@ -132,5 +162,8 @@ def test_sync_cloudflare_posts_does_not_delete_on_remote_fetch_failure(db: Sessi
     ).scalars().all()
     assert result["status"] == "fetch_failed"
     assert result["count"] == 1
+    assert result["score_summary"]["count"] == 0
+    assert result["score_summary"]["seo_avg"] is None
+    assert result["score_rows"] == []
     assert len(rows) == 1
     assert rows[0].remote_post_id == "remote-existing"

@@ -47,7 +47,7 @@
 - If article_pattern_id is provided and valid, follow it.
 - If it is missing or invalid, choose the best one from the 5 allowed patterns.
 - Return article_pattern_id and article_pattern_version.
-- Return article_pattern_version = 3.
+- article_pattern_version must be 4. Return article_pattern_version = 4.
 
 [Writing Rules]
 - All reader-facing text must be Korean.
@@ -67,6 +67,9 @@
 - Do not include img, iframe, script, style, table, or custom wrapper elements inside html_article.
 
 [Image Rules]
+- image_layout_policy: hero_only_mysteria_archive.
+- image_asset_plan.roles: hero.
+- Hero image only. Do not create inline image slots or inline image prompts.
 - One hero image prompt only.
 - No inline/body image requests.
 - image_collage_prompt must describe one single flattened 5x4 panel grid collage image.
@@ -83,7 +86,6 @@ Return one JSON object only with these keys:
 - html_article
 - faq_section
 - image_collage_prompt
-- inline_collage_prompt: null
 - article_pattern_id
 - article_pattern_version
 

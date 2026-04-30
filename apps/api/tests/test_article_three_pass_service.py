@@ -178,7 +178,7 @@ def test_generate_travel_four_beat_article_assembles_planner_and_passes() -> Non
         "meta_description_direction": "Immediate planning value",
         "labels": ["Travel", "Seoul", "Route", "Guide", "Local"],
         "faq_intent": "What readers should check before going.",
-        "image_seed": "single flattened 5x4 travel collage with 20 visible panels and thin white gutters.",
+        "image_seed": "single flattened 4x3 travel collage with 12 visible panels and thin white gutters.",
         "route_place_key_cues": ["station", "cafe", "street", "night view"],
         "beats": [
             {"label": "기", "goal": "Open with the route promise.", "must_include": ["hook"], "avoid": ["padding"]},
@@ -192,7 +192,7 @@ def test_generate_travel_four_beat_article_assembles_planner_and_passes() -> Non
             title_tag="Beat1",
             body_char="A",
             body_len=760,
-            image_prompt="Beat1 image prompt with a single flattened 5x4 travel collage and no text overlays.",
+            image_prompt="Beat1 image prompt with a single flattened 4x3 travel collage and no text overlays.",
         ),
         _build_output(
             title_tag="Beat2",
@@ -216,7 +216,7 @@ def test_generate_travel_four_beat_article_assembles_planner_and_passes() -> Non
                     "answer": "Confirm timing, transit, and the stop sequence before leaving.",
                 }
             ],
-            image_prompt="Beat4 image prompt should win final image prompt with single-image 5x4 route collage framing.",
+            image_prompt="Beat4 image prompt should win final image prompt with single-image 4x3 route collage framing.",
             inline_prompt=None,
         ),
     ]
@@ -260,7 +260,7 @@ def test_generate_travel_four_beat_article_retries_korean_beats_to_3200_3600() -
         "meta_description_direction": "실전 동선",
         "labels": ["Travel", "Seoul", "Night", "Route", "Guide"],
         "faq_intent": "출발 전에 무엇을 확인해야 하는가",
-        "image_seed": "single flattened 5x4 editorial travel collage, 1024x1024, twenty visible panels, thin white gutters",
+        "image_seed": "single flattened 4x3 editorial travel collage, 1024x1024, twelve visible panels, thin white gutters",
         "route_place_key_cues": ["station", "cafe", "night view"],
         "beats": [
             {"label": "기", "goal": "도입", "must_include": ["hook"], "avoid": ["padding"]},
@@ -321,7 +321,7 @@ def test_generate_travel_four_beat_article_flags_short_non_korean_output() -> No
         "meta_description_direction": "Short value",
         "labels": ["Travel", "Busan", "Route", "Guide", "Local"],
         "faq_intent": "What to check first.",
-        "image_seed": "single flattened 5x4 travel collage with 20 visible panels.",
+        "image_seed": "single flattened 4x3 travel collage with 12 visible panels.",
         "route_place_key_cues": ["station", "market", "viewpoint"],
         "beats": [
             {"key": "gi", "label": "기", "goal": "Open", "must_include": ["hook"], "avoid": ["padding"]},

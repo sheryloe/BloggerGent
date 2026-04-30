@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import re
@@ -46,6 +47,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout-seconds", type=int, default=180, help="Per-URL Lighthouse timeout")
     parser.add_argument("--workers", type=int, default=2, help="Concurrent Lighthouse workers")
     parser.add_argument("--limit", type=int, default=0, help="Maximum number of posts to audit")
+    parser.add_argument("--slug-file", default=None, help="Optional CSV/TXT file containing slugs to audit")
     parser.add_argument("--only-missing", action="store_true", help="Only audit rows whose lighthouse_score is null")
     parser.add_argument("--skip-hours", type=int, default=0, help="Skip rows audited within this many hours")
     return parser.parse_args()
@@ -53,6 +55,23 @@ def parse_args() -> argparse.Namespace:
 
 def _safe_str(value: object | None) -> str:
     return str(value or "").strip()
+
+
+def _load_slug_filter(path_value: str | None) -> set[str]:
+    path = Path(path_value or "")
+    if not path.exists():
+        return set()
+    if path.suffix.lower() == ".csv":
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle)
+            if reader.fieldnames and "slug" in reader.fieldnames:
+                return {_safe_str(row.get("slug")) for row in reader if _safe_str(row.get("slug"))}
+        return set()
+    return {
+        line.strip()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    }
 
 
 def _slugify(value: str, *, fallback: str = "post") -> str:
@@ -83,6 +102,7 @@ def _resolve_channel_id(db) -> int:
 def _load_posts(args: argparse.Namespace) -> list[SyncedCloudflarePost]:
     normalized_statuses = {value.strip().lower() for value in args.status if value and value.strip()}
     normalized_categories = {value.strip() for value in args.category if value and value.strip()}
+    normalized_slugs = _load_slug_filter(args.slug_file)
     skip_cutoff = None
     if int(args.skip_hours or 0) > 0:
         skip_cutoff = datetime.now(timezone.utc) - timedelta(hours=max(int(args.skip_hours), 1))
@@ -99,6 +119,8 @@ def _load_posts(args: argparse.Namespace) -> list[SyncedCloudflarePost]:
                     SyncedCloudflarePost.category_slug.in_(sorted(normalized_categories)),
                 )
             )
+        if normalized_slugs:
+            stmt = stmt.where(SyncedCloudflarePost.slug.in_(sorted(normalized_slugs)))
         if args.only_missing:
             stmt = stmt.where(SyncedCloudflarePost.lighthouse_score.is_(None))
         if skip_cutoff is not None:

@@ -43,7 +43,12 @@ from app.services.cloudflare.cloudflare_channel_service import (
     list_cloudflare_categories,
 )
 from app.services.cloudflare.cloudflare_performance_service import get_cloudflare_performance_summary
-from app.services.cloudflare.cloudflare_sync_service import list_synced_cloudflare_posts, sync_cloudflare_posts
+from app.services.cloudflare.cloudflare_sync_service import (
+    collect_cloudflare_sync_score_rows,
+    list_synced_cloudflare_posts,
+    summarize_cloudflare_sync_score_rows,
+    sync_cloudflare_posts,
+)
 from app.services.providers.codex_cli import CodexCLITextProvider
 from app.services.providers.mock import MockArticleProvider
 from app.services.integrations.settings_service import get_settings_map
@@ -905,10 +910,23 @@ def refactor_cloudflare_low_score_posts(
             )
 
     sync_after_result: dict[str, Any] | None = None
+    db_sync_scores: list[dict[str, Any]] = []
+    post_publish_sync: dict[str, Any] = {
+        "provider": "cloudflare",
+        "status": "skipped",
+        "reason": "no_updated_posts",
+        "synced_count": 0,
+        "score_summary": summarize_cloudflare_sync_score_rows([]),
+        "score_rows": [],
+    }
+    post_publish_sync_failed = False
+    post_publish_sync_error: str | None = None
     summary_after: dict[str, Any] | None = None
     if updated_pattern_map:
         try:
             sync_after_result = sync_cloudflare_posts(db, include_non_published=True)
+            if str(sync_after_result.get("status") or "").strip().lower() == "fetch_failed":
+                raise RuntimeError(str(sync_after_result.get("error") or "cloudflare_sync_fetch_failed"))
             synced_rows = (
                 db.execute(
                     select(SyncedCloudflarePost).where(
@@ -933,8 +951,35 @@ def refactor_cloudflare_low_score_posts(
                     synced_changed = True
             if synced_changed:
                 db.commit()
+            db_sync_scores = collect_cloudflare_sync_score_rows(
+                db,
+                remote_post_ids=list(updated_pattern_map.keys()),
+            )
+            if not db_sync_scores:
+                raise RuntimeError("post_publish_score_rows_empty")
+            score_summary = summarize_cloudflare_sync_score_rows(db_sync_scores)
+            if isinstance(sync_after_result, dict):
+                sync_after_result["score_rows"] = db_sync_scores
+                sync_after_result["score_summary"] = score_summary
+            post_publish_sync = {
+                "provider": "cloudflare",
+                "status": "ok",
+                "synced_count": len(db_sync_scores),
+                "score_summary": score_summary,
+                "score_rows": db_sync_scores,
+            }
         except Exception as exc:  # noqa: BLE001
+            post_publish_sync_failed = True
+            post_publish_sync_error = str(exc)
             sync_after_result = {"status": "failed", "reason": str(exc)}
+            post_publish_sync = {
+                "provider": "cloudflare",
+                "status": "failed",
+                "synced_count": 0,
+                "sync_error": str(exc),
+                "score_summary": summarize_cloudflare_sync_score_rows([]),
+                "score_rows": [],
+            }
 
     try:
         summary_after = get_cloudflare_performance_summary(db, month=normalized_month)
@@ -943,7 +988,7 @@ def refactor_cloudflare_low_score_posts(
 
     processed_count = len(items)
     skipped_count = max(processed_count - updated_count - failed_count, 0)
-    status_value = "ok" if failed_count == 0 else ("partial" if updated_count > 0 else "failed")
+    status_value = "ok" if failed_count == 0 and not post_publish_sync_failed else ("partial" if updated_count > 0 else "failed")
     return {
         "status": status_value,
         "execute": True,
@@ -958,6 +1003,9 @@ def refactor_cloudflare_low_score_posts(
         "skipped_count": skipped_count,
         "sync_before_result": sync_before_result,
         "sync_after_result": sync_after_result,
+        "post_publish_sync": post_publish_sync,
+        "sync_error": post_publish_sync_error,
+        "db_sync_scores": db_sync_scores,
         "summary_after": summary_after,
         "items": items,
     }

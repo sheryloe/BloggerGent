@@ -3,12 +3,13 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings as app_settings
 from app.db.base import Base
-from app.models.entities import Article, Blog, Job, JobStatus, PublishMode
+from app.models.entities import Article, Blog, BloggerPost, Job, JobStatus, PublishMode
 from app.services.content import content_ops_service
 from app.services.platform import publishing_service
 
@@ -97,6 +98,8 @@ class _PublishProviderStub:
     def __init__(self) -> None:
         self.access_token = ""
         self.published: list[dict] = []
+        self.published_drafts: list[str] = []
+        self.updated: list[dict] = []
 
     def publish(self, **kwargs):
         self.published.append(dict(kwargs))
@@ -110,6 +113,34 @@ class _PublishProviderStub:
                 "scheduledFor": None,
             },
             {"ok": True},
+        )
+
+    def publish_draft(self, post_id: str):
+        self.published_drafts.append(post_id)
+        return (
+            {
+                "id": post_id,
+                "url": f"https://example.com/{post_id}",
+                "published": "2026-04-14T00:00:00+00:00",
+                "isDraft": False,
+                "postStatus": "published",
+                "scheduledFor": None,
+            },
+            {"ok": True, "post_id": post_id},
+        )
+
+    def update_post(self, **kwargs):
+        self.updated.append(dict(kwargs))
+        return (
+            {
+                "id": kwargs["post_id"],
+                "url": f"https://example.com/{kwargs['post_id']}",
+                "published": "2026-04-14T00:00:00+00:00",
+                "isDraft": False,
+                "postStatus": "published",
+                "scheduledFor": None,
+            },
+            {"ok": True, **kwargs},
         )
 
 
@@ -169,7 +200,10 @@ def test_sanitize_blogger_labels_for_article_replaces_mojibake_for_ja_blog() -> 
     assert cleaned.count("Travel") == 1
 
 
-def test_perform_publish_now_forces_ctr_title_for_blog_37(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_perform_publish_now_preserves_ja_title_after_english_permalink_seed(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     blog = _create_blog(db, blog_id=37, slug="ja-blog")
     article = _create_article(
         db,
@@ -180,12 +214,20 @@ def test_perform_publish_now_forces_ctr_title_for_blog_37(db: Session, monkeypat
     provider = _PublishProviderStub()
     _patch_publish_dependencies(monkeypatch, provider)
 
-    expected_title = publishing_service.build_ctr_permalink_title(article)
+    expected_seed_title = publishing_service.build_english_slug_permalink_seed_title(article)
     publishing_service.perform_publish_now(db, article=article)
 
     assert provider.published
-    assert provider.published[0]["title"] == expected_title
-    assert db.get(Article, article.id).title == expected_title
+    assert provider.published[0]["title"] == expected_seed_title
+    assert provider.published[0]["publish_mode"] == PublishMode.DRAFT
+    assert provider.published_drafts == ["new-1"]
+    assert provider.updated
+    assert provider.updated[0]["title"] == article.title
+    refreshed = db.get(Article, article.id)
+    assert refreshed.title == article.title
+    blogger_post = db.execute(select(BloggerPost).where(BloggerPost.article_id == article.id)).scalar_one()
+    assert blogger_post.response_payload["permalink_seed_title"] == expected_seed_title
+    assert blogger_post.response_payload["visible_title_preserved"] == article.title
 
 
 def test_perform_publish_now_keeps_original_title_for_non_target_blog(

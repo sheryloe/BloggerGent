@@ -47,7 +47,7 @@ MYSTERY_ALLOWED_PATTERNS = {
     "scene-investigation",
     "scp-dossier",
 }
-MYSTERY_PATTERN_VERSION = 3
+MYSTERY_PATTERN_VERSION = 4
 PROMPT_ROOT_BLOGGER = REPO_ROOT / "prompts" / "channels" / "blogger" / "the-midnight-archives"
 PROMPT_ROOT_CF = REPO_ROOT / "prompts" / "channels" / "cloudflare" / "dongri-archive" / "\uc138\uc0c1\uc758 \uae30\ub85d" / "miseuteria-seutori"
 FINAL_AUDIT_PATH = (
